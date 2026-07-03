@@ -11,6 +11,7 @@
 - 线上地址：https://roco-shortdrama-studio.netlify.app/
 - Netlify 项目：https://app.netlify.com/projects/roco-shortdrama-studio
 - Site ID：`896fafd0-4678-4fe3-b221-f08b529d20c8`
+- GitHub 仓库：https://github.com/bigshunshun201-blip/-
 
 ## 访问控制
 
@@ -64,6 +65,13 @@ git push
 ```
 
 推送后 Netlify 会自动重新构建并更新线上站点。
+
+当前本地仓库已经连接到 GitHub：
+
+```powershell
+git remote -v
+git push
+```
 
 如果没有连接 GitHub，也可以手动部署：
 
