@@ -6,6 +6,12 @@
 - `/api/status`、`/api/generate`、`/api/topics` 走 Netlify Functions。
 - DeepSeek API Key 只配置在 Netlify 环境变量中，不写入前端或 Git 仓库。
 
+## 当前线上站点
+
+- 线上地址：https://roco-shortdrama-studio.netlify.app/
+- Netlify 项目：https://app.netlify.com/projects/roco-shortdrama-studio
+- Site ID：`896fafd0-4678-4fe3-b221-f08b529d20c8`
+
 ## 首次部署
 
 1. 登录 Netlify：
