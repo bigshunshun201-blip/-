@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>洛克王国短剧创作工作台</title>
+    <link rel="stylesheet" href="./styles.css?v=20260704-topic-regen" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">Fan-made short drama studio</p>
+        <h1>洛克王国短剧创作工作台</h1>
+      </div>
+      <div class="status-pill" id="statusPill">等待连接 AI</div>
+    </header>
+
+    <main class="shell">
+      <aside class="control-panel" aria-label="内容输入">
+        <section class="panel-section">
+          <div class="section-title">
+            <span class="rune">01</span>
+            <h2>创作输入</h2>
+          </div>
+          <label>
+            主题
+            <input id="theme" value="十年前的迪莫被重新召回" />
+          </label>
+          <label>
+            角色
+            <textarea id="roles" rows="3">阿洛：25岁老玩家；迪莫：童年搭档；黑袍人：寻找旧契约的反派</textarea>
+          </label>
+          <label>
+            剧情方向
+            <select id="direction">
+              <option>童年重逢 + 悬疑反转</option>
+              <option>魔法学院逆袭</option>
+              <option>宠物羁绊催泪</option>
+              <option>轻喜剧整活</option>
+              <option>热血战斗连续剧</option>
+            </select>
+          </label>
+          <label>
+            目标受众
+            <select id="audience">
+              <option>18-30岁洛克王国老玩家</option>
+              <option>学生党与游戏短剧用户</option>
+              <option>亲子向轻剧情用户</option>
+              <option>泛短剧爽感用户</option>
+            </select>
+          </label>
+          <div class="form-grid">
+            <label>
+              时长
+              <select id="duration">
+                <option value="60">60 秒</option>
+                <option value="75">75 秒</option>
+                <option value="90">90 秒</option>
+                <option value="45">45 秒</option>
+              </select>
+            </label>
+            <label>
+              集数
+              <input id="episodeCount" type="number" min="1" max="12" value="3" />
+            </label>
+          </div>
+          <label>
+            风格
+            <select id="style">
+              <option>怀旧、燃、结尾强钩子</option>
+              <option>搞笑、快节奏、反差梗</option>
+              <option>治愈、催泪、轻悬疑</option>
+              <option>学院群像、热血冒险</option>
+            </select>
+          </label>
+          <label>
+            DeepSeek 模型
+            <select id="aiModel">
+              <option value="deepseek-v4-flash">Flash：更快，适合批量出稿</option>
+              <option value="deepseek-v4-pro">Pro：质量更高，适合定稿</option>
+            </select>
+          </label>
+          <label>
+            续写要求
+            <textarea id="continueInstruction" rows="3" placeholder="例如：接着上一集，揭晓暗影博士为什么让喵喵失忆；情绪更催泪，结尾留下第三集钩子。"></textarea>
+          </label>
+          <button class="primary-action" id="generateBtn">AI 生成剧本与分镜</button>
+          <button class="secondary-action" id="continueBtn">AI 续写下一集</button>
+        </section>
+
+        <section class="panel-section compact">
+          <div class="section-title">
+            <span class="rune">02</span>
+            <h2>选题参考</h2>
+          </div>
+          <p class="helper">可选。没有数据也能直接生成；如果有同赛道爆款，只粘标题和核心数据，用来更新选题库。</p>
+          <label>
+            爆款参考 CSV
+            <textarea id="competitorCsv" rows="3" placeholder="title,likes,comments,favorites,shares,views&#10;十年前的宠物还记得你吗,82000,6200,11000,9000,1800000"></textarea>
+          </label>
+          <button class="secondary-action" id="analyzeBtn">更新选题库</button>
+          <button class="ghost-action" id="saveDraftBtn">保存当前草稿</button>
+          <button class="ghost-action" id="exportBtn">导出当前结果 Markdown</button>
+        </section>
+      </aside>
+
+      <section class="workspace">
+        <nav class="tabs" aria-label="工作区标签">
+          <button class="tab active" data-tab="script">剧本</button>
+          <button class="tab" data-tab="storyboard">分镜</button>
+          <button class="tab" data-tab="history">生成记录</button>
+          <button class="tab" data-tab="topics">选题库</button>
+          <button class="tab" data-tab="creative">标题封面</button>
+          <button class="tab" data-tab="calendar">排期复盘</button>
+          <button class="tab" data-tab="example">完整示例</button>
+          <button class="tab" data-tab="optimize">优化</button>
+        </nav>
+
+        <section class="stage">
+          <article class="tab-panel active" id="tab-script">
+            <div class="result-header">
+              <div>
+                <p class="eyebrow">Script engine</p>
+                <h2 id="scriptTitle">等待生成</h2>
+              </div>
+              <button class="small-action" data-copy="scriptOutput">复制剧本</button>
+            </div>
+            <div class="script-output" id="scriptOutput"></div>
+          </article>
+
+          <article class="tab-panel" id="tab-storyboard">
+            <div class="result-header">
+              <div>
+                <p class="eyebrow">9:16 storyboard</p>
+                <h2>抖音竖屏分镜脚本</h2>
+              </div>
+              <button class="small-action" data-copy="storyboardTable">复制分镜</button>
+            </div>
+            <div class="table-wrap" id="storyboardTable"></div>
+          </article>
+
+          <article class="tab-panel" id="tab-history">
+            <div class="result-header">
+              <div>
+                <p class="eyebrow">Candidate pool</p>
+                <h2>生成记录与候选筛选</h2>
+              </div>
+              <div class="header-actions">
+                <button class="small-action" id="exportHistoryBtn">导出全部记录</button>
+                <button class="small-action danger-action" id="clearHistoryBtn">清空记录</button>
+              </div>
+            </div>
+            <div class="history-list" id="historyList"></div>
+          </article>
+
+          <article class="tab-panel" id="tab-topics">
+            <div class="result-header">
+              <div>
+                <p class="eyebrow">Topic bank</p>
+                <h2>洛克王国短剧选题库</h2>
+              </div>
+              <div class="header-actions">
+                <button class="small-action" id="regenerateTopicsBtn">AI 换一批选题</button>
+                <button class="small-action" id="downloadTopics">下载 CSV</button>
+              </div>
+            </div>
+            <div class="topic-reference" id="topicReference"></div>
+            <div class="topic-grid" id="topicGrid"></div>
+          </article>
+
+          <article class="tab-panel" id="tab-creative">
+            <div class="result-header">
+              <div>
+                <p class="eyebrow">Creative testing</p>
+                <h2>标题、封面和开头钩子</h2>
+              </div>
+              <button class="small-action" data-copy="creativeOutput">复制创意包</button>
+            </div>
+            <div class="creative-layout" id="creativeOutput"></div>
+          </article>
+
+          <article class="tab-panel" id="tab-calendar">
+            <div class="result-header">
+              <div>
+                <p class="eyebrow">Publishing loop</p>
+                <h2>7 天发布排期与复盘指标</h2>
+              </div>
+              <button class="small-action" id="downloadCalendar">下载 CSV</button>
+            </div>
+            <div class="table-wrap" id="calendarTable"></div>
+            <div class="review-grid" id="reviewBoard"></div>
+          </article>
+
+          <article class="tab-panel" id="tab-example">
+            <div class="result-header">
+              <div>
+                <p class="eyebrow">Complete sample</p>
+                <h2>一条内容从选题到复盘</h2>
+              </div>
+              <button class="small-action" data-copy="exampleOutput">复制示例</button>
+            </div>
+            <div class="script-output" id="exampleOutput"></div>
+          </article>
+
+          <article class="tab-panel" id="tab-optimize">
+            <div class="result-header">
+              <div>
+                <p class="eyebrow">Iteration loop</p>
+                <h2>发布后复盘与优化方法</h2>
+              </div>
+            </div>
+            <div class="optimization-board">
+              <div>
+                <h3>看数据改内容</h3>
+                <ul>
+                  <li>3 秒留存低：把开头改成系统提示、战斗危机或宠物消失，不再铺背景。</li>
+                  <li>完播率低：每 10-15 秒补一个信息变化，删掉解释性台词。</li>
+                  <li>评论少：结尾加入选择题，例如“你会原谅十年没上线的主人吗？”</li>
+                  <li>转粉低：把单集钩子改成连续剧主线，明确下一集要解决的问题。</li>
+                </ul>
+              </div>
+              <div>
+                <h3>看评论改选题</h3>
+                <ul>
+                  <li>高频词出现“童年、泪目、迪莫”：加大怀旧重逢题材占比。</li>
+                  <li>高频词出现“谁更强、打起来”：增加学院对决与宠物克制关系。</li>
+                  <li>高频词出现“下一集、快更”：保留角色关系，升级系列主线。</li>
+                  <li>高频词出现“看不懂”：封面和字幕要补清角色身份。</li>
+                </ul>
+              </div>
+              <div>
+                <h3>标题/封面测试</h3>
+                <ul>
+                  <li>A 版情绪标题：“它在背包里等了我3652天”。</li>
+                  <li>B 版悬疑标题：“契约失效后，迪莫为什么还在？”</li>
+                  <li>封面保留一张脸、一个宠物、一个冲突词，文字不超过 10 个字。</li>
+                  <li>发布时间先测 12:00、18:30、22:00，每个时段至少 10 条再判断。</li>
+                </ul>
+              </div>
+            </div>
+          </article>
+        </section>
+      </section>
+    </main>
+
+    <footer class="footer-note">
+      粉丝向二创工作台示例，不代表官方内容或授权关系。发布前请核对平台规范与 IP 授权边界。
+    </footer>
+
+    <script src="./generator.js?v=20260704-topic-regen"></script>
+    <script src="./app.js?v=20260704-topic-regen"></script>
+  </body>
+</html>

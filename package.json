@@ -1,0 +1,15 @@
+{
+  "name": "rock-kingdom-shortdrama-studio",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "node scripts/build-public.mjs",
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "netlify-cli": "^17.38.1"
+  }
+}
