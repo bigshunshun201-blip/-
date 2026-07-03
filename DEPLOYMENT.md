@@ -12,6 +12,18 @@
 - Netlify 项目：https://app.netlify.com/projects/roco-shortdrama-studio
 - Site ID：`896fafd0-4678-4fe3-b221-f08b529d20c8`
 
+## 访问控制
+
+线上 API 已增加访问码保护。访问码通过 Netlify 环境变量 `APP_ACCESS_CODE` 配置，不写入前端代码。
+
+当前访问码由 Netlify 环境变量控制。修改方式：
+
+```powershell
+npx.cmd netlify env:set APP_ACCESS_CODE "你的新访问码"
+```
+
+改完访问码后重新部署，或在 Netlify 后台触发一次 deploy。
+
 ## 首次部署
 
 1. 登录 Netlify：
@@ -32,6 +44,7 @@ npx.cmd netlify init
 npx.cmd netlify env:set AI_PROVIDER deepseek --secret
 npx.cmd netlify env:set DEEPSEEK_API_KEY "你的 DeepSeek API Key" --secret
 npx.cmd netlify env:set DEEPSEEK_MODEL deepseek-v4-flash
+npx.cmd netlify env:set APP_ACCESS_CODE "你的访问码"
 ```
 
 4. 发布生产站点：

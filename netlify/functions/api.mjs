@@ -2,7 +2,7 @@ let corePromise;
 
 async function loadCore() {
   if (!corePromise) {
-    for (const key of ["AI_PROVIDER", "DEEPSEEK_API_KEY", "DEEPSEEK_MODEL", "DEEPSEEK_BASE_URL"]) {
+    for (const key of ["AI_PROVIDER", "DEEPSEEK_API_KEY", "DEEPSEEK_MODEL", "DEEPSEEK_BASE_URL", "APP_ACCESS_CODE"]) {
       const value = globalThis.Netlify?.env?.get?.(key);
       if (value) process.env[key] = value;
     }
@@ -31,6 +31,9 @@ export default async (req) => {
     const url = new URL(req.url);
 
     if (req.method === "GET" && url.pathname === "/api/status") {
+      if (!core.hasApiAccess(req.headers)) {
+        return json({ ok: false, error: "请输入访问码", code: "ACCESS_CODE_REQUIRED" }, 401);
+      }
       const aiConnected = await core.providerHealth();
       return json({
         ok: true,
@@ -43,6 +46,9 @@ export default async (req) => {
     }
 
     if (req.method === "POST" && url.pathname === "/api/generate") {
+      if (!core.hasApiAccess(req.headers)) {
+        return json({ ok: false, error: "请输入访问码", code: "ACCESS_CODE_REQUIRED" }, 401);
+      }
       const payload = await req.json().catch(() => ({}));
       const input = payload.input || payload;
       const result = await core.generateWithProvider(input);
@@ -50,6 +56,9 @@ export default async (req) => {
     }
 
     if (req.method === "POST" && url.pathname === "/api/topics") {
+      if (!core.hasApiAccess(req.headers)) {
+        return json({ ok: false, error: "请输入访问码", code: "ACCESS_CODE_REQUIRED" }, 401);
+      }
       const payload = await req.json().catch(() => ({}));
       const input = payload.input || payload;
       const result = await core.generateTopicsWithProvider(input);

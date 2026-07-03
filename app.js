@@ -14,6 +14,7 @@
 
   const draftKey = "roco-shortdrama-studio-draft";
   const historyKey = "roco-shortdrama-studio-history";
+  const accessCodeKey = "roco-shortdrama-access-code";
   const maxHistoryItems = 60;
 
   function nowTime() {
@@ -239,10 +240,17 @@
     }
   }
 
-  async function apiRequest(path, payload) {
+  function accessHeaders(payload) {
+    const headers = payload ? { "Content-Type": "application/json" } : {};
+    const code = window.localStorage.getItem(accessCodeKey);
+    if (code) headers["X-Roco-Access-Code"] = code;
+    return headers;
+  }
+
+  async function fetchApi(path, payload) {
     const response = await fetch(path, {
       method: payload ? "POST" : "GET",
-      headers: payload ? { "Content-Type": "application/json" } : {},
+      headers: accessHeaders(payload),
       body: payload ? JSON.stringify(payload) : undefined,
     });
     const data = await response.json();
@@ -252,6 +260,18 @@
       throw error;
     }
     return data;
+  }
+
+  async function apiRequest(path, payload) {
+    try {
+      return await fetchApi(path, payload);
+    } catch (error) {
+      if (error.code !== "ACCESS_CODE_REQUIRED") throw error;
+      const code = window.prompt("请输入访问码。这个工具会调用你的付费 AI API，请不要把访问码发给不需要使用的人。");
+      if (!code) throw error;
+      window.localStorage.setItem(accessCodeKey, code.trim());
+      return fetchApi(path, payload);
+    }
   }
 
   function normalizeGeneratedResult(result) {

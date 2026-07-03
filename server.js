@@ -4,6 +4,7 @@ const path = require("path");
 
 const root = __dirname;
 const port = Number(process.env.PORT || 8765);
+const appAccessCode = process.env.APP_ACCESS_CODE || "";
 const provider = String(
   process.env.AI_PROVIDER ||
     (process.env.DEEPSEEK_API_KEY ? "deepseek" : process.env.OPENAI_API_KEY ? "openai" : "none"),
@@ -53,6 +54,16 @@ function send(res, status, body, type = "application/json; charset=utf-8") {
   } else {
     res.end(JSON.stringify(body));
   }
+}
+
+function requestAccessCode(headers) {
+  if (!headers) return "";
+  if (typeof headers.get === "function") return headers.get("x-roco-access-code") || "";
+  return headers["x-roco-access-code"] || "";
+}
+
+function hasApiAccess(headers) {
+  return !appAccessCode || requestAccessCode(headers) === appAccessCode;
 }
 
 function readBody(req) {
@@ -533,6 +544,10 @@ const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, `http://${req.headers.host}`);
     if (req.method === "GET" && url.pathname === "/api/status") {
+      if (!hasApiAccess(req.headers)) {
+        send(res, 401, { ok: false, error: "请输入访问码", code: "ACCESS_CODE_REQUIRED" });
+        return;
+      }
       const aiConnected = await providerHealth();
       send(res, 200, {
         ok: true,
@@ -545,6 +560,10 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     if (req.method === "POST" && url.pathname === "/api/generate") {
+      if (!hasApiAccess(req.headers)) {
+        send(res, 401, { ok: false, error: "请输入访问码", code: "ACCESS_CODE_REQUIRED" });
+        return;
+      }
       const body = await readBody(req);
       const payload = JSON.parse(body || "{}");
       const result = await generateWithProvider(payload.input || payload);
@@ -552,6 +571,10 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     if (req.method === "POST" && url.pathname === "/api/topics") {
+      if (!hasApiAccess(req.headers)) {
+        send(res, 401, { ok: false, error: "请输入访问码", code: "ACCESS_CODE_REQUIRED" });
+        return;
+      }
       const body = await readBody(req);
       const payload = JSON.parse(body || "{}");
       const input = payload.input || payload;
@@ -583,4 +606,5 @@ module.exports = {
   modelForRequest,
   provider,
   providerHealth,
+  hasApiAccess,
 };
