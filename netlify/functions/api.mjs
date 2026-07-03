@@ -1,4 +1,15 @@
-import core from "../../server.js";
+let corePromise;
+
+async function loadCore() {
+  if (!corePromise) {
+    for (const key of ["AI_PROVIDER", "DEEPSEEK_API_KEY", "DEEPSEEK_MODEL", "DEEPSEEK_BASE_URL"]) {
+      const value = globalThis.Netlify?.env?.get?.(key);
+      if (value) process.env[key] = value;
+    }
+    corePromise = import("../../server.js").then((module) => module.default || module);
+  }
+  return corePromise;
+}
 
 function json(body, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -16,6 +27,7 @@ function errorStatus(error) {
 
 export default async (req) => {
   try {
+    const core = await loadCore();
     const url = new URL(req.url);
 
     if (req.method === "GET" && url.pathname === "/api/status") {
