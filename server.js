@@ -261,11 +261,16 @@ function resultText(result) {
 function buildScriptOnlyPrompt(input) {
   const payload = normalizePayload(input);
   const previous = payload.mode === "continue" ? "\n这是续写任务：承接 previousScript 的结尾钩子，不要重写上一集。" : "";
+  const requiredRoles = roleNames(payload);
   return `
 你是短剧编剧。只生成「洛克王国」粉丝向短剧剧本，不要生成分镜。
 必须返回严格 JSON，不要 Markdown，不要解释。
-要求：贴合输入主题；优先使用输入 roles 里的角色名；前 3 秒强钩子；结尾留下下一集钩子；台词短句可拍。
-输出要精简，避免长段落。
+硬性要求：
+1. 必须围绕主题「${payload.theme || "用户输入主题"}」重新创作，标题和梗概必须体现这个主题。
+2. 必须使用这些角色名作为核心角色：${requiredRoles.join("、") || "用户未指定"}。
+3. 如果上面列出了角色名，不得替换成洛克、迪莫、恩佐、火花、小洛克等默认角色，除非它们出现在用户输入里。
+4. 前 3 秒强钩子；结尾留下下一集钩子；台词短句可拍。
+5. 输出要精简，避免长段落。
 ${previous}
 
 用户输入：
@@ -285,17 +290,19 @@ ${JSON.stringify(payload, null, 2)}
     "tags": ["标签"]
   }
 }
-限制：characters 3-5个；structure 5段；dialogue 6-10句；rhythm/reversals/hooks/tags 各不超过4条。
+限制：characters 3-5个；structure 5段；dialogue 6-8句；rhythm/reversals/hooks/tags 各不超过3条。
 `;
 }
 
 function buildStoryboardOnlyPrompt(input) {
   const payload = normalizePayload(input);
   const script = input.script || input.previousScript || null;
+  const requiredRoles = roleNames(payload);
   return `
 你是短视频分镜导演。只基于给定 script 生成抖音 9:16 分镜，不要重写剧本。
 必须返回严格 JSON，不要 Markdown，不要解释。
 要求：镜头节奏紧凑；前 3 秒强画面；每个镜头都可拍；字幕短；总时长接近 ${payload.duration || 60} 秒。
+必须延续剧本标题、冲突和角色名：${requiredRoles.join("、") || "以 script 为准"}。不要新增无关主角。
 
 用户输入：
 ${JSON.stringify(payload, null, 2)}
@@ -319,7 +326,7 @@ ${JSON.stringify(script, null, 2)}
     }
   ]
 }
-限制：storyboard 6-8个镜头；每个字段保持短句。
+限制：storyboard 必须正好 6 个镜头；每个字段保持短句。
 `;
 }
 
@@ -477,7 +484,7 @@ function normalizeTopicsResult(result, count) {
   };
 }
 
-async function callOpenAI(input, promptOverride) {
+async function callOpenAI(input, promptOverride, maxTokens = 5000) {
   if (!config.openai.apiKey) {
     const error = new Error("未设置 OPENAI_API_KEY");
     error.code = "NO_API_KEY";
@@ -493,7 +500,7 @@ async function callOpenAI(input, promptOverride) {
       model: config.openai.model,
       input: [{ role: "user", content: [{ type: "input_text", text: promptOverride || buildPrompt(input) }] }],
       temperature: 0.85,
-      max_output_tokens: 5000,
+      max_output_tokens: maxTokens,
     }),
   });
   const raw = await response.text();
@@ -539,7 +546,7 @@ async function repairDeepSeekJson(input, rawText) {
   return extractJson(data.choices?.[0]?.message?.content || raw);
 }
 
-async function callDeepSeek(input, promptOverride) {
+async function callDeepSeek(input, promptOverride, maxTokens = 2200) {
   if (!config.deepseek.apiKey) {
     const error = new Error("未设置 DEEPSEEK_API_KEY");
     error.code = "NO_DEEPSEEK_KEY";
@@ -562,7 +569,7 @@ async function callDeepSeek(input, promptOverride) {
         { role: "user", content: promptOverride || buildPrompt(input) },
       ],
       temperature: 0.85,
-      max_tokens: 2200,
+      max_tokens: maxTokens,
       response_format: { type: "json_object" },
       stream: false,
     }),
@@ -579,7 +586,7 @@ async function callDeepSeek(input, promptOverride) {
   }
 }
 
-async function callOllama(input, promptOverride) {
+async function callOllama(input, promptOverride, maxTokens = 2200) {
   const response = await fetch(`${config.ollama.baseUrl}/api/generate`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -588,7 +595,7 @@ async function callOllama(input, promptOverride) {
       prompt: promptOverride || buildPrompt(input),
       stream: false,
       format: "json",
-      options: { temperature: 0.85 },
+      options: { temperature: 0.85, num_predict: maxTokens },
     }),
   });
   const raw = await response.text();
@@ -597,7 +604,7 @@ async function callOllama(input, promptOverride) {
   return extractJson(data.response || raw);
 }
 
-async function callCompatible(input, promptOverride) {
+async function callCompatible(input, promptOverride, maxTokens = 2200) {
   const response = await fetch(`${config.compatible.baseUrl}/chat/completions`, {
     method: "POST",
     headers: {
@@ -608,6 +615,7 @@ async function callCompatible(input, promptOverride) {
       model: config.compatible.model,
       messages: [{ role: "user", content: promptOverride || buildPrompt(input) }],
       temperature: 0.85,
+      max_tokens: maxTokens,
       response_format: { type: "json_object" },
     }),
   });
@@ -635,22 +643,22 @@ async function generateWithProvider(input) {
   throw error;
 }
 
-async function callProviderWithPrompt(input, promptText) {
-  if (provider === "deepseek") return callDeepSeek(input, promptText);
-  if (provider === "openai") return callOpenAI(input, promptText);
-  if (provider === "ollama") return callOllama(input, promptText);
-  if (provider === "compatible") return callCompatible(input, promptText);
+async function callProviderWithPrompt(input, promptText, maxTokens = 2200) {
+  if (provider === "deepseek") return callDeepSeek(input, promptText, maxTokens);
+  if (provider === "openai") return callOpenAI(input, promptText, maxTokens);
+  if (provider === "ollama") return callOllama(input, promptText, maxTokens);
+  if (provider === "compatible") return callCompatible(input, promptText, maxTokens);
   const error = new Error("未配置 AI_PROVIDER。可用值：deepseek、ollama、compatible、openai");
   error.code = "NO_PROVIDER";
   throw error;
 }
 
 async function generateScriptWithProvider(input) {
-  const result = await callProviderWithPrompt(input, buildScriptOnlyPrompt(input));
+  const result = await callProviderWithPrompt(input, buildScriptOnlyPrompt(input), 1300);
   const normalized = normalizeScriptOnlyResult(result);
   const problems = validateGeneratedResult(normalized, input);
   if (problems.length) {
-    const repaired = await callProviderWithPrompt(input, buildRepairPrompt(input, normalized, problems));
+    const repaired = await callProviderWithPrompt(input, buildRepairPrompt(input, normalized, problems), 1300);
     return normalizeScriptOnlyResult(repaired);
   }
   return normalized;
@@ -660,7 +668,7 @@ async function generateStoryboardWithProvider(input) {
   if (!input.script && !input.previousScript) {
     throw new Error("请先生成或恢复一个剧本，再生成分镜");
   }
-  const result = await callProviderWithPrompt(input, buildStoryboardOnlyPrompt(input));
+  const result = await callProviderWithPrompt(input, buildStoryboardOnlyPrompt(input), 1400);
   return normalizeStoryboardOnlyResult(result);
 }
 
