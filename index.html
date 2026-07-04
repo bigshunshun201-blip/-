@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>洛克王国短剧创作工作台</title>
-    <link rel="stylesheet" href="./styles.css?v=20260704-topic-regen" />
+    <link rel="stylesheet" href="./styles.css?v=20260704-custom-memes" />
   </head>
   <body>
     <header class="topbar">
@@ -39,6 +39,7 @@
               <option>轻喜剧整活</option>
               <option>热血战斗连续剧</option>
             </select>
+            <input id="customDirection" class="inline-custom" placeholder="也可以自己输入剧情方向，例如：沙雕职场邪修 + 宠物救场" />
           </label>
           <label>
             目标受众
@@ -48,6 +49,7 @@
               <option>亲子向轻剧情用户</option>
               <option>泛短剧爽感用户</option>
             </select>
+            <input id="customAudience" class="inline-custom" placeholder="也可以自己输入目标人群，例如：爱看抽象整活的学生党" />
           </label>
           <div class="form-grid">
             <label>
@@ -58,6 +60,7 @@
                 <option value="90">90 秒</option>
                 <option value="45">45 秒</option>
               </select>
+              <input id="customDuration" class="inline-custom" type="number" min="15" max="180" placeholder="自定义秒数" />
             </label>
             <label>
               集数
@@ -72,6 +75,11 @@
               <option>治愈、催泪、轻悬疑</option>
               <option>学院群像、热血冒险</option>
             </select>
+            <input id="customStyle" class="inline-custom" placeholder="也可以自己输入风格，例如：抽象、发疯文学、冷幽默、嘴替吐槽" />
+          </label>
+          <label>
+            热梗/搞笑语录
+            <textarea id="memeSeed" rows="2" placeholder="可选。比如：邪修、外耗、丝瓜汤文学、爱你老己、望周知、来都来了、谁懂啊、这合理吗"></textarea>
           </label>
           <label>
             DeepSeek 模型
@@ -248,7 +256,7 @@
       粉丝向二创工作台示例，不代表官方内容或授权关系。发布前请核对平台规范与 IP 授权边界。
     </footer>
 
-    <script src="./generator.js?v=20260704-topic-regen"></script>
-    <script src="./app.js?v=20260704-topic-regen"></script>
+    <script src="./generator.js?v=20260704-custom-memes"></script>
+    <script src="./app.js?v=20260704-custom-memes"></script>
   </body>
 </html>

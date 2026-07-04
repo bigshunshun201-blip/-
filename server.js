@@ -131,6 +131,7 @@ function normalizePayload(input) {
     duration: Number(input.duration || 60),
     episodeCount: Number(input.episodeCount || 1),
     style: String(input.style || "").trim(),
+    memeSeed: String(input.memeSeed || "").trim(),
     aiModel: String(input.aiModel || "").trim(),
     competitorInsights: input.competitorInsights || "",
     continueInstruction: String(input.continueInstruction || "").trim(),
@@ -414,19 +415,57 @@ function buildTopicsPrompt(input) {
   const count = Math.max(1, Math.min(Number(input.count || 8), 12));
   const existingTopics = Array.isArray(input.existingTopics) ? input.existingTopics : [];
   const replaceTopic = input.replaceTopic || null;
+  const memeSeeds = String(input.memeSeed || payload.memeSeed || "")
+    .split(/[，,、；;\n]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+  const memeReference = [
+    ...memeSeeds,
+    "邪修",
+    "外耗",
+    "丝瓜汤文学",
+    "爱你老己",
+    "望周知",
+    "来都来了",
+    "谁懂啊",
+    "这合理吗",
+    "哪来的退堂鼓",
+    "直接开大",
+    "已读乱回",
+    "班味太重",
+    "不嘻嘻",
+  ];
+  const audienceReference = [
+    payload.audience,
+    "爱看抽象整活的学生党",
+    "喜欢游戏二创和反差梗的泛娱乐用户",
+    "下班刷短剧解压的打工人",
+    "洛克王国老玩家里的搞笑党",
+    "喜欢弹幕吐槽和嘴替台词的年轻用户",
+    "亲子一起看也能笑的轻剧情用户",
+    "只想看强钩子和爽反转的短剧用户",
+  ].filter(Boolean);
   return `
 你是短视频短剧选题策划。请为「洛克王国」粉丝向/二创短剧生成一批全新的选题候选。
 
 要求：
 1. 必须贴合用户输入的主题、角色、剧情方向、目标受众和视频时长。
 2. 不要重复 existingTopics 中已经有的标题、卖点和反转。
-3. 如果 replaceTopic 存在，本次重点生成可替换它的新选题，方向要明显不同。
+3. 如果 replaceTopic 存在，本次重点生成可替换它的新选题，必须换剧情结构、换目标人群、换热梗角度，不要只改标题。
 4. 选题要适合抖音竖屏连续短剧，开头有强钩子，结尾有系列钩子。
-5. 可以借鉴 topicReference / competitorInsights，但不要写成竞品分析。
-6. 输出必须是严格 JSON，不要 Markdown，不要解释。
+5. 必须随机混入网络热梗、搞笑语录、抽象整活或嘴替吐槽，但不能堆砌，要服务剧情。
+6. 目标人群要多样化，不要每条都写“18-30岁洛克王国老玩家”。
+7. 可以借鉴 topicReference / competitorInsights，但不要写成竞品分析。
+8. 输出必须是严格 JSON，不要 Markdown，不要解释。
 
 用户输入：
 ${JSON.stringify(payload, null, 2)}
+
+热梗/搞笑素材池，随机选择或改写，不要每条都用同一个：
+${JSON.stringify(memeReference, null, 2)}
+
+目标人群参考池，必须尽量分散：
+${JSON.stringify(audienceReference, null, 2)}
 
 选题参考：
 ${JSON.stringify(input.topicReference || input.competitorInsights || "", null, 2)}
@@ -446,6 +485,7 @@ ${JSON.stringify(replaceTopic, null, 2)}
       "audience": "目标人群",
       "emotion": "核心情绪点",
       "reversal": "反转点",
+      "memeLine": "适合放进台词/字幕/封面的热梗搞笑语录",
       "duration": 60,
       "series": true,
       "priority": "S"
@@ -454,7 +494,7 @@ ${JSON.stringify(replaceTopic, null, 2)}
   "referenceNote": "本批选题的生成依据，40字以内"
 }
 
-数量：${count} 条。duration 只能在 45、60、75、90 中选择。priority 只能是 S、A、B。
+数量：${count} 条。duration 只能在 45、60、75、90 中选择。priority 只能是 S、A、B。memeLine 不超过 24 个字。
 `;
 }
 
@@ -467,6 +507,7 @@ function normalizeTopicsResult(result, count) {
       audience: String(topic.audience || topic.targetAudience || "").trim(),
       emotion: String(topic.emotion || topic.emotionPoint || "").trim(),
       reversal: String(topic.reversal || topic.reversalPoint || "").trim(),
+      memeLine: String(topic.memeLine || topic.meme_line || topic.hotMeme || "").trim(),
       duration: [45, 60, 75, 90].includes(Number(topic.duration)) ? Number(topic.duration) : 60,
       series: topic.series !== false,
       priority: ["S", "A", "B"].includes(String(topic.priority || "").toUpperCase())
@@ -692,7 +733,7 @@ async function generateTopicsWithProvider(input) {
     result = await callTopicProvider(`
 只返回一个可以被 JSON.parse 解析的 JSON 对象，不要 Markdown，不要尾随逗号，不要注释。
 结构必须是：
-{"topics":[{"title":"...","sellingPoint":"...","audience":"...","emotion":"...","reversal":"...","duration":60,"series":true,"priority":"S"}],"referenceNote":"..."}
+{"topics":[{"title":"...","sellingPoint":"...","audience":"...","emotion":"...","reversal":"...","memeLine":"...","duration":60,"series":true,"priority":"S"}],"referenceNote":"..."}
 数量：${count} 条。不要重复这些标题：${(input.existingTopics || []).map((topic) => topic.title).join("、")}
 用户输入：${JSON.stringify(normalizePayload(input), null, 2)}
 `);

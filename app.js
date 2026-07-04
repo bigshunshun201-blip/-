@@ -47,14 +47,16 @@
   }
 
   function getInput() {
+    const customDuration = Number($("#customDuration")?.value || 0);
     return {
       theme: $("#theme").value.trim(),
       roles: $("#roles").value.trim(),
-      direction: $("#direction").value,
-      audience: $("#audience").value,
-      duration: Number($("#duration").value),
+      direction: $("#customDirection")?.value.trim() || $("#direction").value,
+      audience: $("#customAudience")?.value.trim() || $("#audience").value,
+      duration: customDuration || Number($("#duration").value),
       episodeCount: Number($("#episodeCount").value),
-      style: $("#style").value,
+      style: $("#customStyle")?.value.trim() || $("#style").value,
+      memeSeed: $("#memeSeed") ? $("#memeSeed").value.trim() : "",
       aiModel: $("#aiModel") ? $("#aiModel").value : "",
       continueInstruction: $("#continueInstruction") ? $("#continueInstruction").value.trim() : "",
     };
@@ -79,8 +81,9 @@
       `目标人群：${topic.audience}`,
       `核心情绪：${topic.emotion}`,
       `关键反转：${topic.reversal}`,
+      topic.memeLine ? `热梗台词：${topic.memeLine}` : "",
       topic.series ? "按连续短剧结构处理，结尾必须留下一集钩子。" : "优先做成单集强反转短剧。",
-    ].join("\n");
+    ].filter(Boolean).join("\n");
   }
 
   function applyTopicToInputs(topic) {
@@ -124,6 +127,7 @@
         audience: String(topic.audience || topic.targetAudience || "洛克王国短剧用户").trim(),
         emotion: String(topic.emotion || topic.emotionPoint || "悬疑、怀旧").trim(),
         reversal: String(topic.reversal || topic.reversalPoint || "").trim(),
+        memeLine: String(topic.memeLine || topic.meme_line || topic.hotMeme || "").trim(),
         duration: [45, 60, 75, 90].includes(Number(topic.duration)) ? Number(topic.duration) : 60,
         series: topic.series !== false,
         priority: ["S", "A", "B"].includes(String(topic.priority || "").toUpperCase())
@@ -138,20 +142,53 @@
   function fallbackTopics(count = 8) {
     state.topicBatch += 1;
     const input = getInput();
-    const baseAudience = input.audience || "洛克王国短剧用户";
+    const userMemes = String(input.memeSeed || "")
+      .split(/[，,、；;\n]/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+    const memePool = [
+      ...userMemes,
+      "邪修",
+      "外耗",
+      "丝瓜汤文学",
+      "爱你老己",
+      "望周知",
+      "来都来了",
+      "谁懂啊",
+      "这合理吗",
+      "哪来的退堂鼓",
+      "直接开大",
+      "已读乱回",
+      "班味太重",
+      "不嘻嘻",
+    ];
+    const memeOffset = Math.floor(Math.random() * memePool.length);
+    const audiencePool = [
+      input.audience,
+      "爱看抽象整活的学生党",
+      "喜欢游戏二创和反差梗的泛娱乐用户",
+      "下班刷短剧解压的打工人",
+      "洛克王国老玩家里的搞笑党",
+      "喜欢弹幕吐槽和嘴替台词的年轻用户",
+      "亲子一起看也能笑的轻剧情用户",
+      "只想看强钩子和爽反转的短剧用户",
+    ].filter(Boolean);
+    const audienceOffset = Math.floor(Math.random() * audiencePool.length);
+    const pickAudience = (offset = 0) => audiencePool[(state.topicBatch + audienceOffset + offset) % audiencePool.length];
+    const pickMeme = (offset = 0) => memePool[(state.topicBatch + memeOffset + offset) % memePool.length];
     const pool = [
-      ["迪莫收到一封十年后的求救信", "未来信件+伙伴羁绊，适合做连续悬疑", baseAudience, "紧张、怀旧、守护", "写信的人不是未来的洛克，而是未来的迪莫", 75, true],
-      ["魔法学院禁止提起第一只宠物", "禁忌规则开局，首秒冲突强", "剧情党、设定党", "好奇、压迫、反抗", "禁令是为了防止旧契约集体觉醒", 60, true],
-      ["全王国都说这只宠物已经不存在", "存在感消失危机，情绪代入强", "老玩家、情感向用户", "孤独、亏欠、重逢", "宠物不是消失，而是在替主人挡遗忘诅咒", 80, true],
-      ["最弱新生被分到废弃宠物仓库", "弱者逆袭+学院地图，可持续扩展", "学生党、爽剧用户", "委屈、热血、逆袭", "废弃仓库其实藏着学院最早的守护契约", 75, true],
-      ["旧徽章每晚都会多出一个名字", "道具悬疑，适合作为系列主线", "设定党、悬疑用户", "不安、使命感", "新增名字代表下一位会被遗忘的小洛克", 90, true],
-      ["宠物进化考试那天，它故意交白卷", "进化选择带来强情绪冲突", "亲子/情感向用户", "纠结、心疼、感动", "它不进化是因为进化后会忘记主人声音", 76, true],
-      ["洛克王国的期末题，答案是逃出学院", "校园整活转悬疑，评论参与度高", "学生党、轻喜剧用户", "好笑、紧张、反差", "试卷不是考试，而是学院发出的求救地图", 45, true],
-      ["我删号前，宠物给我留下最后一条留言", "离别场景强，适合催泪短剧", "老玩家、治愈向用户", "遗憾、释怀、重逢", "留言不是过去录的，而是宠物刚刚发来的", 60, true],
-      ["暗影博士偷走的不是徽章，是玩家名字", "反派目标升级，主线感强", "剧情党、战斗向用户", "危机、愤怒、燃", "名字被偷后，所有宠物都会忘记自己的主人", 75, true],
-      ["小时候的我成了本集最终 Boss", "自我对话+反转，适合系列中段", "老玩家、治愈向用户", "震惊、遗憾、释怀", "Boss 阻止长大的洛克，是怕他再次离开王国", 90, true],
-      ["没人敢打开的背包格子亮了", "一个道具制造强悬念，拍摄成本低", "泛短剧用户", "好奇、惊喜、怀旧", "亮起的不是宠物，而是一段被封存的契约记忆", 60, true],
-      ["全班宠物都黑化，只有最胆小那只没变", "反差救场，适合爽点剪辑", "学生党、爽剧用户", "恐惧、反差、热血", "胆小让它从未触碰暗影力量，反而成了唯一解药", 70, true],
+      ["迪莫收到一封十年后的求救信", "未来信件+伙伴羁绊，外加评论区可接“谁懂啊”的怀旧梗", "紧张、怀旧、守护", "写信的人不是未来的洛克，而是未来的迪莫", 75, true],
+      ["魔法学院开了邪修速成班", "把游戏升级拍成野路子学习法，天然适合搞笑语录和反差剪辑", "好笑、离谱、上头", "所谓邪修其实是被封印的古代训练法", 60, true],
+      ["宠物考试全员外耗老师", "课堂整活+宠物嘴替，适合做弹幕吐槽型短剧", "解压、抽象、反差", "老师才是被暗影操控的最终考题", 45, true],
+      ["旧徽章每晚都会发疯文学", "道具悬疑套热梗文案，封面能直接打“它开始乱回我了”", "不安、好笑、使命感", "徽章不是坏了，而是在替失踪宠物求救", 60, true],
+      ["全王国都说这只宠物不嘻嘻了", "萌宠反差+情绪爆点，适合做搞笑开头催泪结尾", "好笑、心疼、重逢", "宠物冷脸是因为它每天都在重置记忆", 75, true],
+      ["洛克王国的期末题，答案是来都来了", "校园考试嫁接网络口头禅，首秒就有短视频感", "荒诞、紧张、反差", "试卷不是考试，而是学院发出的逃生地图", 45, true],
+      ["迪莫说爱你老己，然后黑化了", "可爱台词转恐怖反差，适合做系列第一集钩子", "荒诞、心疼、悬疑", "迪莫说的不是自己，而是被复制出的另一个主人", 60, true],
+      ["魔法学院发布望周知：禁止召唤童年宠物", "公告体热梗+禁忌规则，封面强冲突", "好奇、压迫、反抗", "禁令是为了防止旧契约集体觉醒", 75, true],
+      ["最弱宠物直接开大，全班沉默", "弱者逆袭爽点明确，台词可做成表情包传播", "爽感、燃、反差", "它不是最弱，是一直被系统限制输出", 60, true],
+      ["背包格子已读乱回，吓醒老玩家", "把社交软件梗嫁接背包系统，低成本好拍", "好奇、惊喜、怀旧", "乱回的不是系统，是被困在格子里的第一只宠物", 45, true],
+      ["谁把魔法学院整出班味了", "职场梗+学院群像，适合打工人和学生党双圈层", "疲惫、爆笑、反抗", "班味来自暗影博士植入的任务 KPI", 60, true],
+      ["丝瓜汤文学拯救了黑化宠物", "温柔废话文学反差拯救黑化，结尾可催泪", "治愈、离谱、温柔", "黑化宠物只是不知道怎么说想你了", 75, true],
     ];
     const used = new Set(state.topics.map((topic) => topic.title));
     const start = state.topicBatch % pool.length;
@@ -162,11 +199,12 @@
       .map((item, index) => ({
         title: item[0],
         sellingPoint: item[1],
-        audience: item[2],
-        emotion: item[3],
-        reversal: item[4],
-        duration: item[5],
-        series: item[6],
+        audience: pickAudience(index),
+        emotion: item[2],
+        reversal: item[3],
+        memeLine: `${pickMeme(index)}：${["这合理吗？不合理，但洛克王国先合理了。", "别内耗了，今天开始外耗暗影博士。", "望周知，本集不是回忆杀，是童年反杀。", "来都来了，先把宠物救了再说。"][index % 4]}`,
+        duration: item[4],
+        series: item[5],
         priority: index < 2 ? "S" : index < 5 ? "A" : "B",
       }));
   }
@@ -714,6 +752,7 @@
             <p><strong>人群：</strong>${escapeHtml(topic.audience)}</p>
             <p><strong>情绪：</strong>${escapeHtml(topic.emotion)}</p>
             <p><strong>反转：</strong>${escapeHtml(topic.reversal)}</p>
+            ${topic.memeLine ? `<p><strong>梗台词：</strong>${escapeHtml(topic.memeLine)}</p>` : ""}
             <div class="tagline">
               <span class="tag">${escapeHtml(topic.duration)}秒</span>
               <span class="tag">${topic.series ? "适合系列化" : "单集更合适"}</span>

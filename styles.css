@@ -179,6 +179,12 @@ button:focus-visible {
   box-shadow: 0 0 0 3px rgba(73, 120, 208, 0.18);
 }
 
+.inline-custom {
+  margin-top: 2px;
+  background: #fbf7ef;
+  font-weight: 650;
+}
+
 .form-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
