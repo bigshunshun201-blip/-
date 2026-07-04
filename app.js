@@ -275,6 +275,35 @@
     }
   }
 
+  function sleep(ms) {
+    return new Promise((resolve) => window.setTimeout(resolve, ms));
+  }
+
+  async function resolveAiJob(response, label) {
+    if (!response.async || !response.jobId) return response;
+    const startedAt = Date.now();
+    for (let attempt = 0; attempt < 180; attempt += 1) {
+      await sleep(attempt < 2 ? 1200 : 2000);
+      const job = await apiRequest(`/api/job?id=${encodeURIComponent(response.jobId)}`);
+      if (job.status === "done") {
+        return {
+          ok: true,
+          source: job.source || response.source,
+          model: job.model || response.model,
+          result: job.result,
+        };
+      }
+      if (job.status === "error") {
+        const error = new Error(job.error || `${label}生成失败`);
+        error.code = job.code || "JOB_ERROR";
+        throw error;
+      }
+      const seconds = Math.max(1, Math.round((Date.now() - startedAt) / 1000));
+      setStatus(`${label}生成中... ${seconds}秒`);
+    }
+    throw new Error(`${label}仍在生成中，请稍后重试或缩短输入。`);
+  }
+
   function normalizeGeneratedResult(result) {
     if (!result || !result.script || !Array.isArray(result.storyboard)) {
       throw new Error("AI 返回结构不完整，缺少 script 或 storyboard");
@@ -841,7 +870,7 @@
       throw new Error("还没有可续写的剧本，请先生成一集。");
     }
     setStatus(mode === "continue" ? "AI 续写剧本中..." : "AI 生成剧本中...");
-    const response = await apiRequest("/api/script", {
+    const initialResponse = await apiRequest("/api/script", {
       input: {
         ...input,
         mode,
@@ -850,6 +879,7 @@
         previousStoryboard: mode === "continue" ? state.storyboard : null,
       },
     });
+    const response = await resolveAiJob(initialResponse, mode === "continue" ? "续写剧本" : "剧本");
     const generated = normalizeScriptResult(response.result);
     state.script = generated.script;
     state.storyboard = [];
@@ -875,12 +905,13 @@
     }
     const input = getInput();
     setStatus("AI 正在基于当前剧本生成分镜...");
-    const response = await apiRequest("/api/storyboard", {
+    const initialResponse = await apiRequest("/api/storyboard", {
       input: {
         ...input,
         script: state.script,
       },
     });
+    const response = await resolveAiJob(initialResponse, "分镜");
     state.storyboard = normalizeStoryboardResult(response.result);
     updateCurrentHistoryStoryboard(response);
     renderStoryboard();
