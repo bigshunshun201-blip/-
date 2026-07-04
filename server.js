@@ -159,7 +159,16 @@ function modelForRequest(input) {
 function buildPrompt(input) {
   const payload = normalizePayload(input);
   const isContinue = payload.mode === "continue";
+  const speedLimit = `IMPORTANT SPEED LIMIT:
+- Return compact JSON only.
+- storyboard must contain exactly 6 shots.
+- dialogue max 6 lines.
+- rhythm, reversals, hooks, tags max 3 items each.
+- creativePack must use empty arrays only.
+- Keep every string concise, no long paragraphs.`;
   return `
+${speedLimit}
+
 你是一个短剧总编剧和抖音内容导演。请基于用户输入，为「洛克王国」粉丝向/二创短剧生成全新的剧本和分镜。
 
 硬性要求：
@@ -457,6 +466,7 @@ async function callDeepSeek(input, promptOverride) {
         { role: "user", content: promptOverride || buildPrompt(input) },
       ],
       temperature: 0.85,
+      max_tokens: 2200,
       response_format: { type: "json_object" },
       stream: false,
     }),
