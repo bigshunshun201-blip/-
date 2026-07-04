@@ -55,6 +55,26 @@ export default async (req) => {
       return json({ ok: true, source: core.provider, model: core.modelForRequest(input), result });
     }
 
+    if (req.method === "POST" && url.pathname === "/api/script") {
+      if (!core.hasApiAccess(req.headers)) {
+        return json({ ok: false, error: "请输入访问码", code: "ACCESS_CODE_REQUIRED" }, 401);
+      }
+      const payload = await req.json().catch(() => ({}));
+      const input = payload.input || payload;
+      const result = await core.generateScriptWithProvider(input);
+      return json({ ok: true, source: core.provider, model: core.modelForRequest(input), result });
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/storyboard") {
+      if (!core.hasApiAccess(req.headers)) {
+        return json({ ok: false, error: "请输入访问码", code: "ACCESS_CODE_REQUIRED" }, 401);
+      }
+      const payload = await req.json().catch(() => ({}));
+      const input = payload.input || payload;
+      const result = await core.generateStoryboardWithProvider(input);
+      return json({ ok: true, source: core.provider, model: core.modelForRequest(input), result });
+    }
+
     if (req.method === "POST" && url.pathname === "/api/topics") {
       if (!core.hasApiAccess(req.headers)) {
         return json({ ok: false, error: "请输入访问码", code: "ACCESS_CODE_REQUIRED" }, 401);
@@ -72,5 +92,5 @@ export default async (req) => {
 };
 
 export const config = {
-  path: ["/api/status", "/api/generate", "/api/topics"],
+  path: ["/api/status", "/api/generate", "/api/script", "/api/storyboard", "/api/topics"],
 };

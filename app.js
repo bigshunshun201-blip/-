@@ -9,6 +9,7 @@
     creativePack: null,
     calendar: [],
     history: [],
+    currentHistoryId: null,
     topicBatch: 0,
   };
 
@@ -303,6 +304,39 @@
     };
   }
 
+  function normalizeScriptResult(result) {
+    const script = result && (result.script || result);
+    if (!script || typeof script !== "object") {
+      throw new Error("AI 没有返回可用剧本");
+    }
+    script.characters = Array.isArray(script.characters) ? script.characters : [];
+    script.structure = Array.isArray(script.structure) ? script.structure : [];
+    script.dialogue = Array.isArray(script.dialogue) ? script.dialogue : [];
+    script.rhythm = Array.isArray(script.rhythm) ? script.rhythm : [];
+    script.reversals = Array.isArray(script.reversals) ? script.reversals : [];
+    script.hooks = Array.isArray(script.hooks) ? script.hooks : [];
+    script.tags = Array.isArray(script.tags) ? script.tags : [];
+    return { script, storyboard: [], creativePack: null };
+  }
+
+  function normalizeStoryboardResult(result) {
+    const storyboard = Array.isArray(result?.storyboard) ? result.storyboard : Array.isArray(result) ? result : [];
+    if (!storyboard.length) {
+      throw new Error("AI 没有返回可用分镜");
+    }
+    return storyboard.map((shot, index) => ({
+      shot: shot.shot || index + 1,
+      seconds: shot.seconds || "",
+      visual: shot.visual || "",
+      action: shot.action || "",
+      line: shot.line || "",
+      scale: shot.scale || "",
+      movement: shot.movement || "",
+      sound: shot.sound || "",
+      subtitle: shot.subtitle || "",
+    }));
+  }
+
   function escapeHtml(value) {
     return String(value ?? "")
       .replaceAll("&", "&amp;")
@@ -374,6 +408,10 @@
   }
 
   function renderStoryboard() {
+    if (!state.storyboard.length && state.script) {
+      $("#storyboardTable").innerHTML = `<p class="helper">当前剧本还没有生成分镜。确认剧本方向可用后，点击“AI 生成分镜”。</p>`;
+      return;
+    }
     renderTable($("#storyboardTable"), state.storyboard, [
       { key: "shot", label: "镜头" },
       { key: "seconds", label: "时长" },
@@ -535,6 +573,19 @@
     state.history = [item, ...state.history].slice(0, maxHistoryItems);
     persistHistory();
     renderHistory();
+    return item;
+  }
+
+  function updateCurrentHistoryStoryboard(response) {
+    if (!state.currentHistoryId) return;
+    const item = state.history.find((entry) => entry.id === state.currentHistoryId);
+    if (!item) return;
+    item.storyboard = state.storyboard;
+    item.source = response.source || item.source || "";
+    item.model = response.model || item.model || "";
+    item.updatedAt = new Date().toISOString();
+    persistHistory();
+    renderHistory();
   }
 
   function restoreHistoryItem(index, keepInstruction = false) {
@@ -547,6 +598,7 @@
     state.script = item.script;
     state.storyboard = item.storyboard || [];
     state.creativePack = item.creativePack || null;
+    state.currentHistoryId = item.id || null;
     renderScript();
     renderStoryboard();
     renderCreativePack();
@@ -788,8 +840,8 @@
     if (mode === "continue" && !state.script) {
       throw new Error("还没有可续写的剧本，请先生成一集。");
     }
-    setStatus(mode === "continue" ? "AI 续写中..." : "AI 生成中...");
-    const response = await apiRequest("/api/generate", {
+    setStatus(mode === "continue" ? "AI 续写剧本中..." : "AI 生成剧本中...");
+    const response = await apiRequest("/api/script", {
       input: {
         ...input,
         mode,
@@ -798,11 +850,12 @@
         previousStoryboard: mode === "continue" ? state.storyboard : null,
       },
     });
-    const generated = normalizeGeneratedResult(response.result);
+    const generated = normalizeScriptResult(response.result);
     state.script = generated.script;
-    state.storyboard = generated.storyboard;
-    state.creativePack = generated.creativePack || window.RocoStudio.generateCreativePack(state.script, input, state.topics);
-    addHistoryItem({ mode, input, response, generated: { ...generated, creativePack: state.creativePack } });
+    state.storyboard = [];
+    state.creativePack = window.RocoStudio.generateCreativePack(state.script, input, state.topics);
+    const item = addHistoryItem({ mode, input, response, generated: { ...generated, creativePack: state.creativePack } });
+    state.currentHistoryId = item.id;
     renderScript();
     renderStoryboard();
     renderCreativePack();
@@ -810,9 +863,32 @@
     renderExample();
     saveDraft(false);
     pulseResult();
+    switchTab("script");
     setStatus(
-      `${mode === "continue" ? "AI 已续写" : "AI 已生成"} ${nowTime()} · ${response.source || "provider"} · ${response.model || "model"}`,
+      `${mode === "continue" ? "AI 已续写剧本" : "AI 已生成剧本"} ${nowTime()} · ${response.source || "provider"} · ${response.model || "model"}。满意后可点击“AI 生成分镜”。`,
     );
+  }
+
+  async function generateStoryboardForCurrentScript() {
+    if (!state.script) {
+      throw new Error("请先生成或恢复一个剧本，再生成分镜。");
+    }
+    const input = getInput();
+    setStatus("AI 正在基于当前剧本生成分镜...");
+    const response = await apiRequest("/api/storyboard", {
+      input: {
+        ...input,
+        script: state.script,
+      },
+    });
+    state.storyboard = normalizeStoryboardResult(response.result);
+    updateCurrentHistoryStoryboard(response);
+    renderStoryboard();
+    renderExample();
+    saveDraft(false);
+    pulseResult();
+    switchTab("storyboard");
+    setStatus(`AI 已生成分镜 ${nowTime()} · ${response.source || "provider"} · ${response.model || "model"}`);
   }
 
   async function generateAll() {
@@ -892,6 +968,10 @@
     const payload = {
       input: getInput(),
       competitorCsv: $("#competitorCsv").value,
+      script: state.script,
+      storyboard: state.storyboard,
+      creativePack: state.creativePack,
+      currentHistoryId: state.currentHistoryId,
       topics: state.topics,
       analysis: state.analysis,
       competitors: state.competitors,
@@ -918,6 +998,10 @@
       state.topics = normalizeTopicList(draft.topics);
       state.analysis = draft.analysis || null;
       state.competitors = Array.isArray(draft.competitors) ? draft.competitors : [];
+      state.script = draft.script || null;
+      state.storyboard = Array.isArray(draft.storyboard) ? draft.storyboard : [];
+      state.creativePack = draft.creativePack || null;
+      state.currentHistoryId = draft.currentHistoryId || null;
       setStatus("已恢复草稿");
     } catch (error) {
       try {
@@ -1056,6 +1140,17 @@
         reportError("生成", error);
       }
     });
+    $("#storyboardBtn").addEventListener("click", async () => {
+      try {
+        await generateStoryboardForCurrentScript();
+      } catch (error) {
+        if (["NO_API_KEY", "NO_DEEPSEEK_KEY", "NO_PROVIDER"].includes(error.code)) {
+          setStatus("AI 未连接：请先配置 AI_PROVIDER 和对应 API Key，再重启 node server.js", true);
+          return;
+        }
+        reportError("分镜生成", error);
+      }
+    });
     $("#continueBtn").addEventListener("click", async () => {
       try {
         await continueEpisode();
@@ -1145,6 +1240,10 @@
       } else {
         analyzeAll();
       }
+      renderScript();
+      renderStoryboard();
+      renderCreativePack();
+      renderExample();
       checkAiStatus();
     } catch (error) {
       reportError("初始化", error);

@@ -258,6 +258,102 @@ function resultText(result) {
   return JSON.stringify(result || {}, null, 0);
 }
 
+function buildScriptOnlyPrompt(input) {
+  const payload = normalizePayload(input);
+  const previous = payload.mode === "continue" ? "\n这是续写任务：承接 previousScript 的结尾钩子，不要重写上一集。" : "";
+  return `
+你是短剧编剧。只生成「洛克王国」粉丝向短剧剧本，不要生成分镜。
+必须返回严格 JSON，不要 Markdown，不要解释。
+要求：贴合输入主题；优先使用输入 roles 里的角色名；前 3 秒强钩子；结尾留下下一集钩子；台词短句可拍。
+输出要精简，避免长段落。
+${previous}
+
+用户输入：
+${JSON.stringify(payload, null, 2)}
+
+返回结构：
+{
+  "script": {
+    "title": "标题",
+    "synopsis": "80-160字故事梗概",
+    "characters": [{"name":"角色名","description":"人物设定和本集作用"}],
+    "structure": [{"beat":"0-3秒 强钩子","content":"剧情内容"}],
+    "dialogue": [{"role":"角色名","line":"台词"}],
+    "rhythm": ["情绪节奏"],
+    "reversals": ["反转点"],
+    "hooks": ["爆点或结尾钩子"],
+    "tags": ["标签"]
+  }
+}
+限制：characters 3-5个；structure 5段；dialogue 6-10句；rhythm/reversals/hooks/tags 各不超过4条。
+`;
+}
+
+function buildStoryboardOnlyPrompt(input) {
+  const payload = normalizePayload(input);
+  const script = input.script || input.previousScript || null;
+  return `
+你是短视频分镜导演。只基于给定 script 生成抖音 9:16 分镜，不要重写剧本。
+必须返回严格 JSON，不要 Markdown，不要解释。
+要求：镜头节奏紧凑；前 3 秒强画面；每个镜头都可拍；字幕短；总时长接近 ${payload.duration || 60} 秒。
+
+用户输入：
+${JSON.stringify(payload, null, 2)}
+
+剧本：
+${JSON.stringify(script, null, 2)}
+
+返回结构：
+{
+  "storyboard": [
+    {
+      "shot": 1,
+      "seconds": 3,
+      "visual": "画面内容",
+      "action": "角色动作",
+      "line": "台词/旁白",
+      "scale": "景别",
+      "movement": "镜头运动",
+      "sound": "音效/配乐",
+      "subtitle": "字幕文案"
+    }
+  ]
+}
+限制：storyboard 6-8个镜头；每个字段保持短句。
+`;
+}
+
+function normalizeScriptOnlyResult(result) {
+  const script = result?.script || result;
+  if (!script || typeof script !== "object") throw new Error("AI 没有返回可用剧本");
+  script.characters = Array.isArray(script.characters) ? script.characters : [];
+  script.structure = Array.isArray(script.structure) ? script.structure : [];
+  script.dialogue = Array.isArray(script.dialogue) ? script.dialogue : [];
+  script.rhythm = Array.isArray(script.rhythm) ? script.rhythm : [];
+  script.reversals = Array.isArray(script.reversals) ? script.reversals : [];
+  script.hooks = Array.isArray(script.hooks) ? script.hooks : [];
+  script.tags = Array.isArray(script.tags) ? script.tags : [];
+  return { script };
+}
+
+function normalizeStoryboardOnlyResult(result) {
+  const storyboard = Array.isArray(result?.storyboard) ? result.storyboard : Array.isArray(result) ? result : [];
+  if (!storyboard.length) throw new Error("AI 没有返回可用分镜");
+  return {
+    storyboard: storyboard.map((shot, index) => ({
+      shot: shot.shot || index + 1,
+      seconds: shot.seconds || "",
+      visual: shot.visual || "",
+      action: shot.action || "",
+      line: shot.line || "",
+      scale: shot.scale || "",
+      movement: shot.movement || "",
+      sound: shot.sound || "",
+      subtitle: shot.subtitle || "",
+    })),
+  };
+}
+
 function validateGeneratedResult(result, input) {
   const required = roleNames(input);
   if (!required.length) return [];
@@ -539,6 +635,35 @@ async function generateWithProvider(input) {
   throw error;
 }
 
+async function callProviderWithPrompt(input, promptText) {
+  if (provider === "deepseek") return callDeepSeek(input, promptText);
+  if (provider === "openai") return callOpenAI(input, promptText);
+  if (provider === "ollama") return callOllama(input, promptText);
+  if (provider === "compatible") return callCompatible(input, promptText);
+  const error = new Error("未配置 AI_PROVIDER。可用值：deepseek、ollama、compatible、openai");
+  error.code = "NO_PROVIDER";
+  throw error;
+}
+
+async function generateScriptWithProvider(input) {
+  const result = await callProviderWithPrompt(input, buildScriptOnlyPrompt(input));
+  const normalized = normalizeScriptOnlyResult(result);
+  const problems = validateGeneratedResult(normalized, input);
+  if (problems.length) {
+    const repaired = await callProviderWithPrompt(input, buildRepairPrompt(input, normalized, problems));
+    return normalizeScriptOnlyResult(repaired);
+  }
+  return normalized;
+}
+
+async function generateStoryboardWithProvider(input) {
+  if (!input.script && !input.previousScript) {
+    throw new Error("请先生成或恢复一个剧本，再生成分镜");
+  }
+  const result = await callProviderWithPrompt(input, buildStoryboardOnlyPrompt(input));
+  return normalizeStoryboardOnlyResult(result);
+}
+
 async function generateTopicsWithProvider(input) {
   const count = Math.max(1, Math.min(Number(input.count || 8), 12));
   const prompt = buildTopicsPrompt(input);
@@ -640,6 +765,30 @@ const server = http.createServer(async (req, res) => {
       send(res, 200, { ok: true, source: provider, model: modelForRequest(payload.input || payload), result });
       return;
     }
+    if (req.method === "POST" && url.pathname === "/api/script") {
+      if (!hasApiAccess(req.headers)) {
+        send(res, 401, { ok: false, error: "请输入访问码", code: "ACCESS_CODE_REQUIRED" });
+        return;
+      }
+      const body = await readBody(req);
+      const payload = JSON.parse(body || "{}");
+      const input = payload.input || payload;
+      const result = await generateScriptWithProvider(input);
+      send(res, 200, { ok: true, source: provider, model: modelForRequest(input), result });
+      return;
+    }
+    if (req.method === "POST" && url.pathname === "/api/storyboard") {
+      if (!hasApiAccess(req.headers)) {
+        send(res, 401, { ok: false, error: "请输入访问码", code: "ACCESS_CODE_REQUIRED" });
+        return;
+      }
+      const body = await readBody(req);
+      const payload = JSON.parse(body || "{}");
+      const input = payload.input || payload;
+      const result = await generateStoryboardWithProvider(input);
+      send(res, 200, { ok: true, source: provider, model: modelForRequest(input), result });
+      return;
+    }
     if (req.method === "POST" && url.pathname === "/api/topics") {
       if (!hasApiAccess(req.headers)) {
         send(res, 401, { ok: false, error: "请输入访问码", code: "ACCESS_CODE_REQUIRED" });
@@ -671,6 +820,8 @@ if (require.main === module) {
 
 module.exports = {
   activeModel,
+  generateScriptWithProvider,
+  generateStoryboardWithProvider,
   generateTopicsWithProvider,
   generateWithProvider,
   modelForRequest,
