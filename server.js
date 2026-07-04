@@ -87,7 +87,7 @@ function timeoutSignal(ms) {
   return controller.signal;
 }
 
-function extractJson(text) {
+function extractJsonStrict(text) {
   try {
     return JSON.parse(text);
   } catch (_) {
@@ -95,6 +95,29 @@ function extractJson(text) {
     const end = text.lastIndexOf("}");
     if (start >= 0 && end > start) return JSON.parse(text.slice(start, end + 1));
     throw new Error("模型没有返回可解析 JSON");
+  }
+}
+
+function extractJson(text) {
+  const source = String(text || "").trim();
+  const fenced = source.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const candidateSource = fenced ? fenced[1].trim() : source;
+  const start = candidateSource.indexOf("{");
+  const end = candidateSource.lastIndexOf("}");
+  const candidate = start >= 0 && end > start ? candidateSource.slice(start, end + 1) : candidateSource;
+  const relaxedCandidate = candidate.replace(/^\uFEFF/, "").replace(/,\s*([}\]])/g, "$1");
+
+  try {
+    return JSON.parse(candidate);
+  } catch (firstError) {
+    try {
+      return JSON.parse(relaxedCandidate);
+    } catch (secondError) {
+      const error = new Error(`模型返回的 JSON 无法解析：${secondError.message || firstError.message}`);
+      error.code = "MODEL_JSON_PARSE_ERROR";
+      error.rawText = candidate.slice(0, 12000);
+      throw error;
+    }
   }
 }
 
@@ -380,6 +403,37 @@ async function callOpenAI(input, promptOverride) {
   return extractJson(text);
 }
 
+async function repairDeepSeekJson(input, rawText) {
+  const response = await fetch(`${config.deepseek.baseUrl}/chat/completions`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${config.deepseek.apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: modelForRequest(input),
+      messages: [
+        {
+          role: "system",
+          content:
+            "You repair malformed JSON. Return only one strict JSON object. Do not use Markdown. Do not explain.",
+        },
+        {
+          role: "user",
+          content: `Repair this malformed JSON so JSON.parse can parse it. Preserve the same schema and meaning.\n\n${String(rawText || "").slice(0, 12000)}`,
+        },
+      ],
+      temperature: 0,
+      response_format: { type: "json_object" },
+      stream: false,
+    }),
+  });
+  const raw = await response.text();
+  if (!response.ok) throw new Error(`DeepSeek JSON repair ${response.status}: ${raw.slice(0, 800)}`);
+  const data = JSON.parse(raw);
+  return extractJson(data.choices?.[0]?.message?.content || raw);
+}
+
 async function callDeepSeek(input, promptOverride) {
   if (!config.deepseek.apiKey) {
     const error = new Error("未设置 DEEPSEEK_API_KEY");
@@ -410,7 +464,13 @@ async function callDeepSeek(input, promptOverride) {
   const raw = await response.text();
   if (!response.ok) throw new Error(`DeepSeek API ${response.status}: ${raw.slice(0, 800)}`);
   const data = JSON.parse(raw);
-  return extractJson(data.choices?.[0]?.message?.content || raw);
+  const content = data.choices?.[0]?.message?.content || raw;
+  try {
+    return extractJson(content);
+  } catch (error) {
+    if (error.code !== "MODEL_JSON_PARSE_ERROR") throw error;
+    return repairDeepSeekJson(input, error.rawText || content);
+  }
 }
 
 async function callOllama(input, promptOverride) {
