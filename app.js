@@ -79,6 +79,8 @@
       `选题：${topic.title}`,
       `剧情卖点：${topic.sellingPoint}`,
       `目标人群：${topic.audience}`,
+      topic.roles ? `推荐角色：${topic.roles}` : "",
+      topic.world ? `场景设定：${topic.world}` : "",
       `核心情绪：${topic.emotion}`,
       `关键反转：${topic.reversal}`,
       topic.memeLine ? `热梗台词：${topic.memeLine}` : "",
@@ -89,6 +91,7 @@
   function applyTopicToInputs(topic) {
     state.selectedTopic = topic;
     setInputValue("theme", topic.title);
+    if (topic.roles) setInputValue("roles", topic.roles);
     setInputValue("direction", topicPrompt(topic));
     setInputValue("audience", topic.audience);
     setInputValue("duration", topic.duration);
@@ -125,6 +128,8 @@
         title: String(topic.title || "").trim(),
         sellingPoint: String(topic.sellingPoint || topic.selling_point || "").trim(),
         audience: String(topic.audience || topic.targetAudience || "洛克王国短剧用户").trim(),
+        roles: String(topic.roles || topic.recommendedRoles || topic.roleLine || "").trim(),
+        world: String(topic.world || topic.location || topic.scene || "").trim(),
         emotion: String(topic.emotion || topic.emotionPoint || "悬疑、怀旧").trim(),
         reversal: String(topic.reversal || topic.reversalPoint || "").trim(),
         memeLine: String(topic.memeLine || topic.meme_line || topic.hotMeme || "").trim(),
@@ -176,14 +181,58 @@
     const audienceOffset = Math.floor(Math.random() * audiencePool.length);
     const pickAudience = (offset = 0) => audiencePool[(state.topicBatch + audienceOffset + offset) % audiencePool.length];
     const pickMeme = (offset = 0) => memePool[(state.topicBatch + memeOffset + offset) % memePool.length];
+    const petCasts = [
+      {
+        roles: "阿洛：嘴替型新手洛克；喵喵：草系初始宠，表面乖巧但很会吐槽；魔力猫：进化后突然变成学院纪律委员",
+        world: "魔法学院草系温室",
+      },
+      {
+        roles: "可丽：急性子训练师；火花：火系初始宠，动不动就想直接开大；烈火战神：传说中的火山守门宠",
+        world: "维苏威火山口",
+      },
+      {
+        roles: "小澈：怕水但嘴硬的小洛克；水蓝蓝：水系初始宠，治愈系但会冷脸补刀；卡洛儿：藏在海螺里的失忆歌者",
+        world: "人鱼湾与海螺沙滩",
+      },
+      {
+        roles: "鹿眠：夜巡小洛克；皇家狮鹫：高傲飞行宠，嘴上嫌弃但每次都救场；小狮鹫：不服输的幼年形态",
+        world: "天空城云端训练场",
+      },
+      {
+        roles: "棋棋：会预判弹幕的宠物军师；棋绮后：棋盘女王形态，专治各种乱出牌；圣剑X：沉默的圣剑守护者",
+        world: "王国棋盘密室",
+      },
+      {
+        roles: "路路：迷路体质的小洛克；白发路路：未来形态，知道所有失败结局；书魔虫：躲在禁书里的情报商",
+        world: "魔法学院禁书区",
+      },
+      {
+        roles: "果冻：整活系训练师；呱呱：功夫宠物，专门打断反派吟唱；熊猫拳宗：传说级武系师父",
+        world: "云烟桃源练功台",
+      },
+      {
+        roles: "雪梨：收藏控小洛克；雪影娃娃：冰系人气宠，冷脸但护短；幽兰雪魅：雪夜里出现的进阶形态",
+        world: "雪人谷旧缆车站",
+      },
+      {
+        roles: "洛奇：机械宅小洛克；立方人：逻辑过载的机械宠；先锋君主：废弃工厂的机械审判者",
+        world: "弃之宝岛机械工坊",
+      },
+      {
+        roles: "南瓜：胆小但爱看热闹的小洛克；小灵灵：幽灵系捣蛋宠；九幽菇：从古堡地板长出的怪谈宠",
+        world: "威廉古堡午夜走廊",
+      },
+    ];
+    const castOffset = Math.floor(Math.random() * petCasts.length);
+    const pickCast = (offset = 0) => petCasts[(state.topicBatch + castOffset + offset) % petCasts.length];
     const pool = [
-      ["迪莫收到一封十年后的求救信", "未来信件+伙伴羁绊，外加评论区可接“谁懂啊”的怀旧梗", "紧张、怀旧、守护", "写信的人不是未来的洛克，而是未来的迪莫", 75, true],
-      ["魔法学院开了邪修速成班", "把游戏升级拍成野路子学习法，天然适合搞笑语录和反差剪辑", "好笑、离谱、上头", "所谓邪修其实是被封印的古代训练法", 60, true],
-      ["宠物考试全员外耗老师", "课堂整活+宠物嘴替，适合做弹幕吐槽型短剧", "解压、抽象、反差", "老师才是被暗影操控的最终考题", 45, true],
-      ["旧徽章每晚都会发疯文学", "道具悬疑套热梗文案，封面能直接打“它开始乱回我了”", "不安、好笑、使命感", "徽章不是坏了，而是在替失踪宠物求救", 60, true],
-      ["全王国都说这只宠物不嘻嘻了", "萌宠反差+情绪爆点，适合做搞笑开头催泪结尾", "好笑、心疼、重逢", "宠物冷脸是因为它每天都在重置记忆", 75, true],
-      ["洛克王国的期末题，答案是来都来了", "校园考试嫁接网络口头禅，首秒就有短视频感", "荒诞、紧张、反差", "试卷不是考试，而是学院发出的逃生地图", 45, true],
-      ["迪莫说爱你老己，然后黑化了", "可爱台词转恐怖反差，适合做系列第一集钩子", "荒诞、心疼、悬疑", "迪莫说的不是自己，而是被复制出的另一个主人", 60, true],
+      ["初始宠互换身体，全学院都不嘻嘻了", "把喵喵/火花/水蓝蓝的属性错位做成群像喜剧，天然适合连续剧", "荒诞、好笑、混乱", "互换不是魔法事故，而是图鉴在测试谁才配当主角", 60, true, "阿洛：被三只初始宠追着吐槽的新手；喵喵：草系嘴替宠；火花：火系行动派；水蓝蓝：冷脸治愈宠", "魔法学院初始宠训练室"],
+      ["雪影娃娃在雪人谷开了冷脸邪修班", "冰系人气宠+邪修梗，画面和台词都容易出爆点", "冷幽默、反差、护短", "所谓冷脸训练，是为了冻结暗影老师的记忆篡改", 60, true, "雪梨：收藏控小洛克；雪影娃娃：冰系人气宠，冷脸护短；幽兰雪魅：雪夜出现的进阶形态", "雪人谷旧缆车站"],
+      ["皇家狮鹫被迫当代驾，天空城直接外耗", "高傲飞行宠落到生活化整活场景，反差强", "好笑、速度感、救场", "它不是迷路，是故意绕开会吞掉飞行宠的云洞", 45, true, "鹿眠：夜巡小洛克；皇家狮鹫：高傲飞行宠，嘴硬但救场；小狮鹫：不服输的幼年形态", "天空城云端训练场"],
+      ["书魔虫开始已读乱回，禁书区炸了", "禁书怪谈+社交梗，低成本但悬疑感强", "好奇、惊悚、嘴替", "乱回的每一句都是未来失败结局的截图", 60, true, "路路：迷路体质的小洛克；书魔虫：躲在禁书里的情报商；古卷匣魔像：会吞掉错误剧情的守门者", "魔法学院禁书区"],
+      ["呱呱打断反派吟唱，王国沉默三秒", "功夫宠物做喜剧救场，动作戏和梗台词兼具", "爽感、搞笑、反杀", "呱呱不是乱打，它听见了咒语里的玩家名字", 45, true, "果冻：整活系训练师；呱呱：功夫宠物，专门打断反派吟唱；熊猫拳宗：传说级武系师父", "云烟桃源练功台"],
+      ["立方人算出全班都在内耗", "机械宠+数据吐槽，适合做信息流字幕梗", "理性崩坏、反差、解压", "计算结果显示真正的 Bug 是训练师的童年遗憾", 60, true, "洛奇：机械宅小洛克；立方人：逻辑过载的机械宠；先锋君主：废弃工厂的机械审判者", "弃之宝岛机械工坊"],
+      ["小灵灵把威廉古堡整成弹幕直播间", "幽灵系整活+古堡怪谈，适合做夜间系列", "怪诞、好笑、悬疑", "弹幕不是观众发的，而是失踪宠物的求救信号", 75, true, "南瓜：胆小但爱看热闹的小洛克；小灵灵：幽灵系捣蛋宠；九幽菇：从古堡地板长出的怪谈宠", "威廉古堡午夜走廊"],
       ["魔法学院发布望周知：禁止召唤童年宠物", "公告体热梗+禁忌规则，封面强冲突", "好奇、压迫、反抗", "禁令是为了防止旧契约集体觉醒", 75, true],
       ["最弱宠物直接开大，全班沉默", "弱者逆袭爽点明确，台词可做成表情包传播", "爽感、燃、反差", "它不是最弱，是一直被系统限制输出", 60, true],
       ["背包格子已读乱回，吓醒老玩家", "把社交软件梗嫁接背包系统，低成本好拍", "好奇、惊喜、怀旧", "乱回的不是系统，是被困在格子里的第一只宠物", 45, true],
@@ -197,6 +246,8 @@
       .filter((item) => !used.has(item[0]))
       .slice(0, count)
       .map((item, index) => ({
+        roles: item[6] || pickCast(index).roles,
+        world: item[7] || pickCast(index).world,
         title: item[0],
         sellingPoint: item[1],
         audience: pickAudience(index),
@@ -806,6 +857,8 @@
             <h3>${escapeHtml(topic.title)}</h3>
             <p><strong>卖点：</strong>${escapeHtml(topic.sellingPoint)}</p>
             <p><strong>人群：</strong>${escapeHtml(topic.audience)}</p>
+            ${topic.roles ? `<p><strong>角色：</strong>${escapeHtml(topic.roles)}</p>` : ""}
+            ${topic.world ? `<p><strong>场景：</strong>${escapeHtml(topic.world)}</p>` : ""}
             <p><strong>情绪：</strong>${escapeHtml(topic.emotion)}</p>
             <p><strong>反转：</strong>${escapeHtml(topic.reversal)}</p>
             ${topic.memeLine ? `<p><strong>梗台词：</strong>${escapeHtml(topic.memeLine)}</p>` : ""}

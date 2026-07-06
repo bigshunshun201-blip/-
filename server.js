@@ -445,6 +445,34 @@ function buildTopicsPrompt(input) {
     "亲子一起看也能笑的轻剧情用户",
     "只想看强钩子和爽反转的短剧用户",
   ].filter(Boolean);
+  const petReference = [
+    "喵喵 / 喵呜 / 魔力猫：草系初始宠，适合温室、治愈、吐槽、进化反差",
+    "火花 / 焰火 / 火神：火系初始宠，适合火山、开大、冲动救场",
+    "水蓝蓝 / 波波拉 / 水灵：水系初始宠，适合人鱼湾、治愈、冷脸补刀",
+    "迪莫：光系伙伴，适合怀旧主线，但不要每条都用它",
+    "皇家狮鹫 / 小狮鹫：天空城飞行宠，适合高傲反差和救场",
+    "雪影娃娃 / 幽兰雪魅：冰系人气宠，适合雪人谷、冷脸护短、催泪反转",
+    "呱呱 / 熊猫拳宗：武系功夫宠，适合云烟桃源、打断吟唱、动作喜剧",
+    "小灵灵 / 九幽菇：幽灵或怪谈气质宠，适合威廉古堡、夜间整活",
+    "立方人 / 先锋君主：机械宠，适合弃之宝岛、数据吐槽、系统故障",
+    "棋棋 / 棋绮后：棋盘军师宠，适合密室推理、预判弹幕",
+    "书魔虫 / 古卷匣魔像：禁书区宠物，适合档案、预言、已读乱回",
+    "卡洛儿 / 海豹船长：人鱼湾或海洋系宠物，适合歌声、记忆、海边冒险",
+  ];
+  const worldReference = [
+    "魔法学院",
+    "宠物训练室",
+    "草系温室",
+    "维苏威火山口",
+    "人鱼湾",
+    "天空城",
+    "雪人谷",
+    "威廉古堡",
+    "弃之宝岛机械工坊",
+    "云烟桃源",
+    "禁书区",
+    "王国棋盘密室",
+  ];
   return `
 你是短视频短剧选题策划。请为「洛克王国」粉丝向/二创短剧生成一批全新的选题候选。
 
@@ -455,8 +483,10 @@ function buildTopicsPrompt(input) {
 4. 选题要适合抖音竖屏连续短剧，开头有强钩子，结尾有系列钩子。
 5. 必须随机混入网络热梗、搞笑语录、抽象整活或嘴替吐槽，但不能堆砌，要服务剧情。
 6. 目标人群要多样化，不要每条都写“18-30岁洛克王国老玩家”。
-7. 可以借鉴 topicReference / competitorInsights，但不要写成竞品分析。
-8. 输出必须是严格 JSON，不要 Markdown，不要解释。
+7. 必须构建更丰富的洛克王国世界，随机使用不同宠物、地点、阵营和冲突；不要每条都用迪莫、小洛克、黑衣人。
+8. 每条必须返回 roles，格式为“角色A：说明；宠物B：说明；反派/冲突源C：说明”，后续生成剧本会直接使用它。
+9. 可以借鉴 topicReference / competitorInsights，但不要写成竞品分析。
+10. 输出必须是严格 JSON，不要 Markdown，不要解释。
 
 用户输入：
 ${JSON.stringify(payload, null, 2)}
@@ -466,6 +496,12 @@ ${JSON.stringify(memeReference, null, 2)}
 
 目标人群参考池，必须尽量分散：
 ${JSON.stringify(audienceReference, null, 2)}
+
+宠物参考池，每条至少选 1-2 个，不要重复集中使用迪莫：
+${JSON.stringify(petReference, null, 2)}
+
+场景参考池，每条选 1 个并写入 world：
+${JSON.stringify(worldReference, null, 2)}
 
 选题参考：
 ${JSON.stringify(input.topicReference || input.competitorInsights || "", null, 2)}
@@ -483,6 +519,8 @@ ${JSON.stringify(replaceTopic, null, 2)}
       "title": "短剧选题标题",
       "sellingPoint": "剧情卖点，说明为什么值得拍",
       "audience": "目标人群",
+      "roles": "角色A：说明；宠物B：说明；反派或冲突源C：说明",
+      "world": "主要场景或世界区域",
       "emotion": "核心情绪点",
       "reversal": "反转点",
       "memeLine": "适合放进台词/字幕/封面的热梗搞笑语录",
@@ -494,7 +532,7 @@ ${JSON.stringify(replaceTopic, null, 2)}
   "referenceNote": "本批选题的生成依据，40字以内"
 }
 
-数量：${count} 条。duration 只能在 45、60、75、90 中选择。priority 只能是 S、A、B。memeLine 不超过 24 个字。
+数量：${count} 条。duration 只能在 45、60、75、90 中选择。priority 只能是 S、A、B。memeLine 不超过 24 个字。roles 不超过 90 字。
 `;
 }
 
@@ -505,6 +543,8 @@ function normalizeTopicsResult(result, count) {
       title: String(topic.title || "").trim(),
       sellingPoint: String(topic.sellingPoint || topic.selling_point || "").trim(),
       audience: String(topic.audience || topic.targetAudience || "").trim(),
+      roles: String(topic.roles || topic.recommendedRoles || topic.roleLine || "").trim(),
+      world: String(topic.world || topic.location || topic.scene || "").trim(),
       emotion: String(topic.emotion || topic.emotionPoint || "").trim(),
       reversal: String(topic.reversal || topic.reversalPoint || "").trim(),
       memeLine: String(topic.memeLine || topic.meme_line || topic.hotMeme || "").trim(),
@@ -733,7 +773,7 @@ async function generateTopicsWithProvider(input) {
     result = await callTopicProvider(`
 只返回一个可以被 JSON.parse 解析的 JSON 对象，不要 Markdown，不要尾随逗号，不要注释。
 结构必须是：
-{"topics":[{"title":"...","sellingPoint":"...","audience":"...","emotion":"...","reversal":"...","memeLine":"...","duration":60,"series":true,"priority":"S"}],"referenceNote":"..."}
+{"topics":[{"title":"...","sellingPoint":"...","audience":"...","roles":"角色A：说明；宠物B：说明；反派C：说明","world":"主要场景","emotion":"...","reversal":"...","memeLine":"...","duration":60,"series":true,"priority":"S"}],"referenceNote":"..."}
 数量：${count} 条。不要重复这些标题：${(input.existingTopics || []).map((topic) => topic.title).join("、")}
 用户输入：${JSON.stringify(normalizePayload(input), null, 2)}
 `);
