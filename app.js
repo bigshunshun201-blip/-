@@ -429,9 +429,65 @@
     return Object.values(item).join("：");
   }
 
+  function renderEmptyStudio() {
+    const input = getInput();
+    $("#scriptTitle").textContent = "开始一集短剧";
+    $("#scriptOutput").innerHTML = `
+      <section class="studio-empty">
+        <div class="empty-hero">
+          <p class="eyebrow">Draft cockpit</p>
+          <h3>先生成剧本，满意后再拆分镜。</h3>
+          <p>当前主题会进入剧本生成；选题库和热梗素材会辅助标题、冲突和台词方向。</p>
+          <div class="empty-actions">
+            <button class="primary-action compact-action" data-empty-generate="true">AI 生成剧本</button>
+            <button class="ghost-action compact-action" data-empty-topics="true">查看选题库</button>
+          </div>
+        </div>
+        <div class="input-brief">
+          <div>
+            <span>主题</span>
+            <strong>${escapeHtml(input.theme || "未填写")}</strong>
+          </div>
+          <div>
+            <span>受众</span>
+            <strong>${escapeHtml(input.audience || "未填写")}</strong>
+          </div>
+          <div>
+            <span>风格</span>
+            <strong>${escapeHtml(input.style || "未填写")}</strong>
+          </div>
+          <div>
+            <span>时长</span>
+            <strong>${escapeHtml(input.duration || 60)} 秒</strong>
+          </div>
+        </div>
+        <div class="workflow-strip">
+          <article>
+            <span>01</span>
+            <strong>生成剧本</strong>
+            <p>标题、梗概、人物、结构、台词和结尾钩子。</p>
+          </article>
+          <article>
+            <span>02</span>
+            <strong>拆分镜</strong>
+            <p>确认剧本可用后，再基于同一版剧本生成镜头表。</p>
+          </article>
+          <article>
+            <span>03</span>
+            <strong>筛候选</strong>
+            <p>生成记录会留档，方便入围、恢复和导出。</p>
+          </article>
+        </div>
+      </section>
+    `;
+  }
+
   function renderScript() {
     const script = state.script;
-    if (!script) return;
+    if (!script) {
+      renderEmptyStudio();
+      return;
+    }
     $("#scriptTitle").textContent = script.title;
     $("#scriptOutput").innerHTML = `
       <section class="content-block">
@@ -1230,6 +1286,17 @@
           return;
         }
         reportError("续写", error);
+      }
+    });
+    $("#scriptOutput").addEventListener("click", async (event) => {
+      const generateButton = event.target.closest("[data-empty-generate]");
+      const topicsButton = event.target.closest("[data-empty-topics]");
+      if (!generateButton && !topicsButton) return;
+      try {
+        if (generateButton) await generateAll();
+        if (topicsButton) switchTab("topics");
+      } catch (error) {
+        reportError(generateButton ? "生成" : "切换选题库", error);
       }
     });
     $("#analyzeBtn").addEventListener("click", () => {
