@@ -186,6 +186,7 @@
     const roles = splitRoles(input.roles);
     const direction = clean(input.direction, "童年重逢 + 悬疑反转");
     const audience = clean(input.audience, "18-30岁洛克王国老玩家");
+    const scene = clean(input.scene, "月牙镇");
     const duration = num(input.duration) || 60;
     const episodeCount = num(input.episodeCount) || 3;
     const style = clean(input.style, "怀旧、燃、结尾强钩子");
@@ -195,7 +196,7 @@
 
     return {
       title: `《${theme}》第1集：它等了我3652天`,
-      synopsis: `${protagonist}作为长大后的老玩家，重新打开魔法学院的旧入口，却看到系统提示“契约状态：失效”。他以为${partner}已经消失，旧背包里那枚裂开的契约徽章却突然发光。${partner}没有责怪他，只说“你还没说冒险结束”。就在两人准备重启任务时，${antagonist}锁定了这枚旧徽章，真正的目标不是宠物，而是小洛克们共同遗忘的童年记忆。本集面向${audience}，风格为${style}，单集控制在${duration}秒。`,
+      synopsis: `${protagonist}作为长大后的老玩家，重新打开《洛克王国：世界》里的${scene}探索点，却看到系统提示“契约状态：失效”。他以为${partner}已经消失，旧背包里那枚裂开的契约徽章却突然发光。${partner}没有责怪他，只说“你还没说冒险结束”。就在两人准备重启任务时，${antagonist}锁定了这枚旧徽章，真正的目标不是宠物，而是小洛克们共同遗忘的童年记忆。本集面向${audience}，风格为${style}，单集控制在${duration}秒。`,
       characters: [
         { name: protagonist, description: "长大后的回归玩家，嘴上说只是看看，心里还记得第一只精灵。" },
         { name: partner, description: "童年搭档，战斗力不一定最强，但记得所有没完成的约定。" },
@@ -236,7 +237,7 @@
         "评论互动：如果你的第一只精灵还在等你，你会先对它说什么？",
         `系列方向：${episodeCount}集内完成“重逢-学院危机-旧友反派-徽章觉醒”。`,
       ],
-      tags: ["洛克王国二创", "粉丝向短剧", "童年回忆", "魔法学院", "精灵羁绊", direction],
+      tags: ["洛克王国世界", "手游二创", "粉丝向短剧", scene, "精灵羁绊", direction],
     };
   }
 
@@ -387,6 +388,7 @@
     const roles = splitRoles(input.roles);
     const direction = clean(input.direction, "童年重逢 + 悬疑反转");
     const audience = clean(input.audience, "18-30岁洛克王国老玩家");
+    const scene = clean(input.scene, "月牙镇");
     const duration = num(input.duration) || 60;
     const episodeCount = num(input.episodeCount) || 3;
     const style = clean(input.style, "怀旧、燃、结尾强钩子");
@@ -394,11 +396,11 @@
     const partner = roleName(roles[1], "迪莫");
     const antagonist = roleName(roles[2], "黑袍人");
     const kind = inferScenario(theme, direction, style);
-    const deck = scenarioDeck(kind, { protagonist, partner, antagonist, theme, audience, duration, episodeCount, style, direction }, input);
+    const deck = scenarioDeck(kind, { protagonist, partner, antagonist, theme, audience, duration, episodeCount, style, direction, scene }, input);
 
     return {
       title: `《${theme}》第1集：${deck.titleSuffix}`,
-      synopsis: `${deck.synopsis} 本集面向${audience}，风格为${style}，单集控制在${duration}秒；如果做${episodeCount}集系列，第一集只解决“观众为什么要追下去”。`,
+      synopsis: `${deck.synopsis} 主要场景放在《洛克王国：世界》的${scene}，用探索点、精灵互动或区域任务推动剧情。本集面向${audience}，风格为${style}，单集控制在${duration}秒；如果做${episodeCount}集系列，第一集只解决“观众为什么要追下去”。`,
       characters: [
         ...deck.characterNotes.map((description) => {
           const [name, note] = description.split("：");
@@ -421,7 +423,7 @@
         `系列方向：${episodeCount}集内完成“单集危机-角色选择-旧契约秘密-学院主线升级”。`,
         `标题测试：${theme} / ${deck.titleSuffix} / ${partner}为什么会这样？`,
       ],
-      tags: ["洛克王国二创", "粉丝向短剧", direction, style, kind, audience],
+      tags: ["洛克王国世界", "手游二创", scene, direction, style, kind, audience],
     };
   }
 
@@ -655,14 +657,14 @@
       "哪来的退堂鼓，直接召唤童年搭档。",
     ];
     const topics = [
-      ["喵喵把草系温室整成邪修实验室", "草系初始宠反差整活，适合做轻喜剧连续剧", "好笑、离谱、上头", "所谓邪修配方其实是古代治愈魔法", 60, true, "阿洛：温室值日生；喵喵：草系初始宠，吐槽比技能还准；魔力猫：突然接管纪律的进化形态", "魔法学院草系温室"],
-      ["火花考试直接开大，火山老师沉默了", "火系初始宠+课堂翻车，画面冲突强", "解压、抽象、反差", "老师才是被暗影操控的最终考题", 45, true, "可丽：火山实习训练师；火花：火系初始宠，遇事先开大；烈火战神：维苏威火山的传说守门宠", "维苏威火山口"],
-      ["水蓝蓝冷脸补刀，全人鱼湾不嘻嘻", "治愈宠物走冷幽默路线，有反差和情绪钩子", "荒诞、心疼、悬疑", "水蓝蓝不是变冷，是在隐藏海螺里的求救声", 60, true, "小澈：怕水但嘴硬的小洛克；水蓝蓝：水系初始宠，治愈但会冷脸补刀；卡洛儿：海螺里的失忆歌者", "人鱼湾"],
-      ["皇家狮鹫被迫当代驾，天空城直接外耗", "高傲飞行宠落入生活化整活场景，转发点强", "好奇、压迫、反抗", "它绕路是为了避开吞掉飞行宠的云洞", 75, true, "鹿眠：夜巡小洛克；皇家狮鹫：高傲飞行宠，嘴硬但救场；小狮鹫：不服输的幼年形态", "天空城"],
-      ["谁把魔法学院整出班味了", "职场梗+学院群像，适合打工人和学生党双圈层", "疲惫、爆笑、反抗", "班味来自暗影博士植入的任务 KPI", 60, true, "棋棋：会预判弹幕的宠物军师；棋绮后：棋盘女王形态，专治乱出牌；圣剑X：沉默的圣剑守护者", "王国棋盘密室"],
-      ["书魔虫每晚都在禁书区已读乱回", "禁书怪谈+社交梗，低成本但悬疑感强", "不安、好笑、使命感", "乱回的每一句都是未来失败结局", 60, true, "路路：迷路体质的小洛克；书魔虫：躲在禁书里的情报商；古卷匣魔像：会吞掉错误剧情的守门者", "魔法学院禁书区"],
-      ["雪影娃娃开冷脸培训班，雪人谷冻住了", "冰系人气宠+冷幽默，画面记忆点强", "好笑、心疼、重逢", "冷脸训练是为了冻结记忆篡改", 75, true, "雪梨：收藏控小洛克；雪影娃娃：冰系人气宠，冷脸护短；幽兰雪魅：雪夜出现的进阶形态", "雪人谷"],
-      ["呱呱一拳打断反派吟唱，弹幕炸了", "武系宠物做喜剧救场，动作戏和梗台词兼具", "荒诞、紧张、反差", "呱呱听见了咒语里的玩家名字", 45, true, "果冻：整活系训练师；呱呱：功夫宠，专门打断反派吟唱；熊猫拳宗：传说级武系师父", "云烟桃源"],
+      ["喵喵把月牙镇整成邪修实验室", "草系初始精灵反差整活，适合做轻喜剧连续剧", "好笑、离谱、上头", "所谓邪修配方其实是古代治愈魔法", 60, true, "阿洛：月牙镇新手洛克；喵喵：草系初始精灵，吐槽比技能还准；魔力猫：突然接管路线规划的进化形态", "月牙镇"],
+      ["火花考试直接开大，普拉塔草原沉默了", "火系初始精灵+区域任务翻车，画面冲突强", "解压、抽象、反差", "区域首领不是敌人，是被暗影任务误标记的火神", 45, true, "可丽：普拉塔草原实习训练师；火花：火系初始精灵，遇事先开大；火神：被误认为区域首领的进化形态", "普拉塔草原"],
+      ["水蓝蓝冷脸补刀，浪花基地不嘻嘻", "治愈精灵走冷幽默路线，有反差和情绪钩子", "荒诞、心疼、悬疑", "水蓝蓝不是变冷，是在隐藏海上异常信号", 60, true, "小澈：怕水但嘴硬的小洛克；水蓝蓝：水系初始精灵，治愈但会冷脸补刀；翡翠水母：浪花基地的异常信号源", "海上浪花基地"],
+      ["皇家狮鹫被迫当代驾，聆风塔直接外耗", "高傲飞行精灵落入生活化整活场景，转发点强", "好奇、压迫、反抗", "它绕路是为了避开吞掉飞行精灵的塔顶风眼", 75, true, "鹿眠：聆风塔巡查员；皇家狮鹫：高傲飞行精灵，嘴硬但救场；眠枭之星：塔顶风眼里的谜题精灵", "聆风塔地上区域"],
+      ["谁把旧飞艇航道整出班味了", "职场梗+探索任务，适合打工人和学生党双圈层", "疲惫、爆笑、反抗", "班味来自旧飞艇导航仪植入的任务 KPI", 60, true, "棋棋：会预判弹幕的精灵军师；棋绮后：棋盘女王形态，专治乱出牌；旧飞艇导航仪：故障冲突源", "旧飞艇航道"],
+      ["书魔虫每晚都在聆风塔地下已读乱回", "塔底档案怪谈+社交梗，低成本但悬疑感强", "不安、好笑、使命感", "乱回的每一句都是未来失败结局", 60, true, "路路：迷路体质的小洛克；书魔虫：藏在塔底旧档案里的情报商；古卷匣魔像：会吞掉错误剧情的守门者", "聆风塔地下区域"],
+      ["雪影娃娃开冷脸培训班，风熄山口冻住了", "冰系人气精灵+冷幽默，画面记忆点强", "好笑、心疼、重逢", "冷脸训练是为了冻结异常风眼里的记忆篡改", 75, true, "雪梨：收集控小洛克；雪影娃娃：冰系人气精灵，冷脸护短；幽兰雪魅：风熄山口雪夜里的进阶形态", "风熄山口"],
+      ["呱呱一拳打断风眠圣所吟唱，弹幕炸了", "武系精灵做喜剧救场，动作戏和梗台词兼具", "荒诞、紧张、反差", "呱呱听见了咒语里的玩家名字", 45, true, "果冻：整活系训练师；呱呱：功夫精灵，专门打断反派吟唱；熊猫拳宗：风眠圣所的隐居师父", "风眠圣所"],
     ];
     const audienceOffset = Math.floor(Math.random() * audiences.length);
     const memeOffset = Math.floor(Math.random() * memeLines.length);
