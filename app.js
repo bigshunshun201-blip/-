@@ -46,6 +46,27 @@
     stage.classList.add("pulse");
   }
 
+  function refreshCreationActions() {
+    const hasScript = Boolean(state.script);
+    const hasStoryboard = Boolean(state.storyboard.length);
+    const storyboardButton = $("#storyboardBtn");
+    const continueButton = $("#continueBtn");
+    const stage = $(".stage");
+
+    if (storyboardButton) {
+      storyboardButton.disabled = !hasScript;
+      storyboardButton.title = hasScript ? "根据当前剧本生成对应分镜" : "请先生成并确认一版剧本";
+    }
+    if (continueButton) {
+      continueButton.disabled = !hasScript;
+      continueButton.title = hasScript ? "承接当前剧本的结尾钩子续写下一集" : "请先生成一版剧本";
+    }
+    if (stage) {
+      stage.classList.toggle("has-script", hasScript);
+      stage.classList.toggle("has-storyboard", hasStoryboard);
+    }
+  }
+
   function getInput() {
     const customDuration = Number($("#customDuration")?.value || 0);
     return {
@@ -536,6 +557,7 @@
   }
 
   function renderScript() {
+    refreshCreationActions();
     const script = state.script;
     if (!script) {
       renderEmptyStudio();
@@ -584,6 +606,7 @@
   }
 
   function renderStoryboard() {
+    refreshCreationActions();
     if (!state.storyboard.length && state.script) {
       $("#storyboardTable").innerHTML = `<p class="helper">当前剧本还没有生成分镜。确认剧本方向可用后，点击“AI 生成分镜”。</p>`;
       return;

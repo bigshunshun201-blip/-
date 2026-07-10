@@ -7,22 +7,30 @@
     <link rel="stylesheet" href="./styles.css?v=20260706-mobile-scenes" />
   </head>
   <body>
+    <a class="skip-link" href="#workspace">跳到创作工作区</a>
     <header class="topbar">
       <div class="brand-lockup">
         <div class="app-mark" aria-hidden="true">R</div>
         <div>
-          <p class="eyebrow">Fan-made short drama studio</p>
+          <p class="eyebrow">Roco World · short drama studio</p>
           <h1>洛克王国短剧创作工作台</h1>
         </div>
       </div>
-      <div class="status-pill" id="statusPill">等待连接 AI</div>
+      <div class="topbar-status">
+        <span class="workspace-label">当前工作区</span>
+        <div class="status-pill" id="statusPill" role="status">等待连接 AI</div>
+      </div>
     </header>
 
     <main class="shell">
       <aside class="control-panel" aria-label="内容输入">
-        <section class="panel-section">
+        <div class="control-panel-head">
+          <p class="eyebrow">Episode brief</p>
+          <h2>本集创作设定</h2>
+          <p>先定世界、人物与冲突，再开始生成。</p>
+        </div>
+        <section class="panel-section brief-panel">
           <div class="section-title">
-            <span class="rune">01</span>
             <h2>创作输入</h2>
           </div>
           <label>
@@ -126,14 +134,15 @@
             续写要求
             <textarea id="continueInstruction" rows="3" placeholder="例如：接着上一集，揭晓暗影博士为什么让喵喵失忆；情绪更催泪，结尾留下第三集钩子。"></textarea>
           </label>
-          <button class="primary-action" id="generateBtn">AI 生成剧本</button>
-          <button class="secondary-action" id="storyboardBtn">AI 生成分镜</button>
-          <button class="secondary-action" id="continueBtn">AI 续写下一集</button>
+          <div class="action-stack" aria-label="创作动作">
+            <button class="primary-action" id="generateBtn">生成本集剧本</button>
+            <button class="secondary-action" id="storyboardBtn" disabled>基于剧本生成分镜</button>
+            <button class="ghost-action" id="continueBtn" disabled>续写下一集</button>
+          </div>
         </section>
 
-        <section class="panel-section compact">
+        <section class="panel-section compact reference-panel">
           <div class="section-title">
-            <span class="rune">02</span>
             <h2>选题参考</h2>
           </div>
           <p class="helper">可选。没有数据也能直接生成；如果有同赛道爆款，只粘标题和核心数据，用来更新选题库。</p>
@@ -147,16 +156,22 @@
         </section>
       </aside>
 
-      <section class="workspace">
+      <section class="workspace" id="workspace">
         <nav class="tabs" aria-label="工作区标签">
-          <button class="tab active" data-tab="script">剧本</button>
-          <button class="tab" data-tab="storyboard">分镜</button>
-          <button class="tab" data-tab="history">生成记录</button>
-          <button class="tab" data-tab="topics">选题库</button>
-          <button class="tab" data-tab="creative">标题封面</button>
-          <button class="tab" data-tab="calendar">排期复盘</button>
-          <button class="tab" data-tab="example">完整示例</button>
-          <button class="tab" data-tab="optimize">优化</button>
+          <div class="tab-group" aria-label="内容制作">
+            <span class="tab-group-label">内容制作</span>
+            <button class="tab active" data-tab="script">剧本</button>
+            <button class="tab" data-tab="storyboard">分镜</button>
+            <button class="tab" data-tab="creative">标题与封面</button>
+          </div>
+          <div class="tab-group" aria-label="选题与复盘">
+            <span class="tab-group-label">选题与复盘</span>
+            <button class="tab" data-tab="topics">选题库</button>
+            <button class="tab" data-tab="history">作品库</button>
+            <button class="tab" data-tab="calendar">排期复盘</button>
+            <button class="tab" data-tab="optimize">优化方法</button>
+            <button class="tab" data-tab="example">示例</button>
+          </div>
         </nav>
 
         <section class="stage">
