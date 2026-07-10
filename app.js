@@ -1186,10 +1186,10 @@
       if (status.aiConnected) {
         setStatus(`AI 已连接 · ${status.provider || "provider"} · ${status.model}`);
       } else {
-        setStatus("AI 未连接：请配置 AI_PROVIDER 和对应 API Key 后重启 server.js", true);
+        setStatus("AI 未连接：请检查 Cloudflare Worker 的 DeepSeek 密钥配置。", true);
       }
     } catch (error) {
-      setStatus("未连接本地 AI 服务：请用 node server.js 启动", true);
+      setStatus("未连接生成服务：请确认当前站点已部署到 Cloudflare Worker。", true);
     }
   }
 
@@ -1364,7 +1364,7 @@
         await generateAll();
       } catch (error) {
         if (["NO_API_KEY", "NO_DEEPSEEK_KEY", "NO_PROVIDER"].includes(error.code)) {
-          setStatus("AI 未连接：请先配置 AI_PROVIDER 和对应 API Key，再重启 node server.js", true);
+          setStatus("AI 未连接：请检查 Cloudflare Worker 的 DeepSeek 密钥配置。", true);
           return;
         }
         reportError("生成", error);
@@ -1375,7 +1375,7 @@
         await generateStoryboardForCurrentScript();
       } catch (error) {
         if (["NO_API_KEY", "NO_DEEPSEEK_KEY", "NO_PROVIDER"].includes(error.code)) {
-          setStatus("AI 未连接：请先配置 AI_PROVIDER 和对应 API Key，再重启 node server.js", true);
+          setStatus("AI 未连接：请检查 Cloudflare Worker 的 DeepSeek 密钥配置。", true);
           return;
         }
         reportError("分镜生成", error);
@@ -1386,7 +1386,7 @@
         await continueEpisode();
       } catch (error) {
         if (["NO_API_KEY", "NO_DEEPSEEK_KEY", "NO_PROVIDER"].includes(error.code)) {
-          setStatus("AI 未连接：请先配置 AI_PROVIDER 和对应 API Key，再重启 node server.js", true);
+          setStatus("AI 未连接：请检查 Cloudflare Worker 的 DeepSeek 密钥配置。", true);
           return;
         }
         reportError("续写", error);

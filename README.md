@@ -35,6 +35,30 @@ AI 已连接 · deepseek · deepseek-v4-flash
 
 `DEEPSEEK_MODEL` 只是默认值；页面下拉框会覆盖本次生成使用的模型。
 
+## 部署到 Cloudflare Workers
+
+线上版本使用 Cloudflare Worker 同时托管网页与 `/api/*` 生成接口。DeepSeek Key 只保存在 Cloudflare 的 Secret 中，不会下发到浏览器，也不会进入 Git 仓库。
+
+首次部署在项目目录执行：
+
+```powershell
+npm.cmd run build
+npx.cmd wrangler login
+npx.cmd wrangler secret put DEEPSEEK_API_KEY
+npx.cmd wrangler secret put APP_ACCESS_CODE
+npx.cmd wrangler deploy
+```
+
+`APP_ACCESS_CODE` 是你自己设置的私有访问码。部署完成后打开 Wrangler 输出的 `workers.dev` 地址，首次使用时页面会要求输入该访问码。
+
+后续本地改动后，执行 `git push` 推送代码，再运行：
+
+```powershell
+npm.cmd run deploy:cloudflare
+```
+
+也可以在 Cloudflare Dashboard 的 Workers Builds 中连接此 GitHub 仓库，让 `main` 分支每次推送自动部署。
+
 ## 其他模型方式
 
 ### Ollama 本地模型
@@ -72,8 +96,9 @@ node server.js
 ## 使用流程
 
 1. 左侧填写主题、角色、剧情方向、目标受众、视频时长和风格。
-2. 点击 `AI 生成剧本与分镜`。
-3. 查看 `剧本`、`分镜`、`生成记录`、`标题封面`、`完整示例` 等页签。
+2. 点击 `AI 生成剧本`，先筛选和确认剧本。
+3. 满意后点击 `AI 生成分镜`；分镜会严格以当前剧本为依据生成，并写回同一条生成记录。
+4. 查看 `剧本`、`分镜`、`生成记录`、`标题封面`、`完整示例` 等页签。
 4. 如果觉得当前题材不错，在 `续写要求` 里写下一集方向，然后点击 `AI 续写下一集`。
 5. 如果有爆款参考数据，把 CSV 粘到 `爆款参考 CSV` 后点击 `更新选题库`；没有数据也会使用默认样例生成选题参考。
 6. 在 `选题库` 里不满意当前候选，可以点 `AI 换一批选题`；只是不满意某一条，可以点该卡片的 `替换这条`。
