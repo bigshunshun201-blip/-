@@ -509,7 +509,8 @@
     $("#scriptOutput").innerHTML = `
       <section class="studio-empty">
         <div class="empty-hero">
-          <p class="eyebrow">Draft cockpit</p>
+          <img class="empty-hero-art" src="./assets/moonlit-wind-tower.png" alt="" aria-hidden="true" />
+          <p class="eyebrow">月牙镇 · 本集创作入口</p>
           <h3>先生成剧本，满意后再拆分镜。</h3>
           <p>当前主题会进入剧本生成；选题库和热梗素材会辅助标题、冲突和台词方向。</p>
           <div class="empty-actions">
@@ -658,7 +659,7 @@
     target.innerHTML = `
       <div class="reference-summary">
         <div>
-          <p class="eyebrow">Topic reference</p>
+          <p class="eyebrow">选题参考</p>
           <h3>选题参考</h3>
           <p>根据${rows.length ? "爆款参考数据" : "默认样例"}提炼，只用于辅助判断，不占用主创作流程。</p>
         </div>
