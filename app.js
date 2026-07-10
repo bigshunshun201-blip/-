@@ -65,6 +65,30 @@
       stage.classList.toggle("has-script", hasScript);
       stage.classList.toggle("has-storyboard", hasStoryboard);
     }
+    refreshToolbarState();
+  }
+
+  function refreshToolbarState(activeTab) {
+    const tabLabels = {
+      script: "剧本",
+      storyboard: "分镜",
+      creative: "标题与封面",
+      topics: "选题库",
+      history: "作品库",
+      calendar: "排期复盘",
+      optimize: "优化方法",
+      example: "示例",
+    };
+    const active = activeTab || $(".tab.active")?.dataset.tab || "script";
+    const label = $("#toolbarActiveLabel");
+    const stateLabel = $("#toolbarStateText");
+    if (label) label.textContent = tabLabels[active] || "剧本";
+    if (!stateLabel) return;
+    stateLabel.textContent = state.storyboard.length
+      ? "分镜已就绪"
+      : state.script
+        ? "剧本已生成，可拆分镜"
+        : "等待生成剧本";
   }
 
   function getInput() {
@@ -1220,6 +1244,7 @@
   function switchTab(tabName) {
     $$(".tab").forEach((tab) => tab.classList.toggle("active", tab.dataset.tab === tabName));
     $$(".tab-panel").forEach((panel) => panel.classList.toggle("active", panel.id === `tab-${tabName}`));
+    refreshToolbarState(tabName);
   }
 
   async function copyElementText(id) {

@@ -158,19 +158,30 @@
 
       <section class="workspace" id="workspace">
         <nav class="tabs" aria-label="工作区标签">
-          <div class="tab-group" aria-label="内容制作">
+          <div class="toolbar-heading">
+            <span class="toolbar-sigil" aria-hidden="true"></span>
+            <div>
+              <span>创作航线</span>
+              <strong id="toolbarActiveLabel">剧本</strong>
+            </div>
+          </div>
+          <div class="tab-group production-tabs" aria-label="内容制作">
             <span class="tab-group-label">内容制作</span>
             <button class="tab active" data-tab="script">剧本</button>
             <button class="tab" data-tab="storyboard">分镜</button>
             <button class="tab" data-tab="creative">标题与封面</button>
           </div>
-          <div class="tab-group" aria-label="选题与复盘">
+          <div class="tab-group archive-tabs" aria-label="选题与复盘">
             <span class="tab-group-label">选题与复盘</span>
             <button class="tab" data-tab="topics">选题库</button>
             <button class="tab" data-tab="history">作品库</button>
             <button class="tab" data-tab="calendar">排期复盘</button>
             <button class="tab" data-tab="optimize">优化方法</button>
             <button class="tab" data-tab="example">示例</button>
+          </div>
+          <div class="toolbar-state" aria-live="polite">
+            <span class="toolbar-state-marker" aria-hidden="true"></span>
+            <span id="toolbarStateText">等待生成剧本</span>
           </div>
         </nav>
 
