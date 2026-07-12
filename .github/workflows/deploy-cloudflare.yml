@@ -50,4 +50,6 @@ jobs:
         with:
           apiToken: ${{ env.CF_DEPLOY_TOKEN }}
           accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: "4.110.0"
+          workingDirectory: "."
           command: deploy
