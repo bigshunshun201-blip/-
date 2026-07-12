@@ -57,7 +57,7 @@ npx.cmd wrangler deploy
 npm.cmd run deploy:cloudflare
 ```
 
-也可以在 Cloudflare Dashboard 的 Workers Builds 中连接此 GitHub 仓库，让 `main` 分支每次推送自动部署。
+仓库已包含 GitHub Actions 自动部署工作流。配置一次 `CLOUDFLARE_API_TOKEN` GitHub Secret 后，每次推送 `main` 都会自动部署；本地命令仍可用于立刻手动发布。
 
 ## 其他模型方式
 
