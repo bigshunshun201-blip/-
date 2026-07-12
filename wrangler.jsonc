@@ -1,6 +1,7 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "roco-shortdrama-studio",
+  "account_id": "94fa027c90bd2f6ba36f15d1b2a4eda2",
   "main": "cloudflare/worker.mjs",
   "compatibility_date": "2026-07-10",
   "preview_urls": false,
