@@ -17,25 +17,35 @@ concurrency:
 
 jobs:
   deploy:
-    if: ${{ env.CF_DEPLOY_TOKEN != '' }}
     runs-on: ubuntu-latest
+    env:
+      CF_DEPLOY_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
     steps:
+      - name: Await Cloudflare deployment token
+        if: ${{ env.CF_DEPLOY_TOKEN == '' }}
+        run: echo "CLOUDFLARE_API_TOKEN is not configured yet; deployment skipped."
+
       - name: Check out source
+        if: ${{ env.CF_DEPLOY_TOKEN != '' }}
         uses: actions/checkout@v4
 
       - name: Set up Node
+        if: ${{ env.CF_DEPLOY_TOKEN != '' }}
         uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
 
       - name: Install dependencies
+        if: ${{ env.CF_DEPLOY_TOKEN != '' }}
         run: npm ci
 
       - name: Build static assets
+        if: ${{ env.CF_DEPLOY_TOKEN != '' }}
         run: npm run build
 
       - name: Deploy Worker
+        if: ${{ env.CF_DEPLOY_TOKEN != '' }}
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ env.CF_DEPLOY_TOKEN }}
