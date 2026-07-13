@@ -23,6 +23,7 @@ function normalizeInput(input = {}) {
     audience: String(input.audience || "").trim(),
     duration: Math.max(15, Math.min(Number(input.duration || 60), 180)),
     episodeCount: Math.max(1, Math.min(Number(input.episodeCount || 1), 12)),
+    episodeNumber: Math.max(1, Math.min(Number(input.episodeNumber || 1), 999)),
     style: String(input.style || "").trim(),
     memeSeed: String(input.memeSeed || "").trim(),
     aiModel: String(input.aiModel || "").trim(),
@@ -31,6 +32,10 @@ function normalizeInput(input = {}) {
     previousScript: input.previousScript || null,
     previousStoryboard: input.previousStoryboard || null,
     script: input.script || null,
+    projectName: String(input.projectName || "").trim(),
+    projectLogline: String(input.projectLogline || "").trim(),
+    projectBible: input.projectBible && typeof input.projectBible === "object" ? input.projectBible : {},
+    projectContinuity: Array.isArray(input.projectContinuity) ? input.projectContinuity.slice(-3) : [],
   };
 }
 
@@ -70,9 +75,35 @@ function modelFor(input, env) {
   return ALLOWED_MODELS.has(input.aiModel) ? input.aiModel : env.DEEPSEEK_MODEL || "deepseek-v4-flash";
 }
 
+function bibleContext(payload) {
+  const bible = payload.projectBible || {};
+  const canonical = {
+    "角色设定": bible.characters || "未填写",
+    "精灵能力边界": bible.abilities || "未填写",
+    "角色关系": bible.relations || "未填写",
+    "反派与动机": bible.antagonist || "未填写",
+    "世界规则": bible.worldRules || "未填写",
+    "主线矛盾": bible.mainConflict || "未填写",
+    "每集钩子规则": bible.hookRules || "未填写",
+  };
+  const continuity = payload.projectContinuity?.length
+    ? stringify(payload.projectContinuity, 6000)
+    : "暂无已完成集数。";
+  return `
+项目：${compact(payload.projectName, "未命名短剧项目")}
+系列一句话主线：${compact(payload.projectLogline, "未填写")}
+
+短剧圣经（高优先级事实，发生冲突时必须以此为准，不得无理由改写）：
+${stringify(canonical, 8500)}
+
+已完成集数连续性摘要（只能承接和推进，不能推翻已发生的关键事实）：
+${continuity}`;
+}
+
 function scriptPrompt(input) {
   const payload = normalizeInput(input);
   const names = roleNames(payload);
+  const canon = bibleContext(payload);
   const continuation = payload.mode === "continue"
     ? `\n这是续写任务：必须承接上一集结尾钩子，不重写上一集。续写要求：${compact(payload.continueInstruction, "升级冲突并保留核心角色关系")}。\n上一集剧本：${stringify(payload.previousScript, 9000)}`
     : "";
@@ -85,6 +116,10 @@ function scriptPrompt(input) {
 4. 前 3 秒必须抛出强信息钩子；中段每 8-12 秒至少一次信息变化；结尾留下一集能直接承接的问题。
 5. 台词必须口语化、短句、可拍摄。网络梗只能自然点缀，避免堆砌。
 6. 必须使用下列角色名，不能擅自替换为默认角色：${names.length ? names.join("、") : "根据主题自创 2-4 名角色"}。
+7. 必须遵守短剧圣经的性格、能力边界、角色关系、反派动机、世界规则和钩子规则；不得用失忆、突然升级、复活或新能力偷换已建立事实。
+8. 本集为第 ${payload.episodeNumber || 1} 集。它应推进系列主线矛盾，但只解决本集问题，不能终结整个项目主线。
+
+项目连续性资料：${canon}
 
 用户输入：${stringify(payload, 7000)}${continuation}
 
@@ -115,6 +150,7 @@ function storyboardPrompt(input) {
   const payload = normalizeInput(input);
   const script = payload.script || payload.previousScript;
   const names = roleNames(payload);
+  const canon = bibleContext(payload);
   return `你是抖音竖屏 9:16 短剧分镜导演。只根据给定剧本生成分镜，不能改写或另起剧情。只输出严格 JSON，不要 Markdown 或解释。
 
 要求：
@@ -123,6 +159,9 @@ function storyboardPrompt(input) {
 3. 每个镜头都可直接拍摄/剪辑，字幕短，不超过两行；镜头节奏紧凑，适合手机观看。
 4. 场景为《洛克王国：世界》手游开放世界，主要场景：${compact(payload.scene)}。
 5. 必须使用这些角色名：${names.length ? names.join("、") : "以剧本为准"}。
+6. 必须服从短剧圣经：镜头不能让角色使用超出能力边界的能力，角色关系和反派线索必须延续已完成集数。
+
+项目连续性资料：${canon}
 
 剧本：${stringify(script, 12000)}
 

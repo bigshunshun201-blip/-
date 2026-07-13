@@ -10,13 +10,28 @@
     calendar: [],
     history: [],
     currentHistoryId: null,
+    projects: [],
+    currentProjectId: null,
+    currentEpisodeId: null,
+    reviewEpisodeId: null,
     topicBatch: 0,
   };
 
   const draftKey = "roco-shortdrama-studio-draft";
   const historyKey = "roco-shortdrama-studio-history";
+  const projectsKey = "roco-shortdrama-studio-projects";
   const accessCodeKey = "roco-shortdrama-access-code";
   const maxHistoryItems = 60;
+
+  const defaultBible = {
+    characters: "主角：有明确欲望、弱点与不可突破的底线。\n搭档精灵：有独立意志，不是随时替主角解决问题的工具。",
+    abilities: "精灵能力必须有代价、冷却或场景限制；危机不能靠突然升级无代价解决。",
+    relations: "角色关系要在每集发生可见变化：信任、误会、亏欠或共同秘密至少推进一项。",
+    antagonist: "反派目标清晰，手段与主线矛盾相关；反派每次出手都要留下可追踪的代价或线索。",
+    worldRules: "以《洛克王国：世界》手游开放世界为语境：探索、传送、精灵互动、收集、区域任务与首领挑战。",
+    mainConflict: "主角必须在个人愿望与守护精灵/世界秩序之间做选择，主线问题不能被单集轻易解决。",
+    hookRules: "前 3 秒抛出可见危机或异常信息；结尾只揭开一个新信息，并留下下一集必须行动的问题。",
+  };
 
   function nowTime() {
     return new Date().toLocaleTimeString("zh-CN", { hour12: false });
@@ -70,6 +85,8 @@
 
   function refreshToolbarState(activeTab) {
     const tabLabels = {
+      project: "项目",
+      bible: "短剧圣经",
       script: "剧本",
       storyboard: "分镜",
       creative: "标题与封面",
@@ -101,11 +118,297 @@
       audience: $("#customAudience")?.value.trim() || $("#audience").value,
       duration: customDuration || Number($("#duration").value),
       episodeCount: Number($("#episodeCount").value),
+      episodeNumber: Number($("#episodeNumber")?.value || 1),
       style: $("#customStyle")?.value.trim() || $("#style").value,
       memeSeed: $("#memeSeed") ? $("#memeSeed").value.trim() : "",
       aiModel: $("#aiModel") ? $("#aiModel").value : "",
       continueInstruction: $("#continueInstruction") ? $("#continueInstruction").value.trim() : "",
     };
+  }
+
+  function newId(prefix) {
+    return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  }
+
+  function createProjectRecord(name = "未命名短剧项目") {
+    return {
+      id: newId("project"),
+      name,
+      logline: "",
+      bible: { ...defaultBible },
+      episodes: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  function currentProject() {
+    return state.projects.find((project) => project.id === state.currentProjectId) || state.projects[0] || null;
+  }
+
+  function persistProjects() {
+    try {
+      window.localStorage.setItem(projectsKey, JSON.stringify(state.projects));
+    } catch (error) {
+      setStatus("项目档案保存失败：浏览器本地存储空间可能已满", true);
+    }
+  }
+
+  function loadProjects() {
+    try {
+      const stored = JSON.parse(window.localStorage.getItem(projectsKey) || "[]");
+      state.projects = Array.isArray(stored) ? stored : [];
+    } catch (_) {
+      state.projects = [];
+    }
+    if (!state.projects.length) state.projects = [createProjectRecord("洛克王国短剧项目")];
+    state.projects = state.projects.map((project) => ({
+      ...project,
+      bible: { ...defaultBible, ...(project.bible || {}) },
+      episodes: Array.isArray(project.episodes) ? project.episodes : [],
+    }));
+    state.currentProjectId = state.projects.some((project) => project.id === state.currentProjectId)
+      ? state.currentProjectId
+      : state.projects[0].id;
+    persistProjects();
+  }
+
+  function nextEpisodeNumber(project = currentProject()) {
+    const numbers = (project?.episodes || []).map((episode) => Number(episode.episodeNumber) || 0);
+    return Math.max(0, ...numbers) + 1;
+  }
+
+  function currentProjectEpisode() {
+    const project = currentProject();
+    return project?.episodes?.find((episode) => episode.id === state.currentEpisodeId) || null;
+  }
+
+  function projectContinuity(project = currentProject()) {
+    return (project?.episodes || [])
+      .filter((episode) => episode.script && episode.id !== state.currentEpisodeId)
+      .sort((a, b) => Number(b.episodeNumber) - Number(a.episodeNumber))
+      .slice(0, 3)
+      .reverse()
+      .map((episode) => ({
+        episodeNumber: episode.episodeNumber,
+        title: episode.script.title,
+        synopsis: episode.script.synopsis,
+        hooks: (episode.script.hooks || []).slice(0, 2),
+        status: episode.review?.status || "draft",
+      }));
+  }
+
+  function generationContext(input) {
+    const project = currentProject();
+    return {
+      ...input,
+      projectName: project?.name || "未命名短剧项目",
+      projectLogline: project?.logline || "",
+      projectBible: project?.bible || defaultBible,
+      projectContinuity: projectContinuity(project),
+    };
+  }
+
+  function renderBible() {
+    const bible = currentProject()?.bible || defaultBible;
+    const fields = {
+      bibleCharacters: bible.characters,
+      bibleAbilities: bible.abilities,
+      bibleRelations: bible.relations,
+      bibleAntagonist: bible.antagonist,
+      bibleWorldRules: bible.worldRules,
+      bibleMainConflict: bible.mainConflict,
+      bibleHookRules: bible.hookRules,
+    };
+    Object.entries(fields).forEach(([id, value]) => setInputValue(id, value || ""));
+  }
+
+  function renderReviewForm() {
+    const project = currentProject();
+    const select = $("#reviewEpisodeSelect");
+    if (!select) return;
+    const episodes = project?.episodes || [];
+    if (!episodes.length) {
+      select.innerHTML = `<option value="">生成剧本后可复盘</option>`;
+      select.disabled = true;
+      return;
+    }
+    select.disabled = false;
+    if (!episodes.some((episode) => episode.id === state.reviewEpisodeId)) {
+      state.reviewEpisodeId = state.currentEpisodeId || episodes[episodes.length - 1].id;
+    }
+    select.innerHTML = episodes
+      .slice()
+      .sort((a, b) => Number(a.episodeNumber) - Number(b.episodeNumber))
+      .map((episode) => `<option value="${escapeHtml(episode.id)}">第 ${escapeHtml(episode.episodeNumber)} 集 · ${escapeHtml(episode.script?.title || "待生成")}</option>`)
+      .join("");
+    select.value = state.reviewEpisodeId;
+    const review = episodes.find((episode) => episode.id === state.reviewEpisodeId)?.review || {};
+    setInputValue("reviewStatus", review.status || "draft");
+    setInputValue("reviewPublishDate", review.publishDate || "");
+    setInputValue("reviewViews", review.views ?? "");
+    setInputValue("reviewLikes", review.likes ?? "");
+    setInputValue("reviewComments", review.comments ?? "");
+    setInputValue("reviewCompletionRate", review.completionRate ?? "");
+    setInputValue("reviewNotes", review.notes || "");
+  }
+
+  function renderProject() {
+    const project = currentProject();
+    const select = $("#projectSelect");
+    if (!project || !select) return;
+    select.innerHTML = state.projects.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</option>`).join("");
+    select.value = project.id;
+    setInputValue("projectName", project.name);
+    setInputValue("projectLogline", project.logline || "");
+    const episodes = project.episodes || [];
+    const reviewed = episodes.filter((episode) => episode.review?.status === "reviewed").length;
+    $("#projectOverview").innerHTML = [
+      ["系列主线", project.logline || "尚未填写主线"],
+      ["已归档集数", `${episodes.length} 集`],
+      ["已完成复盘", `${reviewed} 集`],
+    ].map(([label, value]) => `<div><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`).join("");
+    const target = $("#projectEpisodeList");
+    target.innerHTML = episodes.length
+      ? episodes.slice().sort((a, b) => Number(a.episodeNumber) - Number(b.episodeNumber)).map((episode) => `
+        <article class="episode-card">
+          <div class="episode-number">EP ${escapeHtml(episode.episodeNumber)}</div>
+          <div>
+            <div class="history-meta"><span>${escapeHtml(episode.review?.status || "draft")}</span><span>${episode.storyboard?.length || 0} 镜</span></div>
+            <h4>${escapeHtml(episode.script?.title || "待生成剧本")}</h4>
+            <p>${escapeHtml(episode.script?.synopsis || "本集还没有完成剧本。")}</p>
+          </div>
+          <div class="episode-actions">
+            <button class="small-action" data-project-episode-restore="${escapeHtml(episode.id)}">打开本集</button>
+            <button class="small-action" data-project-episode-review="${escapeHtml(episode.id)}">录入复盘</button>
+          </div>
+        </article>`).join("")
+      : `<p class="helper">当前项目还没有集数。填写圣经后，回到剧本页生成第一集。</p>`;
+    renderReviewForm();
+  }
+
+  function saveProjectMeta() {
+    const project = currentProject();
+    if (!project) return;
+    project.name = $("#projectName").value.trim() || "未命名短剧项目";
+    project.logline = $("#projectLogline").value.trim();
+    project.updatedAt = new Date().toISOString();
+    persistProjects();
+    renderProject();
+    setStatus("项目信息已保存");
+  }
+
+  function saveBible() {
+    const project = currentProject();
+    if (!project) return;
+    project.bible = {
+      characters: $("#bibleCharacters").value.trim(),
+      abilities: $("#bibleAbilities").value.trim(),
+      relations: $("#bibleRelations").value.trim(),
+      antagonist: $("#bibleAntagonist").value.trim(),
+      worldRules: $("#bibleWorldRules").value.trim(),
+      mainConflict: $("#bibleMainConflict").value.trim(),
+      hookRules: $("#bibleHookRules").value.trim(),
+    };
+    project.updatedAt = new Date().toISOString();
+    persistProjects();
+    renderProject();
+    setStatus("短剧圣经已保存，后续剧本和分镜将引用它");
+  }
+
+  function createProject() {
+    const name = window.prompt("新项目名称", `短剧项目 ${state.projects.length + 1}`);
+    if (name === null) return;
+    const project = createProjectRecord(name.trim() || `短剧项目 ${state.projects.length + 1}`);
+    state.projects.unshift(project);
+    state.currentProjectId = project.id;
+    state.currentEpisodeId = null;
+    state.reviewEpisodeId = null;
+    setInputValue("episodeNumber", 1);
+    persistProjects();
+    renderProject();
+    renderBible();
+    saveDraft(false);
+    setStatus(`已新建项目：${project.name}`);
+  }
+
+  function upsertProjectEpisode({ mode, input, response, generated, historyId }) {
+    const project = currentProject();
+    if (!project) return null;
+    const episodeNumber = Math.max(1, Number(input.episodeNumber) || nextEpisodeNumber(project));
+    let episode = project.episodes.find((item) => item.id === state.currentEpisodeId);
+    if (!episode || (Number(episode.episodeNumber) !== episodeNumber && mode === "new")) {
+      episode = project.episodes.find((item) => Number(item.episodeNumber) === episodeNumber) || null;
+    }
+    if (!episode) {
+      episode = { id: newId("episode"), episodeNumber, review: { status: "draft" } };
+      project.episodes.push(episode);
+    }
+    Object.assign(episode, {
+      episodeNumber,
+      input: { ...input },
+      script: generated.script,
+      storyboard: generated.storyboard || episode.storyboard || [],
+      creativePack: generated.creativePack || episode.creativePack || null,
+      historyId: historyId || episode.historyId || null,
+      source: response.source || episode.source || "",
+      model: response.model || episode.model || "",
+      updatedAt: new Date().toISOString(),
+    });
+    project.updatedAt = new Date().toISOString();
+    state.currentEpisodeId = episode.id;
+    state.reviewEpisodeId = episode.id;
+    persistProjects();
+    renderProject();
+    return episode;
+  }
+
+  function updateCurrentProjectEpisodeStoryboard(response) {
+    const episode = currentProjectEpisode();
+    const project = currentProject();
+    if (!episode || !project) return;
+    episode.storyboard = state.storyboard;
+    episode.source = response.source || episode.source || "";
+    episode.model = response.model || episode.model || "";
+    episode.updatedAt = new Date().toISOString();
+    project.updatedAt = new Date().toISOString();
+    persistProjects();
+    renderProject();
+  }
+
+  function restoreProjectEpisode(id) {
+    const project = currentProject();
+    const episode = project?.episodes?.find((item) => item.id === id);
+    if (!episode) throw new Error("没有找到该项目集数。");
+    Object.entries(episode.input || {}).forEach(([key, value]) => setInputValue(key, value));
+    setInputValue("episodeNumber", episode.episodeNumber);
+    state.currentEpisodeId = episode.id;
+    state.reviewEpisodeId = episode.id;
+    state.script = episode.script || null;
+    state.storyboard = episode.storyboard || [];
+    state.creativePack = episode.creativePack || null;
+    state.currentHistoryId = episode.historyId || null;
+    renderScript(); renderStoryboard(); renderCreativePack(); renderProject(); renderExample(); saveDraft(false);
+    switchTab("script");
+    setStatus(`已打开第 ${episode.episodeNumber} 集：${episode.script?.title || "待生成"}`);
+  }
+
+  function saveReview() {
+    const episode = currentProject()?.episodes?.find((item) => item.id === state.reviewEpisodeId);
+    if (!episode) throw new Error("请先选择需要复盘的集数。");
+    episode.review = {
+      status: $("#reviewStatus").value,
+      publishDate: $("#reviewPublishDate").value,
+      views: Number($("#reviewViews").value || 0),
+      likes: Number($("#reviewLikes").value || 0),
+      comments: Number($("#reviewComments").value || 0),
+      completionRate: Number($("#reviewCompletionRate").value || 0),
+      notes: $("#reviewNotes").value.trim(),
+      updatedAt: new Date().toISOString(),
+    };
+    persistProjects();
+    renderProject();
+    setStatus(`第 ${episode.episodeNumber} 集复盘已保存`);
   }
 
   function setInputValue(id, value) {
@@ -769,6 +1072,32 @@
     } catch (error) {
       state.history = [];
     }
+    const project = currentProject();
+    if (project && !project.episodes.length && state.history.some((item) => !item.projectId && item.script)) {
+      const legacyItems = state.history.slice().reverse();
+      project.episodes = legacyItems.map((item, index) => {
+        const episodeNumber = Math.max(1, Number(item.input?.episodeNumber) || index + 1);
+        item.projectId = project.id;
+        item.projectName = project.name;
+        item.episodeNumber = episodeNumber;
+        return {
+          id: newId("episode"),
+          episodeNumber,
+          input: { ...(item.input || {}), episodeNumber },
+          script: item.script,
+          storyboard: item.storyboard || [],
+          creativePack: item.creativePack || null,
+          historyId: item.id,
+          source: item.source || "",
+          model: item.model || "",
+          review: { status: "draft" },
+          updatedAt: item.updatedAt || item.createdAt || new Date().toISOString(),
+        };
+      });
+      project.updatedAt = new Date().toISOString();
+      persistHistory();
+      persistProjects();
+    }
     renderHistory();
   }
 
@@ -780,7 +1109,7 @@
     }
   }
 
-  function addHistoryItem({ mode, input, response, generated }) {
+  function addHistoryItem({ mode, input, response, generated, projectId, projectName, episodeNumber }) {
     const item = {
       id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
       createdAt: new Date().toISOString(),
@@ -792,6 +1121,9 @@
       script: generated.script,
       storyboard: generated.storyboard,
       creativePack: generated.creativePack,
+      projectId: projectId || state.currentProjectId,
+      projectName: projectName || currentProject()?.name || "未归档项目",
+      episodeNumber: Number(episodeNumber || input.episodeNumber || 1),
       pinned: false,
     };
     state.history = [item, ...state.history].slice(0, maxHistoryItems);
@@ -810,6 +1142,7 @@
     item.updatedAt = new Date().toISOString();
     persistHistory();
     renderHistory();
+    updateCurrentProjectEpisodeStoryboard(response);
   }
 
   function restoreHistoryItem(index, keepInstruction = false) {
@@ -819,6 +1152,12 @@
       if (key === "continueInstruction" && keepInstruction) return;
       setInputValue(key, value);
     });
+    if (item.projectId && state.projects.some((project) => project.id === item.projectId)) {
+      state.currentProjectId = item.projectId;
+      const projectEpisode = currentProject()?.episodes?.find((episode) => episode.historyId === item.id);
+      state.currentEpisodeId = projectEpisode?.id || null;
+      state.reviewEpisodeId = state.currentEpisodeId;
+    }
     state.script = item.script;
     state.storyboard = item.storyboard || [];
     state.creativePack = item.creativePack || null;
@@ -1068,9 +1407,15 @@
       throw new Error("还没有可续写的剧本，请先生成一集。");
     }
     setStatus(mode === "continue" ? "AI 续写剧本中..." : "AI 生成剧本中...");
+    if (mode === "continue") {
+      const nextNumber = Math.max(Number(input.episodeNumber || 0) + 1, nextEpisodeNumber());
+      input.episodeNumber = nextNumber;
+      setInputValue("episodeNumber", nextNumber);
+      state.currentEpisodeId = null;
+    }
     const initialResponse = await apiRequest("/api/script", {
       input: {
-        ...input,
+        ...generationContext(input),
         mode,
         competitorInsights: state.analysis ? state.analysis.summary : "",
         previousScript: mode === "continue" ? state.script : null,
@@ -1082,8 +1427,17 @@
     state.script = generated.script;
     state.storyboard = [];
     state.creativePack = window.RocoStudio.generateCreativePack(state.script, input, state.topics);
-    const item = addHistoryItem({ mode, input, response, generated: { ...generated, creativePack: state.creativePack } });
+    const item = addHistoryItem({
+      mode,
+      input,
+      response,
+      projectId: state.currentProjectId,
+      projectName: currentProject()?.name,
+      episodeNumber: input.episodeNumber,
+      generated: { ...generated, creativePack: state.creativePack },
+    });
     state.currentHistoryId = item.id;
+    upsertProjectEpisode({ mode, input, response, generated: { ...generated, creativePack: state.creativePack }, historyId: item.id });
     renderScript();
     renderStoryboard();
     renderCreativePack();
@@ -1105,7 +1459,7 @@
     setStatus("AI 正在基于当前剧本生成分镜...");
     const initialResponse = await apiRequest("/api/storyboard", {
       input: {
-        ...input,
+        ...generationContext(input),
         script: state.script,
       },
     });
@@ -1201,6 +1555,8 @@
       storyboard: state.storyboard,
       creativePack: state.creativePack,
       currentHistoryId: state.currentHistoryId,
+      currentProjectId: state.currentProjectId,
+      currentEpisodeId: state.currentEpisodeId,
       topics: state.topics,
       analysis: state.analysis,
       competitors: state.competitors,
@@ -1219,6 +1575,11 @@
       const raw = window.localStorage.getItem(draftKey);
       if (!raw) return;
       const draft = JSON.parse(raw);
+      if (draft.currentProjectId && state.projects.some((project) => project.id === draft.currentProjectId)) {
+        state.currentProjectId = draft.currentProjectId;
+      }
+      state.currentEpisodeId = draft.currentEpisodeId || null;
+      state.reviewEpisodeId = state.currentEpisodeId;
       Object.entries(draft.input || {}).forEach(([key, value]) => {
         const el = document.getElementById(key);
         if (el) el.value = value;
@@ -1359,6 +1720,30 @@
   }
 
   function bindEvents() {
+    $("#newProjectBtn").addEventListener("click", createProject);
+    $("#saveProjectBtn").addEventListener("click", saveProjectMeta);
+    $("#saveBibleBtn").addEventListener("click", saveBible);
+    $("#projectSelect").addEventListener("change", (event) => {
+      state.currentProjectId = event.target.value;
+      state.currentEpisodeId = null;
+      state.reviewEpisodeId = null;
+      setInputValue("episodeNumber", nextEpisodeNumber());
+      renderProject();
+      renderBible();
+      saveDraft(false);
+      setStatus(`已切换到项目：${currentProject()?.name || "未命名项目"}`);
+    });
+    $("#reviewEpisodeSelect").addEventListener("change", (event) => {
+      state.reviewEpisodeId = event.target.value;
+      renderReviewForm();
+    });
+    $("#saveReviewBtn").addEventListener("click", () => {
+      try {
+        saveReview();
+      } catch (error) {
+        reportError("复盘保存", error);
+      }
+    });
     $("#generateBtn").addEventListener("click", async () => {
       try {
         await generateAll();
@@ -1449,6 +1834,20 @@
         reportError("生成记录", error);
       }
     });
+    $("#projectEpisodeList").addEventListener("click", (event) => {
+      const restoreButton = event.target.closest("[data-project-episode-restore]");
+      const reviewButton = event.target.closest("[data-project-episode-review]");
+      try {
+        if (restoreButton) restoreProjectEpisode(restoreButton.dataset.projectEpisodeRestore);
+        if (reviewButton) {
+          state.reviewEpisodeId = reviewButton.dataset.projectEpisodeReview;
+          renderReviewForm();
+          document.getElementById("reviewEpisodeSelect")?.focus();
+        }
+      } catch (error) {
+        reportError("项目集数", error);
+      }
+    });
     $("#topicGrid").addEventListener("click", async (event) => {
       const generateButton = event.target.closest("[data-topic-generate]");
       const continueButton = event.target.closest("[data-topic-continue]");
@@ -1474,6 +1873,7 @@
     }
     try {
       bindEvents();
+      loadProjects();
       restoreDraft();
       loadHistory();
       if (state.topics.length) {
@@ -1484,6 +1884,8 @@
       renderScript();
       renderStoryboard();
       renderCreativePack();
+      renderProject();
+      renderBible();
       renderExample();
       checkAiStatus();
     } catch (error) {

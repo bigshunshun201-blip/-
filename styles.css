@@ -314,6 +314,30 @@ tbody tr:hover td { background: rgba(200, 221, 124, 0.035); }
 .history-actions .small-action { width: 100%; }
 .history-hooks { margin-top: 14px; }
 
+.project-layout { display: grid; grid-template-columns: minmax(280px, 0.8fr) minmax(0, 1.2fr); gap: 24px; }
+.project-config { display: grid; align-content: start; gap: 13px; padding-right: 24px; border-right: 1px solid var(--line); }
+.project-config label, .bible-grid label, .review-form label { display: grid; gap: 7px; color: var(--ink-soft); font-size: 12px; font-weight: 850; }
+.project-overview { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.project-overview > div { min-width: 0; padding: 15px; border-top: 1px solid var(--line); }
+.project-overview span { display: block; margin-bottom: 7px; color: var(--ink-faint); font-size: 11px; font-weight: 800; }
+.project-overview strong { display: block; overflow-wrap: anywhere; color: var(--ink); font-size: 14px; line-height: 1.5; }
+.project-section { margin-top: 28px; padding-top: 22px; border-top: 1px solid var(--line); }
+.project-section .section-title { display: flex; align-items: baseline; justify-content: space-between; gap: 18px; margin-bottom: 14px; }
+.project-section .section-title h3 { margin: 0; color: var(--ink); font-size: 16px; }
+.project-section .section-title p { margin: 0; color: var(--ink-soft); font-size: 13px; line-height: 1.55; }
+.episode-list { display: grid; gap: 10px; }
+.episode-card { display: grid; grid-template-columns: 72px minmax(0, 1fr) auto; gap: 14px; align-items: start; padding: 15px 0; border-top: 1px solid var(--line); }
+.episode-card:first-child { border-top: 0; }
+.episode-number { display: grid; width: 54px; height: 54px; place-items: center; border: 1px solid rgba(200, 221, 124, 0.34); border-radius: var(--radius-sm); color: var(--signal); background: rgba(200, 221, 124, 0.06); font-size: 13px; font-weight: 900; }
+.episode-card h4 { margin: 0 0 6px; color: var(--ink); font-size: 16px; line-height: 1.4; }
+.episode-card p { margin: 0; color: var(--ink-soft); font-size: 13px; line-height: 1.6; }
+.episode-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
+.review-form { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 14px; }
+.review-notes { grid-column: span 3; }
+.bible-intro { max-width: 820px; margin: 0 0 20px; }
+.bible-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 15px; }
+.bible-wide { grid-column: 1 / -1; }
+
 .schema-grid { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
 .field-row { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 10px; padding: 9px 0; border-top: 1px solid var(--line); font-size: 13px; }
 .field-row code { color: var(--signal); font-family: Consolas, "SFMono-Regular", monospace; font-size: 12px; font-weight: 750; }
@@ -347,6 +371,10 @@ tbody tr:hover td { background: rgba(200, 221, 124, 0.035); }
   .control-panel { position: static; max-height: none; }
   .tabs { position: static; margin-bottom: 10px; }
   .input-brief, .workflow-strip, .insight-grid, .review-grid, .optimization-board { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .project-layout { grid-template-columns: 1fr; }
+  .project-config { padding: 0 0 18px; border-right: 0; border-bottom: 1px solid var(--line); }
+  .review-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .review-notes { grid-column: 1 / -1; }
 }
 
 @media (max-width: 680px) {
@@ -370,6 +398,11 @@ tbody tr:hover td { background: rgba(200, 221, 124, 0.035); }
   .result-header h2 { font-size: 21px; }
   .header-actions, .header-actions .small-action { width: 100%; }
   .form-grid, .input-brief, .workflow-strip, .reference-grid, .insight-grid, .review-grid, .optimization-board, .creative-layout { grid-template-columns: 1fr; }
+  .project-overview, .review-form, .bible-grid { grid-template-columns: 1fr; }
+  .bible-wide, .review-notes { grid-column: auto; }
+  .episode-card { grid-template-columns: 54px minmax(0, 1fr); }
+  .episode-actions { grid-column: 1 / -1; justify-content: stretch; }
+  .episode-actions .small-action { flex: 1; }
   .creative-layout .content-block:nth-child(n + 3) { grid-column: auto; }
   .empty-hero { min-height: 300px; padding: 22px; background-position: 59% center; }
   .empty-hero h3 { font-size: 27px; }

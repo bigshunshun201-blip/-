@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>洛克王国短剧创作工作台</title>
-    <link rel="stylesheet" href="./styles.css?v=20260710-motion-toolbar" />
+    <link rel="stylesheet" href="./styles.css?v=20260713-project-system" />
   </head>
   <body>
     <a class="skip-link" href="#workspace">跳到创作工作区</a>
@@ -108,6 +108,10 @@
               集数
               <input id="episodeCount" type="number" min="1" max="12" value="3" />
             </label>
+            <label>
+              当前集数
+              <input id="episodeNumber" type="number" min="1" max="999" value="1" />
+            </label>
           </div>
           <label>
             风格
@@ -167,6 +171,8 @@
           </div>
           <div class="tab-group production-tabs" aria-label="内容制作">
             <span class="tab-group-label">内容制作</span>
+            <button class="tab" data-tab="project">项目</button>
+            <button class="tab" data-tab="bible">短剧圣经</button>
             <button class="tab active" data-tab="script">剧本</button>
             <button class="tab" data-tab="storyboard">分镜</button>
             <button class="tab" data-tab="creative">标题与封面</button>
@@ -186,6 +192,81 @@
         </nav>
 
         <section class="stage">
+          <article class="tab-panel" id="tab-project">
+            <div class="result-header">
+              <div>
+                <p class="eyebrow">内容项目</p>
+                <h2>项目总控与集数档案</h2>
+              </div>
+              <div class="header-actions">
+                <button class="small-action" id="newProjectBtn">新建项目</button>
+                <button class="small-action" id="saveProjectBtn">保存项目信息</button>
+              </div>
+            </div>
+            <div class="project-layout">
+              <section class="project-config" aria-label="项目设定">
+                <label>
+                  当前项目
+                  <select id="projectSelect"></select>
+                </label>
+                <label>
+                  项目名称
+                  <input id="projectName" placeholder="例如：旧契约回声" />
+                </label>
+                <label>
+                  系列一句话主线
+                  <textarea id="projectLogline" rows="3" placeholder="例如：失效的旧契约让伙伴回归，主角必须找回被篡改的羁绊。"></textarea>
+                </label>
+                <p class="helper">剧本、分镜和发布复盘都会归入当前项目。切换项目不会覆盖其他项目的档案。</p>
+              </section>
+              <section class="project-overview" id="projectOverview"></section>
+            </div>
+            <section class="project-section">
+              <div class="section-title">
+                <h3>集数生产档案</h3>
+                <p>每次生成剧本会自动建档；分镜和复盘会回写到同一集。</p>
+              </div>
+              <div class="episode-list" id="projectEpisodeList"></div>
+            </section>
+            <section class="project-section review-entry">
+              <div class="section-title">
+                <h3>发布复盘</h3>
+                <p>选择一集录入真实数据，为后续续写和优化留档。</p>
+              </div>
+              <div class="review-form">
+                <label>复盘集数<select id="reviewEpisodeSelect"></select></label>
+                <label>发布状态<select id="reviewStatus"><option value="draft">草稿</option><option value="scheduled">待发布</option><option value="published">已发布</option><option value="reviewed">已复盘</option></select></label>
+                <label>发布日期<input id="reviewPublishDate" type="date" /></label>
+                <label>播放量<input id="reviewViews" type="number" min="0" placeholder="0" /></label>
+                <label>点赞<input id="reviewLikes" type="number" min="0" placeholder="0" /></label>
+                <label>评论<input id="reviewComments" type="number" min="0" placeholder="0" /></label>
+                <label>完播率 %<input id="reviewCompletionRate" type="number" min="0" max="100" step="0.1" placeholder="例如：46.5" /></label>
+                <label class="review-notes">复盘结论<textarea id="reviewNotes" rows="3" placeholder="例如：首镜信息不足，下一集前 3 秒直接抛出契约倒计时。"></textarea></label>
+              </div>
+              <button class="secondary-action" id="saveReviewBtn">保存本集复盘</button>
+            </section>
+          </article>
+
+          <article class="tab-panel" id="tab-bible">
+            <div class="result-header">
+              <div>
+                <p class="eyebrow">连续剧底稿</p>
+                <h2>短剧圣经</h2>
+              </div>
+              <button class="small-action" id="saveBibleBtn">保存短剧圣经</button>
+            </div>
+            <p class="helper bible-intro">这里定义不可随意改写的角色、能力与世界规则。每次剧本和分镜生成都会引用当前项目的圣经与已完成集数摘要。</p>
+            <div class="bible-grid">
+              <label>角色设定<textarea id="bibleCharacters" rows="6" placeholder="角色名：性格底色、欲望、弱点、口头习惯、不能做的事。"></textarea></label>
+              <label>精灵能力边界<textarea id="bibleAbilities" rows="6" placeholder="精灵名：能力、代价、冷却/限制、不可突破的边界。"></textarea></label>
+              <label>角色关系<textarea id="bibleRelations" rows="5" placeholder="角色A ↔ 角色B：关系变化、秘密、当前信任状态。"></textarea></label>
+              <label>反派与动机<textarea id="bibleAntagonist" rows="5" placeholder="反派目标、手段、底线、与主角的私人连接。"></textarea></label>
+              <label>世界规则<textarea id="bibleWorldRules" rows="5" placeholder="开放世界任务、契约、传送、精灵互动的固定规则与禁区。"></textarea></label>
+              <label>主线矛盾<textarea id="bibleMainConflict" rows="5" placeholder="系列始终未解决的核心问题，以及阶段性升级路径。"></textarea></label>
+              <label class="bible-wide">每集钩子规则<textarea id="bibleHookRules" rows="4" placeholder="例如：每集结尾只揭开一个新信息，同时留下一个必须在下一集行动的问题；不能用无理由失忆或突然复活。"></textarea></label>
+            </div>
+          </article>
+
           <article class="tab-panel active" id="tab-script">
             <div class="result-header">
               <div>
@@ -316,7 +397,7 @@
       粉丝向二创工作台示例，不代表官方内容或授权关系。发布前请核对平台规范与 IP 授权边界。
     </footer>
 
-    <script src="./generator.js?v=20260710-motion-toolbar"></script>
-    <script src="./app.js?v=20260710-motion-toolbar"></script>
+    <script src="./generator.js?v=20260713-project-system"></script>
+    <script src="./app.js?v=20260713-project-system"></script>
   </body>
 </html>
