@@ -1,4 +1,11 @@
 (function () {
+  const aiModelScopes = ["meme", "mix", "plan", "beat", "script", "storyboard", "bible", "character", "continuity", "topics", "ledger", "doctor"];
+  const defaultAiModels = Object.fromEntries(aiModelScopes.map((scope) => [scope, "deepseek-v4-flash"]));
+  const aiModelScopeLabels = {
+    meme: "热梗提炼", mix: "角色与梗搭配", plan: "单集策划", beat: "剧情节拍表",
+    script: "剧本", storyboard: "分镜", bible: "短剧圣经", character: "角色卡",
+    continuity: "一致性检查", topics: "选题", ledger: "连载台账", doctor: "剧本医生",
+  };
   const state = {
     script: null,
     storyboard: [],
@@ -29,6 +36,8 @@
     activeBeatSheetBatchId: null,
     continuationSource: null,
     activeAiOperation: null,
+    aiModels: { ...defaultAiModels },
+    scriptDoctor: null,
   };
 
   const draftKey = "roco-shortdrama-studio-draft";
@@ -37,7 +46,7 @@
   const accessCodeKey = "roco-shortdrama-access-code";
   const maxHistoryItems = 60;
   const apiTimeoutMs = 90_000;
-  const characterFieldIds = ["characterName", "characterRole", "characterTraits", "characterContrast", "characterDesire", "characterWeakness", "characterCatchphrases", "characterMannerism", "characterComedyTrigger", "characterBoundary"];
+  const characterFieldIds = ["characterName", "characterRole", "characterTraits", "characterContrast", "characterDesire", "characterWeakness", "characterCatchphrases", "characterMannerism", "characterComedyTrigger", "characterBoundary", "characterSpeechPattern", "characterPressureResponse", "characterLieTell", "characterAddressStyle", "characterForbiddenPhrases", "characterInnerNeed", "characterWound", "characterSecret"];
   const apiClient = window.RocoApiClient.create({ accessCodeKey, timeoutMs: apiTimeoutMs });
   const archiveStore = window.RocoDataStore.create();
   let projectWriteRevision = 0;
@@ -198,6 +207,7 @@
     state.script = null;
     state.storyboard = [];
     state.creativePack = null;
+    state.scriptDoctor = null;
     state.selectedTopic = null;
     state.planOptions = [];
     state.selectedPlanOptionId = null;
@@ -273,7 +283,8 @@
         batchId: state.activeCreativeMixBatchId || "",
         mixId: state.selectedCreativeMixId || "",
       },
-      aiModel: $("#aiModel") ? $("#aiModel").value : "",
+      aiModel: state.aiModels.script,
+      aiModels: { ...state.aiModels },
       continueInstruction: $("#continueInstruction") ? $("#continueInstruction").value.trim() : "",
       episodePlan: {
         openingHook: $("#planOpeningHook")?.value.trim() || "",
@@ -325,7 +336,7 @@
 
   function characterRoleLine(card) {
     const catchphrase = card.catchphrases?.[0] ? `；口头禅“${card.catchphrases[0]}”` : "";
-    return `${card.name}：${card.role}；${card.traits}；反差：${card.contrast}${catchphrase}；动作习惯：${card.mannerism}；底线：${card.boundary}`;
+    return `${card.name}：${card.role}；${card.traits}；反差：${card.contrast}${catchphrase}；说话节奏：${card.speechPattern || "未设定"}；压力反应：${card.pressureResponse || "未设定"}；撒谎破绽：${card.lieTell || "未设定"}；动作习惯：${card.mannerism}；底线：${card.boundary}`;
   }
 
   function memeSeedLine(meme) {
@@ -466,7 +477,7 @@
       setStatus("DeepSeek 正在从现有角色卡和梗库中设计 3 套剧情组合...");
       const input = getInput();
       const response = await apiRequest("/api/creative-mix", { input: {
-        ...generationContext(input),
+        ...generationContext(input, "mix"),
         candidateCharacterCards: (project.characterCards || []).slice(0, 20),
         candidateMemes: (project.memes || []).slice(0, 30),
       } });
@@ -528,22 +539,36 @@
   }
 
   function renderAiModelSwitches() {
-    const model = $("#aiModel")?.value || "deepseek-v4-flash";
     $$('[data-ai-model-switch]').forEach((target) => {
+      const scope = target.dataset.aiModelScope || "script";
+      const model = state.aiModels[scope] || "deepseek-v4-flash";
       target.classList.add("ai-model-switch");
       target.innerHTML = [
         ["deepseek-v4-flash", "Flash"],
         ["deepseek-v4-pro", "Pro"],
-      ].map(([value, label]) => `<button type="button" data-ai-model-value="${value}" class="${value === model ? "is-active" : ""}" aria-pressed="${value === model}">${label}</button>`).join("");
+      ].map(([value, label]) => `<button type="button" data-ai-model-value="${value}" data-ai-model-scope="${scope}" class="${value === model ? "is-active" : ""}" aria-pressed="${value === model}">${label}</button>`).join("");
     });
   }
 
-  function setAiModel(model) {
+  function setAiModel(scope, model) {
+    if (!aiModelScopes.includes(scope)) return;
     if (!["deepseek-v4-flash", "deepseek-v4-pro"].includes(model)) return;
-    setInputValue("aiModel", model);
+    state.aiModels[scope] = model;
+    if (scope === "script" && $("#aiModel")) $("#aiModel").value = model;
     renderAiModelSwitches();
     saveDraft(false);
-    setStatus(`AI 模型已切换为 ${model.endsWith("pro") ? "Pro（质量优先）" : "Flash（速度优先）"}`);
+    setStatus(`${aiModelScopeLabels[scope]}模型已切换为 ${model.endsWith("pro") ? "Pro（质量优先）" : "Flash（速度优先）"}，不会影响其他模块`);
+  }
+
+  function restoreAiModels(input = {}) {
+    const legacyModel = ["deepseek-v4-flash", "deepseek-v4-pro"].includes(input.aiModel) ? input.aiModel : "deepseek-v4-flash";
+    const saved = input.aiModels && typeof input.aiModels === "object" ? input.aiModels : {};
+    state.aiModels = Object.fromEntries(aiModelScopes.map((scope) => {
+      const model = saved[scope] || legacyModel;
+      return [scope, ["deepseek-v4-flash", "deepseek-v4-pro"].includes(model) ? model : "deepseek-v4-flash"];
+    }));
+    if ($("#aiModel")) $("#aiModel").value = state.aiModels.script;
+    renderAiModelSwitches();
   }
 
   function applyEpisodePlan(plan = {}) {
@@ -680,7 +705,7 @@
         episodePlan: {},
         previousScript: state.script || null,
       };
-      const response = await apiRequest("/api/plans", { input: generationContext(input) });
+      const response = await apiRequest("/api/plans", { input: generationContext(input, "plan") });
       assertActiveAiOperation(operation);
       const options = episodePlanner.normalizePlanOptions(response.result, { prefix: "ai-plan" });
       if (options.length !== 3) throw new Error("DeepSeek 没有返回 3 套完整策划，请重新生成。");
@@ -791,7 +816,7 @@
     const operation = beginAiOperation("剧情节拍表生成");
     try {
       setStatus("DeepSeek 正在把策划拆成 8 个因果节拍...");
-      const response = await apiRequest("/api/beat-sheet", { input: generationContext(input) });
+      const response = await apiRequest("/api/beat-sheet", { input: generationContext(input, "beat") });
       assertActiveAiOperation(operation);
       const beats = normalizeBeatSheet(response.result);
       if (beats.length !== 8) throw new Error("AI 没有返回 8 个完整剧情节拍，请重新生成。");
@@ -879,7 +904,7 @@
     try {
       setStatus(mode === "extract" ? "AI 正在把真实素材转成可拍剧情机制..." : "AI 正在生成不冒充实时热点的平台化梗结构...");
       const initialResponse = await apiRequest("/api/meme-lab", {
-        input: generationContext({ ...getInput(), memeLabMode: mode, memeRawMaterial: rawMaterial }),
+        input: generationContext({ ...getInput(), memeLabMode: mode, memeRawMaterial: rawMaterial }, "meme"),
       });
       const response = await resolveAiJob(initialResponse, "热梗素材");
       assertActiveAiOperation(operation);
@@ -1011,6 +1036,10 @@
       name: $("#characterName").value.trim(), role: $("#characterRole").value.trim(), traits: $("#characterTraits").value.trim(),
       contrast: $("#characterContrast").value.trim(), desire: $("#characterDesire").value.trim(), weakness: $("#characterWeakness").value.trim(),
       catchphrases, mannerism: $("#characterMannerism").value.trim(), comedyTrigger: $("#characterComedyTrigger").value.trim(), boundary: $("#characterBoundary").value.trim(),
+      speechPattern: $("#characterSpeechPattern").value.trim(), pressureResponse: $("#characterPressureResponse").value.trim(),
+      lieTell: $("#characterLieTell").value.trim(), addressStyle: $("#characterAddressStyle").value.trim(),
+      forbiddenPhrases: $("#characterForbiddenPhrases").value.split(/[,，、\n]/).map((item) => item.trim()).filter(Boolean).slice(0, 8),
+      innerNeed: $("#characterInnerNeed").value.trim(), wound: $("#characterWound").value.trim(), secret: $("#characterSecret").value.trim(),
     };
   }
 
@@ -1020,6 +1049,9 @@
       traits: String(card.traits || "").trim(), contrast: String(card.contrast || "").trim(), desire: String(card.desire || "").trim(),
       weakness: String(card.weakness || "").trim(), catchphrases: (Array.isArray(card.catchphrases) ? card.catchphrases : String(card.catchphrases || "").split(/\n|[；;]/)).map((item) => String(item).trim()).filter(Boolean).slice(0, 5),
       mannerism: String(card.mannerism || "").trim(), comedyTrigger: String(card.comedyTrigger || "").trim(), boundary: String(card.boundary || "").trim(),
+      speechPattern: String(card.speechPattern || "").trim(), pressureResponse: String(card.pressureResponse || "").trim(), lieTell: String(card.lieTell || "").trim(),
+      addressStyle: String(card.addressStyle || "").trim(), forbiddenPhrases: (Array.isArray(card.forbiddenPhrases) ? card.forbiddenPhrases : String(card.forbiddenPhrases || "").split(/[,，、\n]/)).map((item) => String(item).trim()).filter(Boolean).slice(0, 8),
+      innerNeed: String(card.innerNeed || "").trim(), wound: String(card.wound || "").trim(), secret: String(card.secret || "").trim(),
       createdAt: card.createdAt || new Date().toISOString(), updatedAt: card.updatedAt || new Date().toISOString(),
     };
   }
@@ -1031,6 +1063,10 @@
       characterContrast: normalized.contrast, characterDesire: normalized.desire, characterWeakness: normalized.weakness,
       characterCatchphrases: normalized.catchphrases.join("\n"), characterMannerism: normalized.mannerism,
       characterComedyTrigger: normalized.comedyTrigger, characterBoundary: normalized.boundary,
+      characterSpeechPattern: normalized.speechPattern, characterPressureResponse: normalized.pressureResponse,
+      characterLieTell: normalized.lieTell, characterAddressStyle: normalized.addressStyle,
+      characterForbiddenPhrases: normalized.forbiddenPhrases.join("，"), characterInnerNeed: normalized.innerNeed,
+      characterWound: normalized.wound, characterSecret: normalized.secret,
     };
     Object.entries(fields).forEach(([id, value]) => setInputValue(id, value));
   }
@@ -1068,6 +1104,8 @@
         <h4>${escapeHtml(card.name)}</h4>
         <p>${escapeHtml(card.traits)}</p>
         <blockquote>${escapeHtml(card.catchphrases?.[0] || "尚未设置口头禅")}</blockquote>
+        <p><strong>说话指纹：</strong>${escapeHtml([card.speechPattern, card.addressStyle].filter(Boolean).join("；") || "待补")}</p>
+        <p><strong>压力/破绽：</strong>${escapeHtml([card.pressureResponse, card.lieTell].filter(Boolean).join("；") || "待补")}</p>
         <p><strong>动作：</strong>${escapeHtml(card.mannerism || "待补")}</p><p><strong>笑点触发：</strong>${escapeHtml(card.comedyTrigger || "待补")}</p>
         <div class="library-card-actions"><button class="small-action ${state.activeCharacterIds.includes(card.id) ? "is-active" : ""}" data-character-use="${escapeHtml(card.id)}">${state.activeCharacterIds.includes(card.id) ? "移出本集" : "加入本集"}</button><button class="small-action" data-character-edit="${escapeHtml(card.id)}">编辑</button><button class="small-action danger-action" data-character-delete="${escapeHtml(card.id)}">移除</button></div>
       </article>`).join("") : `<p class="helper">还没有结构化角色卡。可以先填写名字和定位，再让 DeepSeek 补全鲜明特点。</p>`;
@@ -1077,7 +1115,7 @@
     const operation = beginAiOperation("角色卡起草");
     try {
       setStatus("DeepSeek 正在设计角色反差、口头禅和可重复笑点...");
-      const initialResponse = await apiRequest("/api/character-card", { input: generationContext({ ...getInput(), characterDraft: characterDraftFromForm() }) });
+      const initialResponse = await apiRequest("/api/character-card", { input: generationContext({ ...getInput(), characterDraft: characterDraftFromForm() }, "character") });
       const response = await resolveAiJob(initialResponse, "角色卡");
       assertActiveAiOperation(operation);
       applyCharacterDraft(response.result?.card || response.result);
@@ -1179,13 +1217,15 @@
     return window.RocoWorkflowCore.continuityForTarget(project?.episodes || [], targetEpisodeNumber, 3);
   }
 
-  function generationContext(input) {
+  function generationContext(input, modelScope = "script") {
     const project = currentProject();
     const latestReview = (project?.episodes || [])
       .filter((episode) => episode.review?.status === "reviewed" || episode.review?.status === "published")
       .sort((a, b) => String(b.review?.updatedAt || "").localeCompare(String(a.review?.updatedAt || "")))[0]?.review || null;
     return {
       ...input,
+      aiModel: state.aiModels[modelScope] || "deepseek-v4-flash",
+      aiModels: { ...state.aiModels },
       projectName: project?.name || "未命名短剧项目",
       projectLogline: project?.logline || "",
       projectBible: project?.bible || defaultBible,
@@ -1193,6 +1233,8 @@
       projectAssets: (project?.assets || []).slice(-24),
       projectMemes: (project?.memes || []).filter((item) => (input.activeMemeIds || state.activeMemeIds).includes(item.id)).slice(0, 6),
       projectCharacterCards: (project?.characterCards || []).filter((item) => (input.activeCharacterIds || state.activeCharacterIds).includes(item.id)).slice(0, 8),
+      projectSeriesLedger: project?.seriesLedger || {},
+      projectCanonSources: (project?.canonSources || []).slice(-30),
       latestReview,
     };
   }
@@ -1261,7 +1303,7 @@
     const operation = beginAiOperation("短剧圣经起草");
     try {
       setStatus("DeepSeek 正在根据当前角色、场景和系列方向起草短剧圣经...");
-      const initialResponse = await apiRequest("/api/bible", { input: generationContext(getInput()) });
+      const initialResponse = await apiRequest("/api/bible", { input: generationContext(getInput(), "bible") });
       const response = await resolveAiJob(initialResponse, "短剧圣经");
       assertActiveAiOperation(operation);
       await applyBibleDraft(response.result?.bible, "DeepSeek 短剧圣经草案");
@@ -1346,6 +1388,8 @@
     renderPlanHistory();
     renderCharacterCards();
     renderMemeLibrary();
+    renderSeriesLedger();
+    renderCanonSources();
   }
 
   function saveProjectMeta() {
@@ -1514,6 +1558,7 @@
     state.script = episode.script || null;
     state.storyboard = episode.storyboard || [];
     state.creativePack = episode.creativePack || null;
+    state.scriptDoctor = null;
     state.currentHistoryId = episode.historyId || null;
     state.continuationSource = null;
     state.activePlanBatchId = episode.input?.episodePlanRef?.batchId || null;
@@ -1607,6 +1652,7 @@
   }
 
   function renderConsistency() {
+    renderScriptDoctor();
     const target = $("#consistencyOutput");
     if (!target) return;
     const report = currentProjectEpisode()?.consistency;
@@ -1637,7 +1683,7 @@
     const operation = beginAiOperation("一致性检查");
     try {
       setStatus("AI 正在检查连载一致性...");
-      const input = generationContext({ ...getInput(), script: state.script });
+      const input = generationContext({ ...getInput(), script: state.script }, "continuity");
       const response = await apiRequest("/api/continuity-check", { input });
       assertActiveAiOperation(operation);
       const episode = currentProjectEpisode();
@@ -1655,6 +1701,163 @@
     } finally {
       endAiOperation(operation);
     }
+  }
+
+  function normalizeSeriesLedger(value = {}) {
+    const list = (key) => Array.isArray(value[key]) ? value[key] : [];
+    return {
+      openQuestions: list("openQuestions"), resolvedQuestions: list("resolvedQuestions"),
+      characterStates: list("characterStates"), abilityStates: list("abilityStates"), propStates: list("propStates"),
+      antagonistProgress: String(value.antagonistProgress || "").trim(), recurringGags: list("recurringGags"),
+      nextObligations: list("nextObligations").map((item) => typeof item === "string" ? item : item?.content || item?.obligation || "").filter(Boolean),
+      updatedAt: value.updatedAt || new Date().toISOString(),
+    };
+  }
+
+  function ledgerItemText(item, preferred = []) {
+    if (typeof item === "string") return item;
+    const key = preferred.find((name) => item?.[name]);
+    const lead = key ? item[key] : item?.name || item?.id || "记录";
+    const rest = Object.entries(item || {}).filter(([name, value]) => name !== key && name !== "id" && value).slice(0, 3).map(([, value]) => Array.isArray(value) ? value.join("、") : value);
+    return [lead, ...rest].join("｜");
+  }
+
+  function renderSeriesLedger() {
+    const target = $("#seriesLedgerOutput");
+    if (!target) return;
+    const project = currentProject();
+    const ledger = normalizeSeriesLedger(project?.seriesLedger || {});
+    const groups = [
+      ["未解悬念", ledger.openQuestions, ["question"]], ["人物现状", ledger.characterStates, ["name"]],
+      ["能力与代价", ledger.abilityStates, ["name"]], ["关键道具", ledger.propStates, ["name"]],
+      ["重复梗进度", ledger.recurringGags, ["name"]], ["下一集必须承接", ledger.nextObligations, []],
+    ];
+    const hasContent = groups.some(([, items]) => items.length) || ledger.antagonistProgress;
+    target.innerHTML = hasContent ? `
+      <div class="ledger-grid">${groups.map(([title, items, keys]) => `<article><h4>${title}</h4>${items.length ? `<ul>${items.slice(0, 8).map((item) => `<li>${escapeHtml(ledgerItemText(item, keys))}</li>`).join("")}</ul>` : `<p>暂无</p>`}</article>`).join("")}
+      <article><h4>反派推进</h4><p>${escapeHtml(ledger.antagonistProgress || "暂无")}</p></article></div>`
+      : `<p class="helper">归档剧本后点击“AI 更新台账”，系统会把跨集必须记住的信息沉淀在这里。</p>`;
+    const history = project?.ledgerVersions || [];
+    if ($("#ledgerHistoryCount")) $("#ledgerHistoryCount").textContent = String(history.length);
+    if ($("#ledgerHistoryList")) $("#ledgerHistoryList").innerHTML = history.length ? history.slice(0, 10).map((item, index) => `<div class="plan-history-item"><div><strong>${escapeHtml(new Date(item.createdAt).toLocaleString("zh-CN", { hour12: false }))}</strong><span>${escapeHtml(item.model || "model")} · ${item.episodeCount || 0} 集</span></div><button class="small-action" type="button" data-ledger-restore="${index}">恢复</button></div>`).join("") : `<p class="helper">每次 AI 更新都会留下版本。</p>`;
+  }
+
+  async function updateSeriesLedger() {
+    const project = currentProject();
+    if (!project?.episodes?.some((episode) => episode.script)) throw new Error("请先归档至少一集剧本，再更新连载台账。");
+    const operation = beginAiOperation("连载台账更新");
+    try {
+      setStatus("AI 正在核对全部已归档集数并更新连载台账...");
+      const projectEpisodes = project.episodes.slice().sort((a, b) => Number(a.episodeNumber) - Number(b.episodeNumber)).slice(-30).map((episode) => ({ episodeNumber: episode.episodeNumber, title: episode.script?.title, synopsis: episode.script?.synopsis, structure: episode.script?.structure, hooks: episode.script?.hooks, dialogue: episode.script?.dialogue, consistency: episode.consistency }));
+      const response = await apiRequest("/api/series-ledger", { input: generationContext({ ...getInput(), projectEpisodes }, "ledger") });
+      assertActiveAiOperation(operation);
+      const ledger = normalizeSeriesLedger(response.result?.ledger || response.result);
+      project.seriesLedger = ledger;
+      project.ledgerVersions = [{ id: newId("ledger"), createdAt: new Date().toISOString(), model: response.model || "", source: response.source || "", episodeCount: projectEpisodes.length, ledger }, ...(project.ledgerVersions || [])].slice(0, 30);
+      project.updatedAt = new Date().toISOString();
+      await persistProjects();
+      renderSeriesLedger();
+      setStatus(`连载台账已更新并留档 ${nowTime()} · ${response.model || "deepseek"}${usageSuffix(response)}`);
+    } finally { endAiOperation(operation); }
+  }
+
+  function restoreLedgerVersion(index) {
+    const project = currentProject();
+    const version = project?.ledgerVersions?.[index];
+    if (!version) throw new Error("没有找到这个台账版本。");
+    project.seriesLedger = normalizeSeriesLedger(version.ledger);
+    project.updatedAt = new Date().toISOString();
+    persistProjects();
+    renderSeriesLedger();
+    setStatus("已恢复所选连载台账版本");
+  }
+
+  function renderCanonSources() {
+    const target = $("#canonSourceLibrary");
+    if (!target) return;
+    const sources = currentProject()?.canonSources || [];
+    if ($("#canonSourceCount")) $("#canonSourceCount").textContent = `${sources.length} 条来源`;
+    target.innerHTML = sources.length ? sources.slice().reverse().map((item) => `<article class="asset-card canon-source-card"><span class="asset-type">${escapeHtml(item.type)}</span><div><h3>${escapeHtml(item.name)}</h3><p>${escapeHtml(item.content)}</p>${item.url ? `<small>${escapeHtml(item.url)}</small>` : ""}</div><button class="small-action danger-action" data-canon-source-delete="${escapeHtml(item.id)}">移除</button></article>`).join("") : `<p class="helper">尚未记录设定来源。建议先录入官方确认内容、项目二设，以及明确禁用的页游设定。</p>`;
+  }
+
+  function addCanonSource() {
+    const name = $("#canonSourceName").value.trim();
+    const content = $("#canonSourceContent").value.trim();
+    if (!name || !content) throw new Error("请填写设定名称和具体内容。");
+    const project = currentProject();
+    project.canonSources.push({ id: newId("canon"), type: $("#canonSourceType").value, name, content, url: $("#canonSourceUrl").value.trim(), createdAt: new Date().toISOString() });
+    ["canonSourceName", "canonSourceContent", "canonSourceUrl"].forEach((id) => setInputValue(id, ""));
+    persistProjects(); renderCanonSources(); setStatus("手游设定来源已存入当前项目，后续生成会引用它");
+  }
+
+  function deleteCanonSource(id) {
+    const project = currentProject();
+    project.canonSources = (project.canonSources || []).filter((item) => item.id !== id);
+    persistProjects(); renderCanonSources(); setStatus("已移除设定来源");
+  }
+
+  function renderScriptDoctor() {
+    const target = $("#scriptDoctorOutput");
+    const applyButton = $("#applyDoctorRevisionBtn");
+    if (!target || !applyButton) return;
+    const report = state.scriptDoctor?.report || currentProjectEpisode()?.doctorReport || null;
+    if (!state.script) {
+      target.innerHTML = `<p class="helper">请先生成或打开一集剧本，再执行剧作诊断。</p>`;
+      applyButton.hidden = true;
+      return;
+    }
+    if (!report) {
+      target.innerHTML = `<p class="helper">当前版本尚未诊断。剧本医生会指出具体问题、证据、修法，并提供一版完整修订稿供你选择。</p>`;
+      applyButton.hidden = true;
+      return;
+    }
+    const dimensions = Array.isArray(report.dimensions) ? report.dimensions : [];
+    const issues = Array.isArray(report.issues) ? report.issues : [];
+    target.innerHTML = `<div class="consistency-summary"><div><h3>${escapeHtml(report.summary || "剧本诊断完成")}</h3><p>${escapeHtml(report.priority || "优先修复最高影响问题")}</p></div><span class="consistency-score">${escapeHtml(report.score ?? "-")}</span></div>
+      <div class="doctor-dimensions">${dimensions.map((item) => `<span><strong>${escapeHtml(item.area || "维度")}</strong>${escapeHtml(item.score ?? "-")}</span>`).join("")}</div>
+      <div class="consistency-list">${issues.map((item) => `<article class="consistency-item"><strong>${escapeHtml(item.severity || "建议")} · ${escapeHtml(item.area || "剧作")}</strong><div><p>${escapeHtml(item.evidence || item.problem || "")}</p><p>修法：${escapeHtml(item.fix || "")}</p>${[...(item.beatIds || []), ...(item.dialogueIds || [])].length ? `<small>关联：${escapeHtml([...(item.beatIds || []), ...(item.dialogueIds || [])].join("、"))}</small>` : ""}</div></article>`).join("")}</div>`;
+    applyButton.hidden = !state.scriptDoctor?.revisedScript;
+  }
+
+  async function runScriptDoctor() {
+    if (!state.script) throw new Error("请先生成或恢复一个剧本，再执行剧作诊断。");
+    const operation = beginAiOperation("剧本医生");
+    try {
+      setStatus("AI 剧本医生正在诊断人物行动、冲突、台词、笑点和结尾钩子...");
+      const response = await apiRequest("/api/script-doctor", { input: generationContext({ ...getInput(), script: state.script }, "doctor") });
+      assertActiveAiOperation(operation);
+      const report = response.result?.report || {};
+      const revisedScript = response.result?.revisedScript || null;
+      state.scriptDoctor = { report, revisedScript, response };
+      const episode = currentProjectEpisode();
+      if (episode) {
+        const version = activeEpisodeVersion(episode);
+        if (version) version.doctorReport = report;
+        applyEpisodeVersion(episode, version?.id);
+        persistProjects();
+      }
+      renderScriptDoctor();
+      switchTab("consistency");
+      setStatus(`剧本诊断完成 ${nowTime()} · ${response.model || "deepseek"}${usageSuffix(response)}`);
+    } finally { endAiOperation(operation); }
+  }
+
+  function applyDoctorRevision() {
+    const revisedScript = state.scriptDoctor?.revisedScript;
+    if (!revisedScript) throw new Error("当前没有可采用的修订稿。");
+    const input = getInput();
+    const response = state.scriptDoctor.response || { source: "script-doctor", model: state.aiModels.doctor };
+    state.script = normalizeScriptResult({ script: revisedScript }).script;
+    state.storyboard = [];
+    state.creativePack = window.RocoStudio.generateCreativePack(state.script, input, state.topics);
+    const item = addHistoryItem({ mode: "doctor", input, response, projectId: state.currentProjectId, projectName: currentProject()?.name, episodeNumber: input.episodeNumber, generated: { script: state.script, storyboard: [], creativePack: state.creativePack } });
+    state.currentHistoryId = item.id;
+    upsertProjectEpisode({ mode: "doctor", input, response, generated: { script: state.script, storyboard: [], creativePack: state.creativePack }, historyId: item.id });
+    state.scriptDoctor = null;
+    persistHistory();
+    renderScript(); renderStoryboard(); renderCreativePack(); renderHistory(); renderConsistency(); saveDraft(false);
+    switchTab("script");
+    setStatus("已采用剧本医生修订稿并新建剧本版本；原稿仍可从版本记录恢复");
   }
 
   function setInputValue(id, value) {
@@ -1904,7 +2107,7 @@
     try {
       const response = await apiRequest("/api/topics", {
         input: {
-          ...input,
+          ...generationContext(input, "topics"),
           count: 8,
           mode: "batch",
           competitorInsights: state.analysis ? state.analysis.summary : "",
@@ -1939,7 +2142,7 @@
     try {
       const response = await apiRequest("/api/topics", {
         input: {
-          ...getInput(),
+          ...generationContext(getInput(), "topics"),
           count: 1,
           mode: "replace",
           replaceTopic: oldTopic,
@@ -2019,7 +2222,10 @@
     return {
       script,
       storyboard: result.storyboard.map((shot, index) => ({
+        clipId: shot.clipId || `CLIP-${String(index + 1).padStart(2, "0")}`,
         shot: shot.shot || index + 1,
+        beatIds: Array.isArray(shot.beatIds) ? shot.beatIds : [],
+        dialogueIds: Array.isArray(shot.dialogueIds) ? shot.dialogueIds : [],
         timeRange: shot.timeRange || "",
         seconds: shot.seconds || "",
         generationSeconds: shot.generationSeconds || shot.seconds || "",
@@ -2055,6 +2261,7 @@
     script.characters = Array.isArray(script.characters) ? script.characters : [];
     script.structure = Array.isArray(script.structure) ? script.structure : [];
     script.dialogue = Array.isArray(script.dialogue) ? script.dialogue : [];
+    script.dialogue = script.dialogue.map((item, index) => ({ ...item, id: item.id || `LINE-${String(index + 1).padStart(2, "0")}`, beatIds: Array.isArray(item.beatIds) ? item.beatIds : [] }));
     script.rhythm = Array.isArray(script.rhythm) ? script.rhythm : [];
     script.reversals = Array.isArray(script.reversals) ? script.reversals : [];
     script.innovationPoints = Array.isArray(script.innovationPoints) ? script.innovationPoints : [];
@@ -2071,7 +2278,10 @@
       throw new Error("AI 没有返回可用分镜");
     }
     return storyboard.map((shot, index) => ({
+      clipId: shot.clipId || `CLIP-${String(index + 1).padStart(2, "0")}`,
       shot: shot.shot || index + 1,
+      beatIds: Array.isArray(shot.beatIds) ? shot.beatIds : [],
+      dialogueIds: Array.isArray(shot.dialogueIds) ? shot.dialogueIds : [],
       timeRange: shot.timeRange || "",
       seconds: shot.seconds || "",
       generationSeconds: shot.generationSeconds || shot.seconds || "",
@@ -2167,6 +2377,7 @@
       `第 ${segment.shot} 段｜${segment.timeRange || `${segment.seconds || 10}秒`}`,
       `生成规格：${segment.generationMode || "单场景连续镜头"}｜生成 ${segment.generationSeconds || segment.seconds || ""} 秒｜成片保留 ${segment.seconds || ""} 秒${Number(segment.trimSeconds || 0) ? `｜尾部裁剪 ${segment.trimSeconds} 秒` : ""}`,
       `所属剧本：${state.script?.title || "未命名剧本"}`,
+      `关联ID：${segment.clipId || ""}｜${(segment.beatIds || []).join("、")}｜${(segment.dialogueIds || []).join("、")}`,
       `本段任务：${segment.segmentGoal || ""}`,
       `角色：${segment.characters || ""}`,
       `场景：${segment.scene || ""}`,
@@ -2374,6 +2585,7 @@
     state.script = item.script;
     state.storyboard = item.storyboard || [];
     state.creativePack = item.creativePack || null;
+    state.scriptDoctor = null;
     state.currentHistoryId = item.id || null;
     state.continuationSource = null;
     state.activePlanBatchId = item.input?.episodePlanRef?.batchId || null;
@@ -2647,7 +2859,7 @@
       const previousStoryboard = mode === "continue" ? continuationSource?.storyboard || state.storyboard : null;
       const initialResponse = await apiRequest("/api/script", {
         input: {
-          ...generationContext(input),
+          ...generationContext(input, "script"),
           mode,
           competitorInsights: state.analysis ? state.analysis.summary : "",
           previousScript,
@@ -2659,6 +2871,7 @@
       const generated = normalizeScriptResult(response.result);
       state.script = generated.script;
       state.storyboard = [];
+      state.scriptDoctor = null;
       state.creativePack = window.RocoStudio.generateCreativePack(state.script, input, state.topics);
       const item = addHistoryItem({
         mode,
@@ -2701,7 +2914,7 @@
       setStatus("AI 正在基于当前剧本生成分镜...");
       const initialResponse = await apiRequest("/api/storyboard", {
         input: {
-          ...generationContext(input),
+          ...generationContext(input, "storyboard"),
           script,
         },
       });
@@ -2858,6 +3071,7 @@
         const el = document.getElementById(key);
         if (el) el.value = value;
       });
+      restoreAiModels(draft.input);
       applyEpisodePlan(draft.input?.episodePlan);
       restoreActiveSelections(draft.input);
       restoreCreativeWorkflow(draft.input);
@@ -3017,7 +3231,7 @@
   function bindEvents() {
     document.addEventListener("click", (event) => {
       const modelButton = event.target.closest("[data-ai-model-value]");
-      if (modelButton) setAiModel(modelButton.dataset.aiModelValue);
+      if (modelButton) setAiModel(modelButton.dataset.aiModelScope || "script", modelButton.dataset.aiModelValue);
     });
     $("#newProjectBtn").addEventListener("click", createProject);
     $("#saveProjectBtn").addEventListener("click", saveProjectMeta);
@@ -3028,6 +3242,13 @@
       event.target.value = "";
     });
     $("#saveBibleBtn").addEventListener("click", saveBible);
+    $("#addCanonSourceBtn").addEventListener("click", () => {
+      try { addCanonSource(); } catch (error) { reportError("设定来源入库", error); }
+    });
+    $("#canonSourceLibrary").addEventListener("click", (event) => {
+      const button = event.target.closest("[data-canon-source-delete]");
+      if (button) deleteCanonSource(button.dataset.canonSourceDelete);
+    });
     $("#memeLabBtn").addEventListener("click", async () => {
       try {
         await runMemeLab("extract");
@@ -3191,6 +3412,19 @@
       } catch (error) {
         reportError("一致性检查", error);
       }
+    });
+    $("#runScriptDoctorBtn").addEventListener("click", async () => {
+      try { await runScriptDoctor(); } catch (error) { reportError("剧本医生", error); }
+    });
+    $("#applyDoctorRevisionBtn").addEventListener("click", () => {
+      try { applyDoctorRevision(); } catch (error) { reportError("采用修订稿", error); }
+    });
+    $("#updateSeriesLedgerBtn").addEventListener("click", async () => {
+      try { await updateSeriesLedger(); } catch (error) { reportError("连载台账", error); }
+    });
+    $("#ledgerHistoryList").addEventListener("click", (event) => {
+      const button = event.target.closest("[data-ledger-restore]");
+      if (button) restoreLedgerVersion(Number(button.dataset.ledgerRestore));
     });
     $("#addAssetBtn").addEventListener("click", () => {
       try {

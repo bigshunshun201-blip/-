@@ -3,7 +3,14 @@
   if (typeof module === "object" && module.exports) module.exports = api;
   if (root) root.RocoProjectDomain = api;
 })(typeof globalThis !== "undefined" ? globalThis : this, function () {
-  const PROJECT_SCHEMA_VERSION = 3;
+  const PROJECT_SCHEMA_VERSION = 4;
+
+  function emptySeriesLedger() {
+    return {
+      openQuestions: [], resolvedQuestions: [], characterStates: [], abilityStates: [], propStates: [],
+      antagonistProgress: "", recurringGags: [], nextObligations: [], updatedAt: null,
+    };
+  }
 
   function newId(prefix) {
     return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -20,6 +27,9 @@
       planBatches: [],
       creativeMixBatches: [],
       beatSheetBatches: [],
+      seriesLedger: emptySeriesLedger(),
+      ledgerVersions: [],
+      canonSources: [],
       episodes: [],
       assets: [],
       memes: [],
@@ -71,6 +81,7 @@
       source: snapshot.source || "",
       model: snapshot.model || "",
       consistency: snapshot.consistency || null,
+      doctorReport: snapshot.doctorReport || null,
     };
   }
 
@@ -95,6 +106,7 @@
     episode.source = version.source || "";
     episode.model = version.model || "";
     episode.consistency = version.consistency || null;
+    episode.doctorReport = version.doctorReport || null;
     return episode;
   }
 
@@ -130,6 +142,9 @@
       planBatches: Array.isArray(source.planBatches) ? source.planBatches : [],
       creativeMixBatches: Array.isArray(source.creativeMixBatches) ? source.creativeMixBatches : [],
       beatSheetBatches: Array.isArray(source.beatSheetBatches) ? source.beatSheetBatches : [],
+      seriesLedger: { ...emptySeriesLedger(), ...(source.seriesLedger || {}) },
+      ledgerVersions: Array.isArray(source.ledgerVersions) ? source.ledgerVersions : [],
+      canonSources: Array.isArray(source.canonSources) ? source.canonSources : [],
     };
 
     if (project.schemaVersion < 2) {
@@ -158,6 +173,13 @@
       project.creativeMixBatches = [];
       project.beatSheetBatches = [];
       project.schemaVersion = 3;
+    }
+
+    if (project.schemaVersion < 4) {
+      project.seriesLedger = emptySeriesLedger();
+      project.ledgerVersions = [];
+      project.canonSources = [];
+      project.schemaVersion = 4;
     }
 
     project.schemaVersion = PROJECT_SCHEMA_VERSION;
@@ -265,6 +287,7 @@
 
   return {
     PROJECT_SCHEMA_VERSION,
+    emptySeriesLedger,
     newId,
     createProjectRecord,
     createStoryboardVersion,

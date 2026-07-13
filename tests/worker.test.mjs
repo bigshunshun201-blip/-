@@ -61,6 +61,7 @@ test("storyboard normalizer retains production fields", () => {
   assert.equal(result.storyboard[1].seconds, 7);
   assert.equal(result.storyboard[1].timeRange, "08-15秒");
   assert.equal(result.storyboard[1].generationMode, "单场景连续镜头");
+  assert.equal(result.storyboard[0].clipId, "CLIP-01");
 });
 
 test("storyboard segment planner adapts duration and marks fixed-mode trimming", () => {
@@ -114,7 +115,10 @@ test("script normalizer rejects incomplete output and missing requested roles", 
     activeCharacterIds: ["char-1"], projectCharacterCards: [{ id: "char-1", name: "阿洛" }],
     activeMemeIds: ["meme-1"], projectMemes: [{ id: "meme-1", phrase: "嘴硬检测" }],
   };
-  assert.equal(__test.normalizeScript(integrated, integratedInput).script.assetIntegration.memes[0].triggerRole, "阿洛");
+  const normalizedIntegrated = __test.normalizeScript(integrated, integratedInput).script;
+  assert.equal(normalizedIntegrated.assetIntegration.memes[0].triggerRole, "阿洛");
+  assert.equal(normalizedIntegrated.dialogue[0].id, "LINE-01");
+  assert.ok(normalizedIntegrated.dialogue.every((line) => line.beatIds.length));
   assert.throws(() => __test.normalizeScript({ script: { ...integrated.script, assetIntegration: { characters: [], memes: [] } } }, integratedInput), /已选角色卡/);
   assert.throws(() => __test.normalizeScript({ script: { title: "空壳" } }), (error) => error.code === "AI_OUTPUT_INVALID");
   assert.throws(() => __test.normalizeScript(valid, { roles: "阿洛：调查者；雪影娃娃：搭档" }), /雪影娃娃/);
@@ -139,6 +143,17 @@ test("continuity normalizer always returns the five required checks", () => {
   });
   assert.equal(result.score, 86);
   assert.deepEqual(result.checks.map((check) => check.area), ["角色性格", "角色标志性特征", "精灵能力", "人物关系", "悬念承接"]);
+});
+
+test("series ledger normalizer keeps actionable cross-episode facts", () => {
+  const result = __test.normalizeSeriesLedger({ ledger: {
+    openQuestions: [{ id: "Q-01", question: "徽章为何指向聆风塔", originEpisode: 1, nextAction: "第2集查坐标" }],
+    characterStates: [{ name: "阿洛", currentGoal: "查坐标", knownFacts: "契约会测谎", hiddenFacts: "隐瞒第一次失败", relationshipState: "与迪莫互疑", lastChange: "承认说谎" }],
+    abilityStates: [], propStates: [], antagonistProgress: "", recurringGags: [], resolvedQuestions: [],
+    nextObligations: ["第2集前3秒承接徽章坐标"],
+  } });
+  assert.equal(result.ledger.openQuestions[0].id, "Q-01");
+  assert.match(result.ledger.nextObligations[0], /第2集/);
 });
 
 test("bible normalizer requires all continuity fields", () => {
@@ -236,11 +251,14 @@ test("beat sheet normalizer requires eight causal production beats", () => {
 
 test("UI contains the production workflow controls", async () => {
   const html = await readFile(new URL("../index.html", import.meta.url), "utf8");
-  for (const id of ["clipMode", "creativeMixBrief", "characterPicker", "memePicker", "suggestCreativeMixBtn", "creativeMixHistoryList", "planOpeningHook", "planProtagonistGoal", "planStakes", "planForcedChoice", "planRelationshipShift", "autoPlanBtn", "suggestPlansBtn", "planSuggestions", "planHistoryList", "generateBeatSheetBtn", "beatSheetList", "approveBeatSheetBtn", "beatSheetHistoryList", "planReadyState", "memeLabBtn", "memeInspireBtn", "memeLabResults", "memeLibrary", "addMemeBtn", "generateBibleBtn", "applyBibleTemplateBtn", "generateCharacterBtn", "saveCharacterBtn", "characterLibrary", "storyboardHistory", "checkContinuityBtn", "assetLibrary", "reviewCommentThemes", "exportProjectBtn"]) {
+  for (const id of ["clipMode", "creativeMixBrief", "characterPicker", "memePicker", "suggestCreativeMixBtn", "creativeMixHistoryList", "planOpeningHook", "planProtagonistGoal", "planStakes", "planForcedChoice", "planRelationshipShift", "autoPlanBtn", "suggestPlansBtn", "planSuggestions", "planHistoryList", "generateBeatSheetBtn", "beatSheetList", "approveBeatSheetBtn", "beatSheetHistoryList", "planReadyState", "memeLabBtn", "memeInspireBtn", "memeLabResults", "memeLibrary", "addMemeBtn", "generateBibleBtn", "applyBibleTemplateBtn", "generateCharacterBtn", "saveCharacterBtn", "characterLibrary", "storyboardHistory", "checkContinuityBtn", "assetLibrary", "reviewCommentThemes", "exportProjectBtn", "updateSeriesLedgerBtn", "runScriptDoctorBtn", "addCanonSourceBtn", "characterSpeechPattern"]) {
     assert.match(html, new RegExp(`id="${id}"`));
   }
   assert.match(html, /open\.douyin\.com\/platform\/resource\/docs\/openapi\/data-open-service\/tops-data\/hot-video-list/);
   assert.match(html, /data-ai-model-switch/);
+  for (const scope of ["meme", "mix", "plan", "beat", "script", "storyboard", "bible", "character", "continuity", "topics", "ledger", "doctor"]) {
+    assert.match(html, new RegExp(`data-ai-model-scope="${scope}"`));
+  }
 });
 
 test("JSON extraction repairs common missing commas from model output", () => {
@@ -431,6 +449,8 @@ test("project schema migrates legacy episode inputs and rejects future versions"
   assert.deepEqual(legacy.episodes[0].input.activeCharacterIds, []);
   assert.deepEqual(legacy.creativeMixBatches, []);
   assert.deepEqual(legacy.beatSheetBatches, []);
+  assert.deepEqual(legacy.seriesLedger.nextObligations, []);
+  assert.deepEqual(legacy.canonSources, []);
   assert.throws(() => projectDomain.migrateProjectRecord({ schemaVersion: projectDomain.PROJECT_SCHEMA_VERSION + 1 }), /高于当前支持版本/);
 });
 

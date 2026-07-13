@@ -20,6 +20,8 @@ const AI_PATH_COST = new Map([
   ["/api/beat-sheet", 1],
   ["/api/topics", 1],
   ["/api/continuity-check", 1],
+  ["/api/series-ledger", 1],
+  ["/api/script-doctor", 1],
   ["/api/generate", 2],
 ]);
 
@@ -215,6 +217,9 @@ function normalizeInput(input = {}) {
     projectLogline: String(input.projectLogline || "").trim(),
     projectBible: input.projectBible && typeof input.projectBible === "object" ? input.projectBible : {},
     projectContinuity: Array.isArray(input.projectContinuity) ? input.projectContinuity.slice(-3) : [],
+    projectSeriesLedger: input.projectSeriesLedger && typeof input.projectSeriesLedger === "object" ? input.projectSeriesLedger : {},
+    projectCanonSources: Array.isArray(input.projectCanonSources) ? input.projectCanonSources.slice(-30) : [],
+    projectEpisodes: Array.isArray(input.projectEpisodes) ? input.projectEpisodes.slice(-30) : [],
     projectAssets: Array.isArray(input.projectAssets) ? input.projectAssets.slice(-24) : [],
     activeMemeIds,
     activeCharacterIds,
@@ -287,6 +292,9 @@ function creativeInputSummary(payload) {
     previousScript,
     previousStoryboard,
     script,
+    projectSeriesLedger,
+    projectCanonSources,
+    projectEpisodes,
     ...creativeInput
   } = payload;
   return stringify(creativeInput, 4800);
@@ -343,6 +351,12 @@ ${stringify(canonical, 8500)}
 
 已完成集数连续性摘要（只能承接和推进，不能推翻已发生的关键事实）：
 ${continuity}
+
+连载台账（所有未解悬念、人物现状、能力代价、道具归属和下一集义务均为高优先级连续性事实）：
+${stringify(payload.projectSeriesLedger || {}, 7500)}
+
+手游设定来源库（按“手游官方已确认 > 宣传片或实机内容 > 合理推测 > 项目原创二设”使用；“禁用页游设定”必须回避。来源不足时明确作为二设，不得把页游内容冒充手游事实）：
+${stringify(payload.projectCanonSources || [], 6500)}
 
 可复用内容资产（优先复用其中适配本集的角色立绘、场景、口头禅、冲突/标题/封面模板和 BGM/SFX 方案；不适配时不要生硬套用）：
 ${stringify(payload.projectAssets || [], 5000)}
@@ -406,7 +420,7 @@ function scriptPrompt(input) {
       {"beat":"反转与选择","beatIds":["BEAT-06","BEAT-07"],"content":"剧情"},
       {"beat":"选择后果与结尾钩子","beatIds":["BEAT-08"],"content":"下一集悬念"}
     ],
-    "dialogue": [{"role":"角色名","line":"短台词"}],
+    "dialogue": [{"id":"LINE-01","beatIds":["BEAT-01"],"role":"角色名","line":"短台词","intention":"这句话想让对方做什么","subtext":"没说出口的真实意思"}],
     "rhythm": ["情绪节奏"],
     "reversals": ["反转点"],
     "innovationPoints": ["本集独有的剧情机制，以及它怎样推动冲突"],
@@ -445,6 +459,7 @@ function storyboardPrompt(input) {
 10. 每段 visualPrompt 要能脱离上下文直接交给视频模型，并明确“单场景连续镜头、无硬切”；continuityIn 和 continuityOut 必须精确描述首尾人物位置、朝向、表情、道具和环境状态，使相邻视频段能用首尾帧或参考图衔接。
 11. 所有视频段合起来必须完整实现当前剧本；最后一段必须呈现剧本结尾悬念，不能擅自增加新反转或混入其他剧本内容。
 12. 角色若有结构化角色卡，动作链和画面提示词必须体现其标志性动作、反差或喜剧触发器；口头禅只能出现在剧本已有台词中，不得为分镜擅自加戏。
+13. 每段必须用 beatIds 和 dialogueIds 原样引用剧本中的节拍与台词 id；分镜台词必须与所引用 LINE 原台词一致，不能只写意思相近的新台词。
 
 项目连续性资料：${canon}
 
@@ -453,7 +468,7 @@ function storyboardPrompt(input) {
 返回结构：
 {
   "storyboard": [
-    {"shot":1,"timeRange":"00-08秒","seconds":8,"generationSeconds":8,"segmentGoal":"本段推进的唯一剧情任务","continuityIn":"段首人物、道具和环境状态","continuityOut":"段尾人物、道具和环境状态","beatBreakdown":[{"range":"0-3秒","content":"同一镜头内的动作阶段"},{"range":"3-8秒","content":"同一镜头内的动作阶段"}],"characters":"出镜角色","scene":"单一场景","visual":"整段画面概述","action":"一个主动作和最多一个反应","line":"台词/旁白","scale":"单一主景别或平滑景别变化","movement":"一种主要镜头运动","sound":"音效/配乐建议","subtitle":"字幕文案","visualPrompt":"单场景连续镜头、无硬切的完整9:16提示词","assetLinks":"资产库名称或待采集素材","assetNote":"制作备注","assetStatus":"待制作"}
+    {"clipId":"CLIP-01","shot":1,"beatIds":["BEAT-01"],"dialogueIds":["LINE-01"],"timeRange":"00-08秒","seconds":8,"generationSeconds":8,"segmentGoal":"本段推进的唯一剧情任务","continuityIn":"段首人物、道具和环境状态","continuityOut":"段尾人物、道具和环境状态","beatBreakdown":[{"range":"0-3秒","content":"同一镜头内的动作阶段"},{"range":"3-8秒","content":"同一镜头内的动作阶段"}],"characters":"出镜角色","scene":"单一场景","visual":"整段画面概述","action":"一个主动作和最多一个反应","line":"所引用剧本原台词/旁白","scale":"单一主景别或平滑景别变化","movement":"一种主要镜头运动","sound":"音效/配乐建议","subtitle":"字幕文案","visualPrompt":"单场景连续镜头、无硬切的完整9:16提示词","assetLinks":"资产库名称或待采集素材","assetNote":"制作备注","assetStatus":"待制作"}
   ]
 }
 限制：storyboard 必须正好 ${segmentCount} 条，按时间顺序排列；每段内容只能来自当前剧本。`;
@@ -484,6 +499,50 @@ function continuityPrompt(input) {
   "nextEpisodeCarryover":"下一集承接提示"
 }
 限制：checks 必须包含“角色性格”“角色标志性特征”“精灵能力”“人物关系”“悬念承接”五项；score 为 0-100 整数。`;
+}
+
+function seriesLedgerPrompt(input) {
+  const payload = normalizeInput(input);
+  return `你是连续短剧的场记与故事编辑。请根据全部已归档集数更新项目“连载台账”，只输出严格 JSON，不要 Markdown 或解释。
+
+原则：
+1. 台账只记录已在剧本中发生、明确建立或必须承接的事实；不能把推测写成已发生事实。
+2. 旧台账中仍有效的未解悬念必须保留；已经在后续集明确解决的内容移入 resolvedQuestions。
+3. 人物状态写当前目标、已知事实、隐瞒事实、核心关系状态和最后变化；能力状态写代价、冷却、禁用条件和最后使用集。
+4. 关键道具写持有人、当前状态和“铺垫/回收”进度；重复梗写上次用法、变化和下次使用规则，防止机械重复。
+5. nextObligations 必须是下一集能直接执行的具体义务，例如“第4集开头承接徽章裂开后的选择”，不能写“继续推进主线”。
+6. 必须遵守《洛克王国：世界》手游来源边界，不得把页游设定补进台账。
+
+项目资料：${bibleContext(payload)}
+旧台账：${stringify(payload.projectSeriesLedger || {}, 7500)}
+已归档集数（按集数顺序）：${stringify(payload.projectEpisodes || [], 22000)}
+
+返回结构：
+{"ledger":{"openQuestions":[{"id":"Q-01","question":"未解问题","originEpisode":1,"nextAction":"何时如何承接"}],"resolvedQuestions":[{"id":"Q-00","resolution":"解决事实","resolvedEpisode":2}],"characterStates":[{"name":"角色名","currentGoal":"当前目标","knownFacts":"已知事实","hiddenFacts":"隐瞒事实","relationshipState":"核心关系现状","lastChange":"最后一次变化"}],"abilityStates":[{"name":"精灵或能力","status":"当前可用状态","costCooldown":"代价或冷却","lastUsedEpisode":1}],"propStates":[{"name":"道具名","holder":"持有人","status":"状态","setupPayoff":"铺垫或回收进度"}],"antagonistProgress":"反派计划推进到哪一步","recurringGags":[{"name":"梗名","lastUse":"上次用法","evolution":"已经怎样变化","nextUseRule":"下次如何升级或暂停"}],"nextObligations":["下一集必须承接的具体行动"]}}`;
+}
+
+function scriptDoctorPrompt(input) {
+  const payload = normalizeInput(input);
+  return `你是专业短剧总编和剧本医生。请诊断当前《洛克王国：世界》手游竖屏短剧，并在不改变已确认策划、8节拍因果、人物设定、能力边界和结尾核心承诺的前提下，给出一版完整修订稿。只输出严格 JSON，不要 Markdown。
+
+必须检查：
+1. 主角是否主动追求具体目标，还是只被事件拖着走；失败代价和被迫选择是否落实。
+2. 冲突是否逐拍升级，每个反转是否由前文规则、道具或选择触发；铺垫是否有回收。
+3. 各角色台词能否遮住名字仍被识别；是否遵守说话节奏、压力反应、称呼习惯、撒谎破绽与禁用表达。
+4. 已选梗是否成为动作、规则或后果，而不是硬塞流行语；笑点是否有铺垫、误导、回扣。
+5. 9:16画面是否有清晰主体动作、道具变化和前中后景；是否能拆成可生成的视频段。
+6. 前3秒是否静音也能理解，结尾是否提出下一集必须行动的问题。
+7. 手游设定来源是否可靠；来源不明只能作为项目二设，禁用页游设定不得出现。
+
+项目资料：${bibleContext(payload)}
+本集策划：${stringify(payload.episodePlan || {}, 3500)}
+已确认节拍：${stringify(payload.beatSheet || [], 7500)}
+当前剧本：${stringify(payload.script || payload.previousScript || {}, 15000)}
+
+返回结构：
+{"report":{"score":0,"summary":"一句话诊断","priority":"最优先修复的一件事","dimensions":[{"area":"主角主动性|冲突升级|铺垫回收|台词区分|梗与笑点|画面表现|结尾钩子|设定边界","score":0}],"issues":[{"severity":"高|中|低","area":"问题维度","problem":"具体问题","evidence":"引用剧情位置或短句作为依据","fix":"可直接执行的修改","beatIds":["BEAT-01"],"dialogueIds":["LINE-01"]}]},"revisedScript":{"title":"完整修订后的剧本对象，结构必须与原剧本生成接口完全一致"}}
+
+限制：dimensions 必须覆盖8个维度；issues 只保留最多8个高价值问题；revisedScript 必须返回完整对象，不得省略未修改字段，并保留稳定的 BEAT 与 LINE 对应。`;
 }
 
 function biblePrompt(input) {
@@ -531,6 +590,8 @@ function characterCardPrompt(input) {
 5. 喜剧触发器要能重复制造“铺垫 -> 误导 -> 回扣”，但不能让角色变成只负责出丑的工具人。
 6. 欲望、弱点和底线要能制造选择；底线不能与当前短剧圣经冲突。
 7. 使用手游开放世界语境，不套用旧页游剧情，不冒充官方设定。
+8. 建立稳定的“语言指纹”：说话节奏、压力下反应、撒谎破绽、称呼习惯和禁用表达必须彼此一致，并能用于后续台词检查。
+9. 补全角色内在需求、旧伤和隐瞒秘密，使外在欲望与内在需求产生矛盾。
 
 项目资料：${bibleContext(payload)}
 当前创作输入：${creativeInputSummary(payload)}
@@ -548,7 +609,15 @@ function characterCardPrompt(input) {
     "catchphrases":["口头禅1","口头禅2","口头禅3"],
     "mannerism":"可见的动作习惯及触发条件",
     "comedyTrigger":"可重复的喜剧触发与回扣方式",
-    "boundary":"绝不能做的事"
+    "boundary":"绝不能做的事",
+    "speechPattern":"说话节奏和句式习惯",
+    "pressureResponse":"压力下的语言与行动反应",
+    "lieTell":"撒谎时可观察的语言或动作破绽",
+    "addressStyle":"对不同关系角色的称呼习惯",
+    "forbiddenPhrases":["绝不符合该角色的表达"],
+    "innerNeed":"尚未承认的内在需求",
+    "wound":"造成错误信念的旧伤",
+    "secret":"会改变关系判断的隐瞒秘密"
   }
 }`;
 }
@@ -759,12 +828,18 @@ function normalizeScript(result, input = {}) {
   const payload = normalizeInput(input);
   const source = result?.script || result;
   if (!source || typeof source !== "object") throw validationError("剧本", ["缺少 script 对象"]);
+  const sourceDialogue = Array.isArray(source.dialogue) ? source.dialogue : [];
+  const validBeatIds = payload.beatSheet.length === 8 ? payload.beatSheet.map((beat, index) => textValue(beat?.id) || `BEAT-${String(index + 1).padStart(2, "0")}`) : [];
   const script = {
     title: textValue(source.title),
     synopsis: textValue(source.synopsis),
     characters: (Array.isArray(source.characters) ? source.characters : []).map((item) => ({ name: textValue(item?.name), description: textValue(item?.description) })),
     structure: (Array.isArray(source.structure) ? source.structure : []).map((item) => ({ beat: textValue(item?.beat), beatIds: normalizeIdList(item?.beatIds, 8), content: textValue(item?.content) })),
-    dialogue: (Array.isArray(source.dialogue) ? source.dialogue : []).map((item) => ({ role: textValue(item?.role), line: textValue(item?.line) })),
+    dialogue: sourceDialogue.map((item, index) => {
+      const supplied = normalizeIdList(item?.beatIds, 8).filter((id) => !validBeatIds.length || validBeatIds.includes(id));
+      const fallback = validBeatIds.length ? [validBeatIds[Math.min(validBeatIds.length - 1, Math.floor(index * validBeatIds.length / Math.max(1, sourceDialogue.length)))]] : [];
+      return { id: `LINE-${String(index + 1).padStart(2, "0")}`, beatIds: supplied.length ? supplied : fallback, role: textValue(item?.role), line: textValue(item?.line), intention: textValue(item?.intention), subtext: textValue(item?.subtext) };
+    }),
     rhythm: (Array.isArray(source.rhythm) ? source.rhythm : []).map(textValue).filter(Boolean),
     reversals: (Array.isArray(source.reversals) ? source.reversals : []).map(textValue).filter(Boolean),
     innovationPoints: (Array.isArray(source.innovationPoints) ? source.innovationPoints : []).map(textValue).filter(Boolean),
@@ -798,6 +873,7 @@ function normalizeScript(result, input = {}) {
     const coveredBeatIds = new Set(script.structure.flatMap((item) => item.beatIds));
     const missingBeatIds = payload.beatSheet.map((beat, index) => textValue(beat?.id) || `BEAT-${String(index + 1).padStart(2, "0")}`).filter((id) => !coveredBeatIds.has(id));
     if (missingBeatIds.length) issues.push(`剧情结构未覆盖已确认节拍：${missingBeatIds.join("、")}`);
+    if (script.dialogue.some((item) => !item.beatIds.length)) issues.push("每句台词必须关联至少一个已确认节拍id");
   }
   const selectedCharacterIds = new Set(payload.projectCharacterCards.map((item) => textValue(item?.id)).filter(Boolean));
   const integratedCharacterIds = new Set(script.assetIntegration.characters.map((item) => item.assetId));
@@ -819,10 +895,19 @@ function normalizeStoryboard(result, duration, clipMode = "smart", script = null
   const plan = storyboardSegmentPlan(duration || source.reduce((sum, item) => sum + Number(item?.seconds || 0), 0), clipMode);
   const expectedSegments = plan.segments.length;
   if (source.length !== expectedSegments) throw validationError("分镜", [`应返回${expectedSegments}个视频段，实际为${source.length}个`]);
+  const scriptBeatIds = [...new Set((script?.structure || []).flatMap((item) => normalizeIdList(item?.beatIds, 8)))];
+  const scriptDialogueIds = (script?.dialogue || []).map((item, index) => textValue(item?.id) || `LINE-${String(index + 1).padStart(2, "0")}`);
   const storyboard = source.map((shot, index) => {
       const planned = plan.segments[index];
+      const suppliedBeatIds = normalizeIdList(shot?.beatIds, 8).filter((id) => scriptBeatIds.includes(id));
+      const suppliedDialogueIds = normalizeIdList(shot?.dialogueIds, 10).filter((id) => scriptDialogueIds.includes(id));
+      const fallbackBeat = scriptBeatIds.length ? [scriptBeatIds[Math.min(scriptBeatIds.length - 1, Math.floor(index * scriptBeatIds.length / source.length))]] : [];
+      const fallbackDialogue = scriptDialogueIds.length ? [scriptDialogueIds[Math.min(scriptDialogueIds.length - 1, Math.floor(index * scriptDialogueIds.length / source.length))]] : [];
       return {
+        clipId: `CLIP-${String(index + 1).padStart(2, "0")}`,
         shot: index + 1,
+        beatIds: suppliedBeatIds.length ? suppliedBeatIds : fallbackBeat,
+        dialogueIds: suppliedDialogueIds.length ? suppliedDialogueIds : fallbackDialogue,
         timeRange: planned.timeRange,
         seconds: planned.seconds,
         generationSeconds: planned.generationSeconds,
@@ -847,6 +932,8 @@ function normalizeStoryboard(result, duration, clipMode = "smart", script = null
     const missing = requiredFields.filter((field) => !shot[field]);
     if (missing.length) issues.push(`第${index + 1}段缺少${missing.join("/")}`);
     if (!shot.beatBreakdown.length || shot.beatBreakdown.some((beat) => !beat.range || !beat.content)) issues.push(`第${index + 1}段缺少完整动作阶段`);
+    if (scriptBeatIds.length && !shot.beatIds.length) issues.push(`第${index + 1}段未关联剧本节拍`);
+    if (scriptDialogueIds.length && !shot.dialogueIds.length) issues.push(`第${index + 1}段未关联剧本台词`);
   });
   const scriptLines = (script?.dialogue || []).map((item) => normalizedLine(item?.line)).filter((line) => line.length >= 2);
   if (scriptLines.length) {
@@ -878,6 +965,50 @@ function normalizeContinuity(result) {
     mustPreserve: Array.isArray(report.mustPreserve) ? report.mustPreserve.map(String).slice(0, 5) : [],
     nextEpisodeCarryover: String(report.nextEpisodeCarryover || ""),
   };
+}
+
+function normalizeSeriesLedger(result) {
+  const source = result?.ledger || result;
+  if (!source || typeof source !== "object") throw validationError("连载台账", ["缺少 ledger 对象"]);
+  const objects = (key, fields) => (Array.isArray(source[key]) ? source[key] : []).slice(0, 30).map((item) => Object.fromEntries(fields.map((field) => [field, field.toLowerCase().includes("episode") ? Number(item?.[field] || 0) : textValue(item?.[field])]))).filter((item) => fields.some((field) => item[field]));
+  const ledger = {
+    openQuestions: objects("openQuestions", ["id", "question", "originEpisode", "nextAction"]),
+    resolvedQuestions: objects("resolvedQuestions", ["id", "resolution", "resolvedEpisode"]),
+    characterStates: objects("characterStates", ["name", "currentGoal", "knownFacts", "hiddenFacts", "relationshipState", "lastChange"]),
+    abilityStates: objects("abilityStates", ["name", "status", "costCooldown", "lastUsedEpisode"]),
+    propStates: objects("propStates", ["name", "holder", "status", "setupPayoff"]),
+    antagonistProgress: textValue(source.antagonistProgress),
+    recurringGags: objects("recurringGags", ["name", "lastUse", "evolution", "nextUseRule"]),
+    nextObligations: (Array.isArray(source.nextObligations) ? source.nextObligations : []).map(textValue).filter(Boolean).slice(0, 12),
+    updatedAt: new Date().toISOString(),
+  };
+  const issues = [];
+  if (!ledger.characterStates.length) issues.push("至少需要一条人物现状");
+  if (!ledger.nextObligations.length) issues.push("至少需要一条下一集具体承接义务");
+  if (issues.length) throw validationError("连载台账", issues);
+  return { ledger };
+}
+
+function normalizeScriptDoctor(result, input = {}) {
+  const reportSource = result?.report || {};
+  const requiredAreas = ["主角主动性", "冲突升级", "铺垫回收", "台词区分", "梗与笑点", "画面表现", "结尾钩子", "设定边界"];
+  const dimensions = Array.isArray(reportSource.dimensions) ? reportSource.dimensions : [];
+  const report = {
+    score: Math.max(0, Math.min(100, Number(reportSource.score) || 0)),
+    summary: textValue(reportSource.summary), priority: textValue(reportSource.priority),
+    dimensions: requiredAreas.map((area) => {
+      const item = dimensions.find((candidate) => textValue(candidate?.area).includes(area)) || {};
+      return { area, score: Math.max(0, Math.min(100, Number(item.score) || 0)) };
+    }),
+    issues: (Array.isArray(reportSource.issues) ? reportSource.issues : []).slice(0, 8).map((item) => ({ severity: ["高", "中", "低"].includes(item?.severity) ? item.severity : "中", area: textValue(item?.area), problem: textValue(item?.problem), evidence: textValue(item?.evidence), fix: textValue(item?.fix), beatIds: normalizeIdList(item?.beatIds, 8), dialogueIds: normalizeIdList(item?.dialogueIds, 10) })).filter((item) => item.problem && item.evidence && item.fix),
+  };
+  const issues = [];
+  if (!report.summary || !report.priority) issues.push("诊断结论与优先修复项不能为空");
+  if (report.issues.length < 2) issues.push("至少需要2条有依据的具体问题");
+  let revisedScript;
+  try { revisedScript = normalizeScript({ script: result?.revisedScript }, input).script; } catch (cause) { issues.push(`修订稿不可用：${cause.message}`); }
+  if (issues.length) throw validationError("剧本医生", issues);
+  return { report, revisedScript };
 }
 
 function normalizeBible(result) {
@@ -912,6 +1043,9 @@ function normalizeCharacterCard(result) {
     contrast: String(source.contrast || "").trim(), desire: String(source.desire || "").trim(), weakness: String(source.weakness || "").trim(),
     catchphrases: (Array.isArray(source.catchphrases) ? source.catchphrases : []).map((item) => String(item).trim()).filter(Boolean).slice(0, 5),
     mannerism: String(source.mannerism || "").trim(), comedyTrigger: String(source.comedyTrigger || "").trim(), boundary: String(source.boundary || "").trim(),
+    speechPattern: String(source.speechPattern || "").trim(), pressureResponse: String(source.pressureResponse || "").trim(), lieTell: String(source.lieTell || "").trim(),
+    addressStyle: String(source.addressStyle || "").trim(), forbiddenPhrases: (Array.isArray(source.forbiddenPhrases) ? source.forbiddenPhrases : []).map((item) => String(item).trim()).filter(Boolean).slice(0, 8),
+    innerNeed: String(source.innerNeed || "").trim(), wound: String(source.wound || "").trim(), secret: String(source.secret || "").trim(),
   };
   if (!card.name || !card.role || !card.traits || !card.catchphrases.length || !card.boundary) throw new Error("AI 返回的角色卡不完整");
   return { card };
@@ -1262,6 +1396,20 @@ async function api(request, env, url) {
     return success(result);
   }
 
+  if (url.pathname === "/api/series-ledger") {
+    if (!Array.isArray(input.projectEpisodes) || !input.projectEpisodes.length) return error("请先归档至少一集剧本", "EPISODES_REQUIRED", 400);
+    const raw = await askDeepSeek(env, input, seriesLedgerPrompt(input), 3000, usageMeter);
+    const result = await normalizeWithRepair(env, input, raw, normalizeSeriesLedger, 3000, usageMeter, "series-ledger");
+    return success(result);
+  }
+
+  if (url.pathname === "/api/script-doctor") {
+    if (!input.script && !input.previousScript) return error("请先提供需要诊断的剧本", "SCRIPT_REQUIRED", 400);
+    const raw = await askDeepSeek(env, input, scriptDoctorPrompt(input), 5200, usageMeter, { temperature: 0.55 });
+    const result = await normalizeWithRepair(env, input, raw, (value) => normalizeScriptDoctor(value, input), 5200, usageMeter, "script-doctor");
+    return success(result);
+  }
+
   if (url.pathname === "/api/generate") {
     const rawScript = await askDeepSeek(env, input, scriptPrompt(input), 2200, usageMeter);
     const scriptResult = await normalizeWithRepair(env, input, rawScript, (value) => normalizeScript(value, input), 2200, usageMeter, "script");
@@ -1309,6 +1457,8 @@ export const __test = {
   normalizeContinuity,
   normalizeBible,
   normalizeCharacterCard,
+  normalizeSeriesLedger,
+  normalizeScriptDoctor,
   normalizeMemeIdeas,
   normalizePlans,
   normalizeCreativeMixes,

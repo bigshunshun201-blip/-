@@ -15,7 +15,7 @@
     if (typeof item === "string") return item;
     if (item?.name && item.description) return `${item.name}：${item.description}`;
     if (item?.beat && item.content) return `${item.beat}：${item.content}`;
-    if (item?.role && item.line) return `${item.role}：“${item.line}”`;
+    if (item?.role && item.line) return `${item.id ? `${item.id} · ` : ""}${item.role}：“${item.line}”${item.intention ? `｜意图：${item.intention}` : ""}${item.subtext ? `｜潜台词：${item.subtext}` : ""}${item.beatIds?.length ? `｜${item.beatIds.join("、")}` : ""}`;
     return Object.values(item || {}).join("：");
   }
 
@@ -110,7 +110,7 @@
         <thead><tr><th>视频段</th><th>本段任务</th><th>角色 / 场景</th><th>段内节拍与动作</th><th>台词 / 字幕</th><th>镜头 / 声音</th><th>首尾连续性</th><th>AI 视频提示词</th><th>关联资产</th><th>制作备注</th><th>素材状态</th></tr></thead>
         <tbody>${storyboardRows.map((shot, index) => `
           <tr>
-            <td><strong>第 ${escapeHtml(shot.shot)} 段</strong><br>${escapeHtml(shot.timeRange)}<br><small>成片 ${escapeHtml(shot.seconds)} 秒</small><br><small>生成 ${escapeHtml(shot.generationSeconds || shot.seconds)} 秒${Number(shot.trimSeconds || 0) ? ` · 裁 ${escapeHtml(shot.trimSeconds)} 秒` : ""}</small><br><button class="segment-copy-button" type="button" data-copy-storyboard-segment="${index}">复制本段</button></td>
+            <td><strong>${escapeHtml(shot.clipId || `CLIP-${String(index + 1).padStart(2, "0")}`)}</strong><br><small>第 ${escapeHtml(shot.shot || index + 1)} 段</small><br>${escapeHtml(shot.timeRange)}<br><small>${escapeHtml((shot.beatIds || []).join("、"))}</small><br><small>${escapeHtml((shot.dialogueIds || []).join("、"))}</small><br><small>成片 ${escapeHtml(shot.seconds)} 秒</small><br><small>生成 ${escapeHtml(shot.generationSeconds || shot.seconds)} 秒${Number(shot.trimSeconds || 0) ? ` · 裁 ${escapeHtml(shot.trimSeconds)} 秒` : ""}</small><br><button class="segment-copy-button" type="button" data-copy-storyboard-segment="${index}">复制本段</button></td>
             <td>${escapeHtml(shot.segmentGoal)}</td>
             <td><strong>${escapeHtml(shot.characters)}</strong><br>${escapeHtml(shot.scene)}</td>
             <td>${beats(shot.beatBreakdown)}<small>${escapeHtml(shot.visual)}；${escapeHtml(shot.action)}</small></td>

@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>洛克王国短剧创作工作台</title>
-    <link rel="stylesheet" href="./styles.css?v=20260713-smart-video-segments" />
+    <link rel="stylesheet" href="./styles.css?v=20260714-production-system" />
   </head>
   <body>
     <a class="skip-link" href="#workspace">跳到创作工作区</a>
@@ -141,20 +141,13 @@
             <textarea id="memeSeed" rows="4" placeholder="粘贴热榜标题、视频分享文案或评论区高频词，每行一个；不必整理格式。"></textarea>
             <small class="field-hint">抖音官方自动榜单需要应用权限。这里先把你看到的真实素材提炼成动作、道具、规则和回扣笑点。</small>
             <div class="meme-lab-actions">
-              <div data-ai-model-switch aria-label="热梗提炼模型"></div>
+              <div data-ai-model-switch data-ai-model-scope="meme" aria-label="热梗提炼模型"></div>
               <button class="secondary-action" id="memeLabBtn" type="button">AI 提炼这些素材</button>
               <button class="ghost-action" id="memeInspireBtn" type="button">没素材，生成梗结构</button>
             </div>
             <div class="meme-lab-results" id="memeLabResults" aria-live="polite"></div>
           </div>
-          <div class="field-group">
-            <span>默认 AI 模型</span>
-            <div data-ai-model-switch aria-label="默认 AI 模型"></div>
-            <select id="aiModel" hidden>
-              <option value="deepseek-v4-flash">Flash：更快，适合批量出稿</option>
-              <option value="deepseek-v4-pro">Pro：质量更高，适合定稿</option>
-            </select>
-          </div>
+          <select id="aiModel" hidden><option value="deepseek-v4-flash">Flash</option><option value="deepseek-v4-pro">Pro</option></select>
           <label>
             续写要求
             <textarea id="continueInstruction" rows="3" placeholder="例如：接着上一集，揭晓暗影博士为什么让喵喵失忆；情绪更催泪，结尾留下第三集钩子。"></textarea>
@@ -184,7 +177,7 @@
             <textarea id="creativeMixBrief" rows="3" placeholder="例如：让嘴硬的主角误用精灵的读心能力，把“已读乱回”变成会改变任务指令的世界规则；笑点必须反过来迫使主角作出选择。"></textarea>
           </label>
           <div class="mix-actions">
-            <div data-ai-model-switch aria-label="角色与梗搭配模型"></div>
+            <div data-ai-model-switch data-ai-model-scope="mix" aria-label="角色与梗搭配模型"></div>
             <button class="secondary-action" id="suggestCreativeMixBtn" type="button">DeepSeek 搭配 3 套</button>
           </div>
           <div class="creative-mix-results" id="creativeMixResults" aria-live="polite" hidden></div>
@@ -202,7 +195,7 @@
               <strong>先确定本集结构，再生成剧本</strong>
               <span>快速填充免费；DeepSeek 会结合短剧圣经和前集实时创作（Flash 1 单位 / Pro 3 单位）</span>
             </div>
-            <div class="ai-model-line"><span>生成模型</span><div data-ai-model-switch aria-label="策划生成模型"></div></div>
+            <div class="ai-model-line"><span>策划模型</span><div data-ai-model-switch data-ai-model-scope="plan" aria-label="策划生成模型"></div></div>
             <div class="plan-starter-actions">
               <button class="secondary-action" id="autoPlanBtn" type="button">快速填充（免费）</button>
               <button class="ghost-action" id="suggestPlansBtn" type="button">DeepSeek 生成 3 套</button>
@@ -231,7 +224,7 @@
                 <strong>剧情节拍表</strong>
                 <span>先看 8 个因果节点，再决定是否写成完整剧本。</span>
               </div>
-              <button class="secondary-action" id="generateBeatSheetBtn" type="button">AI 生成节拍表</button>
+              <div class="beat-sheet-controls"><div data-ai-model-switch data-ai-model-scope="beat" aria-label="节拍表生成模型"></div><button class="secondary-action" id="generateBeatSheetBtn" type="button">AI 生成节拍表</button></div>
             </div>
             <div class="beat-sheet-status" id="beatSheetStatus">策划完成后可生成</div>
             <div class="beat-sheet-list" id="beatSheetList"></div>
@@ -243,7 +236,8 @@
           </div>
           <div class="action-stack episode-actions-stack" aria-label="创作动作">
             <p class="plan-ready-state" id="planReadyState" role="status">请先完整填写或采用一套本集策划</p>
-            <div class="ai-model-line"><span>剧本 / 分镜模型</span><div data-ai-model-switch aria-label="剧本和分镜生成模型"></div></div>
+            <div class="ai-model-line"><span>剧本模型</span><div data-ai-model-switch data-ai-model-scope="script" aria-label="剧本生成模型"></div></div>
+            <div class="ai-model-line"><span>分镜模型</span><div data-ai-model-switch data-ai-model-scope="storyboard" aria-label="分镜生成模型"></div></div>
             <button class="primary-action" id="generateBtn" disabled>先完成本集策划</button>
             <button class="secondary-action" id="storyboardBtn" disabled>基于本版剧本生成 AI 视频段</button>
             <button class="ghost-action" id="continueBtn" disabled>续写下一集</button>
@@ -338,6 +332,14 @@
               </div>
               <div class="episode-list" id="projectEpisodeList"></div>
             </section>
+            <section class="project-section series-ledger-section">
+              <div class="section-title">
+                <div><h3>连载台账</h3><p>从已归档集数提取未解悬念、人物状态、能力代价、关键道具和下一集义务。</p></div>
+                <div class="header-actions"><div data-ai-model-switch data-ai-model-scope="ledger" aria-label="连载台账模型"></div><button class="small-action" id="updateSeriesLedgerBtn" type="button">AI 更新台账</button></div>
+              </div>
+              <div class="series-ledger-output" id="seriesLedgerOutput"></div>
+              <details class="compact-history"><summary>查看台账历史 <span id="ledgerHistoryCount">0</span></summary><div id="ledgerHistoryList"></div></details>
+            </section>
             <section class="project-section review-entry">
               <div class="section-title">
                 <h3>发布复盘</h3>
@@ -381,7 +383,7 @@
                 <option value="mystery">羁绊悬疑</option>
                 <option value="ensemble">热血群像</option>
               </select>
-              <div data-ai-model-switch aria-label="短剧圣经生成模型"></div>
+              <div data-ai-model-switch data-ai-model-scope="bible" aria-label="短剧圣经生成模型"></div>
               <button class="secondary-action" id="applyBibleTemplateBtn" type="button">免费套用模板</button>
               <button class="ghost-action" id="generateBibleBtn" type="button">DeepSeek 帮我起草</button>
             </div>
@@ -394,6 +396,18 @@
               <label>主线矛盾<textarea id="bibleMainConflict" rows="5" placeholder="系列始终未解决的核心问题，以及阶段性升级路径。"></textarea></label>
               <label class="bible-wide">每集钩子规则<textarea id="bibleHookRules" rows="4" placeholder="例如：每集结尾只揭开一个新信息，同时留下一个必须在下一集行动的问题；不能用无理由失忆或突然复活。"></textarea></label>
             </div>
+            <section class="canon-source-section" aria-labelledby="canonSourceTitle">
+              <div class="section-heading"><div><p class="eyebrow">手游设定边界</p><h3 id="canonSourceTitle">设定来源库</h3></div><span id="canonSourceCount">0 条来源</span></div>
+              <p class="helper">记录哪些内容来自《洛克王国：世界》手游公开信息，哪些是项目二设。生成时会优先遵守已确认来源，并避开页游设定混入。</p>
+              <div class="canon-source-entry">
+                <label>来源等级<select id="canonSourceType"><option value="手游官方已确认">手游官方已确认</option><option value="宣传片或实机内容">宣传片或实机内容</option><option value="合理推测">合理推测</option><option value="项目原创二设">项目原创二设</option><option value="禁用页游设定">禁用页游设定</option></select></label>
+                <label>设定名称<input id="canonSourceName" placeholder="例如：月牙镇区域机制" /></label>
+                <label class="canon-wide">设定内容<textarea id="canonSourceContent" rows="3" placeholder="写清可用事实、推测边界或明确禁用的旧设定。"></textarea></label>
+                <label class="canon-wide">来源链接或备注<input id="canonSourceUrl" placeholder="可选：官方页面、视频链接、时间点或核对备注" /></label>
+                <button class="secondary-action" id="addCanonSourceBtn" type="button">存入来源库</button>
+              </div>
+              <div class="canon-source-library" id="canonSourceLibrary"></div>
+            </section>
             <section class="character-section" aria-labelledby="characterSectionTitle">
               <div class="section-heading">
                 <div><p class="eyebrow">可复用人物资产</p><h3 id="characterSectionTitle">鲜明角色卡</h3></div>
@@ -411,9 +425,17 @@
                 <label>动作习惯<input id="characterMannerism" placeholder="例如：撒谎时会把徽章转半圈" /></label>
                 <label>喜剧触发器<input id="characterComedyTrigger" placeholder="例如：越想维持专业形象，道具越拆台" /></label>
                 <label class="character-wide">绝不能做的事<input id="characterBoundary" placeholder="例如：不会为了完成任务牺牲精灵伙伴" /></label>
+                <label>说话节奏<input id="characterSpeechPattern" placeholder="例如：先下结论，再补一句心虚解释" /></label>
+                <label>压力反应<input id="characterPressureResponse" placeholder="例如：越危险语速越慢，先护住搭档" /></label>
+                <label>撒谎破绽<input id="characterLieTell" placeholder="例如：说谎时会避开角色名字" /></label>
+                <label>称呼习惯<input id="characterAddressStyle" placeholder="例如：只在认真时叫搭档全名" /></label>
+                <label class="character-wide">禁用表达<input id="characterForbiddenPhrases" placeholder="不符合该角色、绝不能说的词句，用逗号分隔" /></label>
+                <label>内在需求<input id="characterInnerNeed" placeholder="角色尚未承认但真正需要学会的事" /></label>
+                <label>旧伤<input id="characterWound" placeholder="造成当前错误信念的过去经历" /></label>
+                <label class="character-wide">隐瞒秘密<input id="characterSecret" placeholder="会改变关系判断、但尚未公开的信息" /></label>
               </div>
               <div class="character-actions">
-                <div data-ai-model-switch aria-label="角色卡生成模型"></div>
+                <div data-ai-model-switch data-ai-model-scope="character" aria-label="角色卡生成模型"></div>
                 <button class="ghost-action" id="generateCharacterBtn" type="button">DeepSeek 起草角色</button>
                 <button class="secondary-action" id="saveCharacterBtn" type="button">保存角色卡</button>
                 <button class="small-action" id="clearCharacterBtn" type="button">清空</button>
@@ -425,10 +447,19 @@
           <article class="tab-panel" id="tab-consistency">
             <div class="result-header">
               <div><p class="eyebrow">连载质检</p><h2>连载一致性检查</h2></div>
-              <div class="header-actions"><div data-ai-model-switch aria-label="一致性检查模型"></div><button class="small-action" id="checkContinuityBtn">检查当前集</button></div>
+              <div class="header-actions"><div data-ai-model-switch data-ai-model-scope="continuity" aria-label="一致性检查模型"></div><button class="small-action" id="checkContinuityBtn">检查当前集</button></div>
             </div>
             <p class="helper bible-intro">一键对照短剧圣经、已完成集数与当前剧本：角色性格、精灵能力、人物关系和上一集悬念是否被正确承接。</p>
             <div class="consistency-output" id="consistencyOutput"></div>
+            <section class="script-doctor-section">
+              <div class="result-header">
+                <div><p class="eyebrow">剧作诊断</p><h2>剧本医生</h2></div>
+                <div class="header-actions"><div data-ai-model-switch data-ai-model-scope="doctor" aria-label="剧本医生模型"></div><button class="small-action" id="runScriptDoctorBtn" type="button">诊断当前剧本</button></div>
+              </div>
+              <p class="helper bible-intro">检查主角主动性、冲突升级、铺垫回收、台词区分度、梗的剧情作用、画面表现力与结尾追更动力，并生成一版可选择采用的修订稿。</p>
+              <div class="consistency-output" id="scriptDoctorOutput"></div>
+              <button class="secondary-action" id="applyDoctorRevisionBtn" type="button" hidden>采用修订稿并新建版本</button>
+            </section>
           </article>
 
           <article class="tab-panel" id="tab-assets">
@@ -507,7 +538,7 @@
                 <h2>洛克王国短剧选题库</h2>
               </div>
               <div class="header-actions">
-                <div data-ai-model-switch aria-label="选题生成模型"></div>
+                <div data-ai-model-switch data-ai-model-scope="topics" aria-label="选题生成模型"></div>
                 <button class="small-action" id="regenerateTopicsBtn">AI 换一批选题</button>
                 <button class="small-action" id="downloadTopics">下载 CSV</button>
               </div>
@@ -595,13 +626,13 @@
       粉丝向二创工作台示例，不代表官方内容或授权关系。发布前请核对平台规范与 IP 授权边界。
     </footer>
 
-    <script src="./generator.js?v=20260713-smart-video-segments"></script>
-    <script src="./workflow-core.js?v=20260713-smart-video-segments"></script>
-    <script src="./project-domain.js?v=20260713-smart-video-segments"></script>
-    <script src="./episode-planner.js?v=20260713-smart-video-segments"></script>
-    <script src="./ui-templates.js?v=20260713-smart-video-segments"></script>
-    <script src="./api-client.js?v=20260713-smart-video-segments"></script>
-    <script src="./data-store.js?v=20260713-smart-video-segments"></script>
-    <script src="./app.js?v=20260713-smart-video-segments"></script>
+    <script src="./generator.js?v=20260714-production-system"></script>
+    <script src="./workflow-core.js?v=20260714-production-system"></script>
+    <script src="./project-domain.js?v=20260714-production-system"></script>
+    <script src="./episode-planner.js?v=20260714-production-system"></script>
+    <script src="./ui-templates.js?v=20260714-production-system"></script>
+    <script src="./api-client.js?v=20260714-production-system"></script>
+    <script src="./data-store.js?v=20260714-production-system"></script>
+    <script src="./app.js?v=20260714-production-system"></script>
   </body>
 </html>
