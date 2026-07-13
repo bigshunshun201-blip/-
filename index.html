@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>洛克王国短剧创作工作台</title>
-    <link rel="stylesheet" href="./styles.css?v=20260713-project-system" />
+    <link rel="stylesheet" href="./styles.css?v=20260713-production-system" />
   </head>
   <body>
     <a class="skip-link" href="#workspace">跳到创作工作区</a>
@@ -145,6 +145,16 @@
           </div>
         </section>
 
+        <section class="panel-section compact episode-plan-panel">
+          <div class="section-title"><h2>本集策划</h2></div>
+          <p class="helper">先锁定追更结构，再生成剧本。五项会连同短剧圣经进入本集档案。</p>
+          <label>开头钩子<textarea id="planOpeningHook" rows="2" placeholder="前 3 秒必须看见的异常、危机或反常信息"></textarea></label>
+          <label>核心冲突<textarea id="planConflict" rows="2" placeholder="本集主角现在必须解决的对立问题"></textarea></label>
+          <label>反转信息<textarea id="planReversal" rows="2" placeholder="中后段改变观众判断的新信息"></textarea></label>
+          <label>结尾悬念<textarea id="planEndingSuspense" rows="2" placeholder="下一集必须行动或回答的问题"></textarea></label>
+          <label>目标情绪<input id="planTargetEmotion" placeholder="例如：压迫感 -> 反杀爽感 -> 悬念" /></label>
+        </section>
+
         <section class="panel-section compact reference-panel">
           <div class="section-title">
             <h2>选题参考</h2>
@@ -173,6 +183,7 @@
             <span class="tab-group-label">内容制作</span>
             <button class="tab" data-tab="project">项目</button>
             <button class="tab" data-tab="bible">短剧圣经</button>
+            <button class="tab" data-tab="consistency">一致性检查</button>
             <button class="tab active" data-tab="script">剧本</button>
             <button class="tab" data-tab="storyboard">分镜</button>
             <button class="tab" data-tab="creative">标题与封面</button>
@@ -182,6 +193,7 @@
             <button class="tab" data-tab="topics">选题库</button>
             <button class="tab" data-tab="history">作品库</button>
             <button class="tab" data-tab="calendar">排期复盘</button>
+            <button class="tab" data-tab="assets">资产库</button>
             <button class="tab" data-tab="optimize">优化方法</button>
             <button class="tab" data-tab="example">示例</button>
           </div>
@@ -237,13 +249,18 @@
                 <label>复盘集数<select id="reviewEpisodeSelect"></select></label>
                 <label>发布状态<select id="reviewStatus"><option value="draft">草稿</option><option value="scheduled">待发布</option><option value="published">已发布</option><option value="reviewed">已复盘</option></select></label>
                 <label>发布日期<input id="reviewPublishDate" type="date" /></label>
+                <label>发布时间<input id="reviewPublishTime" type="time" /></label>
                 <label>播放量<input id="reviewViews" type="number" min="0" placeholder="0" /></label>
                 <label>点赞<input id="reviewLikes" type="number" min="0" placeholder="0" /></label>
                 <label>评论<input id="reviewComments" type="number" min="0" placeholder="0" /></label>
+                <label>转发<input id="reviewShares" type="number" min="0" placeholder="0" /></label>
+                <label>关注转化<input id="reviewFollows" type="number" min="0" placeholder="0" /></label>
                 <label>完播率 %<input id="reviewCompletionRate" type="number" min="0" max="100" step="0.1" placeholder="例如：46.5" /></label>
+                <label class="review-notes">用户高频评论<textarea id="reviewCommentThemes" rows="3" placeholder="例如：迪莫别下线、黑袍人是谁、想看月牙镇夜景"></textarea></label>
                 <label class="review-notes">复盘结论<textarea id="reviewNotes" rows="3" placeholder="例如：首镜信息不足，下一集前 3 秒直接抛出契约倒计时。"></textarea></label>
               </div>
               <button class="secondary-action" id="saveReviewBtn">保存本集复盘</button>
+              <div class="review-insights" id="reviewInsights"></div>
             </section>
           </article>
 
@@ -265,6 +282,27 @@
               <label>主线矛盾<textarea id="bibleMainConflict" rows="5" placeholder="系列始终未解决的核心问题，以及阶段性升级路径。"></textarea></label>
               <label class="bible-wide">每集钩子规则<textarea id="bibleHookRules" rows="4" placeholder="例如：每集结尾只揭开一个新信息，同时留下一个必须在下一集行动的问题；不能用无理由失忆或突然复活。"></textarea></label>
             </div>
+          </article>
+
+          <article class="tab-panel" id="tab-consistency">
+            <div class="result-header">
+              <div><p class="eyebrow">连载质检</p><h2>连载一致性检查</h2></div>
+              <button class="small-action" id="checkContinuityBtn">检查当前集</button>
+            </div>
+            <p class="helper bible-intro">一键对照短剧圣经、已完成集数与当前剧本：角色性格、精灵能力、人物关系和上一集悬念是否被正确承接。</p>
+            <div class="consistency-output" id="consistencyOutput"></div>
+          </article>
+
+          <article class="tab-panel" id="tab-assets">
+            <div class="result-header"><div><p class="eyebrow">可复用资产</p><h2>内容资产库</h2></div></div>
+            <div class="asset-entry">
+              <label>资产类型<select id="assetType"><option value="角色立绘">角色立绘</option><option value="场景">场景</option><option value="口头禅">口头禅</option><option value="冲突模板">冲突模板</option><option value="标题模板">标题模板</option><option value="封面文案">封面文案</option><option value="BGM/SFX">BGM/SFX</option></select></label>
+              <label>资产名称<input id="assetName" placeholder="例如：迪莫·雨夜回归立绘" /></label>
+              <label class="asset-details">可复用内容<textarea id="assetContent" rows="3" placeholder="画面提示词、适用场景、可直接复用的台词/模板或音效方案。"></textarea></label>
+              <label>标签<input id="assetTags" placeholder="例如：迪莫, 月牙镇, 悬疑" /></label>
+              <button class="secondary-action" id="addAssetBtn">存入资产库</button>
+            </div>
+            <div class="asset-library" id="assetLibrary"></div>
           </article>
 
           <article class="tab-panel active" id="tab-script">
@@ -397,7 +435,7 @@
       粉丝向二创工作台示例，不代表官方内容或授权关系。发布前请核对平台规范与 IP 授权边界。
     </footer>
 
-    <script src="./generator.js?v=20260713-project-system"></script>
-    <script src="./app.js?v=20260713-project-system"></script>
+    <script src="./generator.js?v=20260713-production-system"></script>
+    <script src="./app.js?v=20260713-production-system"></script>
   </body>
 </html>

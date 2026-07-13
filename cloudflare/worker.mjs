@@ -36,6 +36,9 @@ function normalizeInput(input = {}) {
     projectLogline: String(input.projectLogline || "").trim(),
     projectBible: input.projectBible && typeof input.projectBible === "object" ? input.projectBible : {},
     projectContinuity: Array.isArray(input.projectContinuity) ? input.projectContinuity.slice(-3) : [],
+    projectAssets: Array.isArray(input.projectAssets) ? input.projectAssets.slice(-24) : [],
+    latestReview: input.latestReview && typeof input.latestReview === "object" ? input.latestReview : null,
+    episodePlan: input.episodePlan && typeof input.episodePlan === "object" ? input.episodePlan : {},
   };
 }
 
@@ -97,7 +100,13 @@ function bibleContext(payload) {
 ${stringify(canonical, 8500)}
 
 已完成集数连续性摘要（只能承接和推进，不能推翻已发生的关键事实）：
-${continuity}`;
+${continuity}
+
+可复用内容资产（优先复用其中适配本集的角色立绘、场景、口头禅、冲突/标题/封面模板和 BGM/SFX 方案；不适配时不要生硬套用）：
+${stringify(payload.projectAssets || [], 5000)}
+
+最近发布复盘（用于调整下一集钩子、标题与封面方向；无数据时忽略）：
+${stringify(payload.latestReview || {}, 2200)}`;
 }
 
 function scriptPrompt(input) {
@@ -118,8 +127,11 @@ function scriptPrompt(input) {
 6. 必须使用下列角色名，不能擅自替换为默认角色：${names.length ? names.join("、") : "根据主题自创 2-4 名角色"}。
 7. 必须遵守短剧圣经的性格、能力边界、角色关系、反派动机、世界规则和钩子规则；不得用失忆、突然升级、复活或新能力偷换已建立事实。
 8. 本集为第 ${payload.episodeNumber || 1} 集。它应推进系列主线矛盾，但只解决本集问题，不能终结整个项目主线。
+9. 必须严格执行本集策划：开头钩子、核心冲突、反转信息、结尾悬念、时长与目标情绪都要在标题、结构、台词和钩子中可见；不要写成完整闭环故事。
 
 项目连续性资料：${canon}
+
+本集策划（高优先级）：${stringify(payload.episodePlan || {}, 2600)}
 
 用户输入：${stringify(payload, 7000)}${continuation}
 
@@ -160,6 +172,7 @@ function storyboardPrompt(input) {
 4. 场景为《洛克王国：世界》手游开放世界，主要场景：${compact(payload.scene)}。
 5. 必须使用这些角色名：${names.length ? names.join("、") : "以剧本为准"}。
 6. 必须服从短剧圣经：镜头不能让角色使用超出能力边界的能力，角色关系和反派线索必须延续已完成集数。
+7. 每个镜头都必须填写角色、场景、动作、台词/旁白、镜头景别、时长、画面提示词、音效/配乐提示和素材状态；素材状态只能是“已有”“待制作”“待采集”。
 
 项目连续性资料：${canon}
 
@@ -168,9 +181,35 @@ function storyboardPrompt(input) {
 返回结构：
 {
   "storyboard": [
-    {"shot":1,"seconds":3,"visual":"画面内容","action":"角色动作","line":"台词/旁白","scale":"景别","movement":"镜头运动","sound":"音效/配乐建议","subtitle":"字幕文案"}
+    {"shot":1,"seconds":3,"characters":"出镜角色","scene":"场景","visual":"画面内容","action":"角色动作","line":"台词/旁白","scale":"景别","movement":"镜头运动","sound":"音效/配乐建议","subtitle":"字幕文案","visualPrompt":"可给绘图/素材检索使用的画面提示词","assetStatus":"待制作"}
   ]
 }`;
+}
+
+function continuityPrompt(input) {
+  const payload = normalizeInput(input);
+  return `你是连续短剧总编审。请检查当前集是否与《洛克王国：世界》手游短剧项目的短剧圣经和已完成集数一致。只输出严格 JSON，不要 Markdown。
+
+检查要求：
+1. 角色性格是否跑偏。
+2. 精灵能力是否突破设定或无代价解决危机。
+3. 前后集人物关系、反派动机和世界规则是否矛盾。
+4. 上一集结尾悬念是否被正确承接；若没有上一集，标记 pass。
+5. 只列可执行的问题和修正建议，不能泛泛而谈。
+
+项目资料：${bibleContext(payload)}
+当前剧本：${stringify(payload.script || payload.previousScript || {}, 12000)}
+本集策划：${stringify(payload.episodePlan || {}, 2600)}
+
+返回结构：
+{
+  "score": 0,
+  "summary":"一句话结论",
+  "checks":[{"area":"角色性格","status":"pass|warn|fail","evidence":"依据","fix":"可执行修正"}],
+  "mustPreserve":["下一集必须保留的事实"],
+  "nextEpisodeCarryover":"下一集承接提示"
+}
+限制：checks 必须包含“角色性格”“精灵能力”“人物关系”“悬念承接”四项；score 为 0-100 整数。`;
 }
 
 function topicsPrompt(input) {
@@ -212,13 +251,38 @@ function normalizeStoryboard(result) {
       shot: shot.shot || index + 1,
       seconds: shot.seconds || "",
       visual: shot.visual || "",
+      characters: shot.characters || "",
+      scene: shot.scene || "",
       action: shot.action || "",
       line: shot.line || "",
       scale: shot.scale || "",
       movement: shot.movement || "",
       sound: shot.sound || "",
       subtitle: shot.subtitle || "",
+      visualPrompt: shot.visualPrompt || "",
+      assetStatus: ["已有", "待制作", "待采集"].includes(shot.assetStatus) ? shot.assetStatus : "待制作",
     })),
+  };
+}
+
+function normalizeContinuity(result) {
+  const report = result && typeof result === "object" ? result : {};
+  const checks = Array.isArray(report.checks) ? report.checks : [];
+  const requiredAreas = ["角色性格", "精灵能力", "人物关系", "悬念承接"];
+  return {
+    score: Math.max(0, Math.min(100, Number(report.score) || 0)),
+    summary: String(report.summary || "一致性检查完成"),
+    checks: requiredAreas.map((area) => {
+      const source = checks.find((check) => String(check.area || "").includes(area)) || {};
+      return {
+        area,
+        status: ["pass", "warn", "fail"].includes(source.status) ? source.status : "warn",
+        evidence: String(source.evidence || "模型未提供明确依据"),
+        fix: String(source.fix || "请人工确认后再继续生成。"),
+      };
+    }),
+    mustPreserve: Array.isArray(report.mustPreserve) ? report.mustPreserve.map(String).slice(0, 5) : [],
+    nextEpisodeCarryover: String(report.nextEpisodeCarryover || ""),
   };
 }
 
@@ -320,6 +384,12 @@ async function api(request, env, url) {
   if (url.pathname === "/api/topics") {
     const count = Math.max(1, Math.min(Number(input.count || 8), 12));
     const result = normalizeTopics(await askDeepSeek(env, input, topicsPrompt(input), 1700), count);
+    return json({ ok: true, source: "deepseek", model, result });
+  }
+
+  if (url.pathname === "/api/continuity-check") {
+    if (!input.script && !input.previousScript) return error("请先提供需要检查的剧本", "SCRIPT_REQUIRED", 400);
+    const result = normalizeContinuity(await askDeepSeek(env, input, continuityPrompt(input), 1500));
     return json({ ok: true, source: "deepseek", model, result });
   }
 

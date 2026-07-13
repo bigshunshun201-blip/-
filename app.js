@@ -87,6 +87,8 @@
     const tabLabels = {
       project: "项目",
       bible: "短剧圣经",
+      consistency: "一致性检查",
+      assets: "资产库",
       script: "剧本",
       storyboard: "分镜",
       creative: "标题与封面",
@@ -123,7 +125,22 @@
       memeSeed: $("#memeSeed") ? $("#memeSeed").value.trim() : "",
       aiModel: $("#aiModel") ? $("#aiModel").value : "",
       continueInstruction: $("#continueInstruction") ? $("#continueInstruction").value.trim() : "",
+      episodePlan: {
+        openingHook: $("#planOpeningHook")?.value.trim() || "",
+        conflict: $("#planConflict")?.value.trim() || "",
+        reversal: $("#planReversal")?.value.trim() || "",
+        endingSuspense: $("#planEndingSuspense")?.value.trim() || "",
+        targetEmotion: $("#planTargetEmotion")?.value.trim() || "",
+      },
     };
+  }
+
+  function applyEpisodePlan(plan = {}) {
+    setInputValue("planOpeningHook", plan.openingHook || "");
+    setInputValue("planConflict", plan.conflict || "");
+    setInputValue("planReversal", plan.reversal || "");
+    setInputValue("planEndingSuspense", plan.endingSuspense || "");
+    setInputValue("planTargetEmotion", plan.targetEmotion || "");
   }
 
   function newId(prefix) {
@@ -137,6 +154,7 @@
       logline: "",
       bible: { ...defaultBible },
       episodes: [],
+      assets: [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
@@ -166,6 +184,7 @@
       ...project,
       bible: { ...defaultBible, ...(project.bible || {}) },
       episodes: Array.isArray(project.episodes) ? project.episodes : [],
+      assets: Array.isArray(project.assets) ? project.assets : [],
     }));
     state.currentProjectId = state.projects.some((project) => project.id === state.currentProjectId)
       ? state.currentProjectId
@@ -200,13 +219,31 @@
 
   function generationContext(input) {
     const project = currentProject();
+    const latestReview = (project?.episodes || [])
+      .filter((episode) => episode.review?.status === "reviewed" || episode.review?.status === "published")
+      .sort((a, b) => String(b.review?.updatedAt || "").localeCompare(String(a.review?.updatedAt || "")))[0]?.review || null;
     return {
       ...input,
       projectName: project?.name || "未命名短剧项目",
       projectLogline: project?.logline || "",
       projectBible: project?.bible || defaultBible,
       projectContinuity: projectContinuity(project),
+      projectAssets: (project?.assets || []).slice(-24),
+      latestReview,
     };
+  }
+
+  function validateEpisodePlan(input) {
+    const plan = input.episodePlan || {};
+    const labels = {
+      openingHook: "开头钩子",
+      conflict: "核心冲突",
+      reversal: "反转信息",
+      endingSuspense: "结尾悬念",
+      targetEmotion: "目标情绪",
+    };
+    const missing = Object.entries(labels).filter(([key]) => !String(plan[key] || "").trim()).map(([, label]) => label);
+    if (missing.length) throw new Error(`请先完成本集策划：${missing.join("、")}`);
   }
 
   function renderBible() {
@@ -246,11 +283,16 @@
     const review = episodes.find((episode) => episode.id === state.reviewEpisodeId)?.review || {};
     setInputValue("reviewStatus", review.status || "draft");
     setInputValue("reviewPublishDate", review.publishDate || "");
+    setInputValue("reviewPublishTime", review.publishTime || "");
     setInputValue("reviewViews", review.views ?? "");
     setInputValue("reviewLikes", review.likes ?? "");
     setInputValue("reviewComments", review.comments ?? "");
+    setInputValue("reviewShares", review.shares ?? "");
+    setInputValue("reviewFollows", review.follows ?? "");
     setInputValue("reviewCompletionRate", review.completionRate ?? "");
+    setInputValue("reviewCommentThemes", review.commentThemes || "");
     setInputValue("reviewNotes", review.notes || "");
+    renderReviewInsights(review);
   }
 
   function renderProject() {
@@ -267,6 +309,7 @@
       ["系列主线", project.logline || "尚未填写主线"],
       ["已归档集数", `${episodes.length} 集`],
       ["已完成复盘", `${reviewed} 集`],
+      ["可复用资产", `${(project.assets || []).length} 条`],
     ].map(([label, value]) => `<div><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`).join("");
     const target = $("#projectEpisodeList");
     target.innerHTML = episodes.length
@@ -353,6 +396,7 @@
       historyId: historyId || episode.historyId || null,
       source: response.source || episode.source || "",
       model: response.model || episode.model || "",
+      consistency: null,
       updatedAt: new Date().toISOString(),
     });
     project.updatedAt = new Date().toISOString();
@@ -381,6 +425,7 @@
     const episode = project?.episodes?.find((item) => item.id === id);
     if (!episode) throw new Error("没有找到该项目集数。");
     Object.entries(episode.input || {}).forEach(([key, value]) => setInputValue(key, value));
+    applyEpisodePlan(episode.input?.episodePlan);
     setInputValue("episodeNumber", episode.episodeNumber);
     state.currentEpisodeId = episode.id;
     state.reviewEpisodeId = episode.id;
@@ -388,7 +433,7 @@
     state.storyboard = episode.storyboard || [];
     state.creativePack = episode.creativePack || null;
     state.currentHistoryId = episode.historyId || null;
-    renderScript(); renderStoryboard(); renderCreativePack(); renderProject(); renderExample(); saveDraft(false);
+    renderScript(); renderStoryboard(); renderCreativePack(); renderProject(); renderAssets(); renderConsistency(); renderExample(); saveDraft(false);
     switchTab("script");
     setStatus(`已打开第 ${episode.episodeNumber} 集：${episode.script?.title || "待生成"}`);
   }
@@ -399,16 +444,141 @@
     episode.review = {
       status: $("#reviewStatus").value,
       publishDate: $("#reviewPublishDate").value,
+      publishTime: $("#reviewPublishTime").value,
       views: Number($("#reviewViews").value || 0),
       likes: Number($("#reviewLikes").value || 0),
       comments: Number($("#reviewComments").value || 0),
+      shares: Number($("#reviewShares").value || 0),
+      follows: Number($("#reviewFollows").value || 0),
       completionRate: Number($("#reviewCompletionRate").value || 0),
+      commentThemes: $("#reviewCommentThemes").value.trim(),
       notes: $("#reviewNotes").value.trim(),
       updatedAt: new Date().toISOString(),
     };
     persistProjects();
     renderProject();
     setStatus(`第 ${episode.episodeNumber} 集复盘已保存`);
+  }
+
+  function deriveReviewInsights(review = {}) {
+    const views = Number(review.views || 0);
+    const completion = Number(review.completionRate || 0);
+    const comments = Number(review.comments || 0);
+    const shares = Number(review.shares || 0);
+    const follows = Number(review.follows || 0);
+    const interactionRate = views ? ((Number(review.likes || 0) + comments + shares) / views) * 100 : 0;
+    const hook = completion && completion < 35
+      ? "前 3 秒取消铺垫，直接给出倒计时、精灵异常或关系破裂的可见证据。"
+      : comments && views && comments / views < 0.003
+        ? "结尾改成二选一追问，让观众决定下一集先救谁、先查哪条线索。"
+        : "沿用当前信息密度，下一集在前 3 秒先兑现上一集留下的一个问题。";
+    const title = shares && views && shares / views > 0.01
+      ? "标题沿用情绪共鸣结构，加入角色名和不可逆代价。"
+      : "标题用“角色 + 异常问题”结构，避免解释世界观，例如“迪莫为什么不肯回月牙镇？”";
+    const cover = follows && views && follows / views > 0.01
+      ? "封面保留账号主角和系列标记，强化追更识别。"
+      : "封面只保留一张角色表情、一处异常道具和 6-10 字冲突词。";
+    return { hook, title, cover, interactionRate };
+  }
+
+  function renderReviewInsights(review = {}) {
+    const target = $("#reviewInsights");
+    if (!target) return;
+    const hasData = Object.values(review).some((value) => value !== "" && value !== 0 && value !== "draft" && value !== undefined);
+    if (!hasData) {
+      target.innerHTML = `<p class="helper">录入发布数据后，这里会给出下一集的钩子、标题和封面方向。</p>`;
+      return;
+    }
+    const insights = deriveReviewInsights(review);
+    target.innerHTML = [
+      ["下一集钩子", insights.hook],
+      ["标题方向", insights.title],
+      ["封面方向", insights.cover],
+    ].map(([title, body]) => `<article><h4>${escapeHtml(title)}</h4><p>${escapeHtml(body)}</p></article>`).join("");
+  }
+
+  function renderAssets() {
+    const target = $("#assetLibrary");
+    if (!target) return;
+    const assets = currentProject()?.assets || [];
+    target.innerHTML = assets.length
+      ? assets.slice().reverse().map((asset) => `
+        <article class="asset-card">
+          <span class="asset-type">${escapeHtml(asset.type)}</span>
+          <div><h3>${escapeHtml(asset.name)}</h3><p>${escapeHtml(asset.content)}</p><div class="tagline">${(asset.tags || []).map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join("")}</div></div>
+          <button class="small-action danger-action" data-asset-delete="${escapeHtml(asset.id)}">移除</button>
+        </article>`).join("")
+      : `<p class="helper">还没有可复用资产。将角色立绘、场景、口头禅、冲突模板、标题模板、封面文案和 BGM/SFX 方案存入这里，生成时会作为项目上下文参考。</p>`;
+  }
+
+  function addAsset() {
+    const name = $("#assetName").value.trim();
+    const content = $("#assetContent").value.trim();
+    if (!name || !content) throw new Error("请填写资产名称和可复用内容。");
+    const project = currentProject();
+    project.assets.push({
+      id: newId("asset"),
+      type: $("#assetType").value,
+      name,
+      content,
+      tags: $("#assetTags").value.split(/[,，、\n]/).map((tag) => tag.trim()).filter(Boolean).slice(0, 8),
+      createdAt: new Date().toISOString(),
+    });
+    ["assetName", "assetContent", "assetTags"].forEach((id) => setInputValue(id, ""));
+    persistProjects();
+    renderAssets();
+    setStatus("已存入内容资产库");
+  }
+
+  function deleteAsset(id) {
+    const project = currentProject();
+    project.assets = (project.assets || []).filter((asset) => asset.id !== id);
+    persistProjects();
+    renderAssets();
+    setStatus("已移除资产");
+  }
+
+  function renderConsistency() {
+    const target = $("#consistencyOutput");
+    if (!target) return;
+    const report = currentProjectEpisode()?.consistency;
+    if (!state.script) {
+      target.innerHTML = `<p class="helper">请先生成或打开一集剧本，再执行一致性检查。</p>`;
+      return;
+    }
+    if (!report) {
+      target.innerHTML = `<p class="helper">当前集尚未检查。点击“检查当前集”会核对角色性格、精灵能力、人物关系和上一集悬念承接。</p>`;
+      return;
+    }
+    const checks = Array.isArray(report.checks) ? report.checks : [];
+    target.innerHTML = `
+      <div class="consistency-summary">
+        <div><h3>${escapeHtml(report.summary || "一致性检查完成")}</h3><p>下一集必须保留：${escapeHtml((report.mustPreserve || []).join("；") || "无额外要求")}</p></div>
+        <span class="consistency-score">${escapeHtml(report.score ?? "-")}</span>
+      </div>
+      <div class="consistency-list">${checks.map((check) => `
+        <article class="consistency-item">
+          <strong>${escapeHtml(check.area || "检查项")}</strong>
+          <div><span class="check-status ${escapeHtml(check.status || "warn")}">${escapeHtml(check.status || "warn")}</span><p>${escapeHtml(check.evidence || "")}</p><p>修正建议：${escapeHtml(check.fix || "无需修正")}</p></div>
+        </article>`).join("")}</div>
+      ${report.nextEpisodeCarryover ? `<section class="content-block"><h3>下一集承接提示</h3><p>${escapeHtml(report.nextEpisodeCarryover)}</p></section>` : ""}`;
+  }
+
+  async function runContinuityCheck() {
+    if (!state.script) throw new Error("请先生成或恢复一个剧本，再检查一致性。");
+    setStatus("AI 正在检查连载一致性...");
+    const input = generationContext({ ...getInput(), script: state.script });
+    const response = await apiRequest("/api/continuity-check", { input });
+    const episode = currentProjectEpisode();
+    if (episode) {
+      episode.consistency = response.result;
+      episode.updatedAt = new Date().toISOString();
+      persistProjects();
+    }
+    renderConsistency();
+    renderProject();
+    switchTab("consistency");
+    setStatus(`一致性检查完成 ${nowTime()} · ${response.model || "deepseek"}`);
   }
 
   function setInputValue(id, value) {
@@ -761,12 +931,16 @@
         shot: shot.shot || index + 1,
         seconds: shot.seconds || "",
         visual: shot.visual || "",
+        characters: shot.characters || "",
+        scene: shot.scene || "",
         action: shot.action || "",
         line: shot.line || "",
         scale: shot.scale || "",
         movement: shot.movement || "",
         sound: shot.sound || "",
         subtitle: shot.subtitle || "",
+        visualPrompt: shot.visualPrompt || "",
+        assetStatus: shot.assetStatus || "待准备",
       })),
       creativePack: result.creativePack || null,
     };
@@ -796,12 +970,16 @@
       shot: shot.shot || index + 1,
       seconds: shot.seconds || "",
       visual: shot.visual || "",
+      characters: shot.characters || "",
+      scene: shot.scene || "",
       action: shot.action || "",
       line: shot.line || "",
       scale: shot.scale || "",
       movement: shot.movement || "",
       sound: shot.sound || "",
       subtitle: shot.subtitle || "",
+      visualPrompt: shot.visualPrompt || "",
+      assetStatus: shot.assetStatus || "待准备",
     }));
   }
 
@@ -942,6 +1120,8 @@
     renderTable($("#storyboardTable"), state.storyboard, [
       { key: "shot", label: "镜头" },
       { key: "seconds", label: "时长" },
+      { key: "characters", label: "角色" },
+      { key: "scene", label: "场景" },
       { key: "visual", label: "画面内容" },
       { key: "action", label: "角色动作" },
       { key: "line", label: "台词/旁白" },
@@ -949,6 +1129,8 @@
       { key: "movement", label: "运镜" },
       { key: "sound", label: "音效/BGM" },
       { key: "subtitle", label: "字幕" },
+      { key: "visualPrompt", label: "画面提示词" },
+      { key: "assetStatus", label: "素材状态" },
     ]);
   }
 
@@ -1152,6 +1334,7 @@
       if (key === "continueInstruction" && keepInstruction) return;
       setInputValue(key, value);
     });
+    applyEpisodePlan(item.input?.episodePlan);
     if (item.projectId && state.projects.some((project) => project.id === item.projectId)) {
       state.currentProjectId = item.projectId;
       const projectEpisode = currentProject()?.episodes?.find((episode) => episode.historyId === item.id);
@@ -1165,6 +1348,7 @@
     renderScript();
     renderStoryboard();
     renderCreativePack();
+    renderConsistency();
     renderExample();
     switchTab("script");
     saveDraft(false);
@@ -1403,6 +1587,7 @@
 
   async function runGeneration(mode = "new") {
     const input = getInput();
+    validateEpisodePlan(input);
     if (mode === "continue" && !state.script) {
       throw new Error("还没有可续写的剧本，请先生成一集。");
     }
@@ -1442,6 +1627,7 @@
     renderStoryboard();
     renderCreativePack();
     renderHistory();
+    renderConsistency();
     renderExample();
     saveDraft(false);
     pulseResult();
@@ -1467,6 +1653,7 @@
     state.storyboard = normalizeStoryboardResult(response.result);
     updateCurrentHistoryStoryboard(response);
     renderStoryboard();
+    renderConsistency();
     renderExample();
     saveDraft(false);
     pulseResult();
@@ -1584,6 +1771,7 @@
         const el = document.getElementById(key);
         if (el) el.value = value;
       });
+      applyEpisodePlan(draft.input?.episodePlan);
       $("#competitorCsv").value = draft.competitorCsv || "";
       state.topics = normalizeTopicList(draft.topics);
       state.analysis = draft.analysis || null;
@@ -1723,6 +1911,20 @@
     $("#newProjectBtn").addEventListener("click", createProject);
     $("#saveProjectBtn").addEventListener("click", saveProjectMeta);
     $("#saveBibleBtn").addEventListener("click", saveBible);
+    $("#checkContinuityBtn").addEventListener("click", async () => {
+      try {
+        await runContinuityCheck();
+      } catch (error) {
+        reportError("一致性检查", error);
+      }
+    });
+    $("#addAssetBtn").addEventListener("click", () => {
+      try {
+        addAsset();
+      } catch (error) {
+        reportError("资产入库", error);
+      }
+    });
     $("#projectSelect").addEventListener("change", (event) => {
       state.currentProjectId = event.target.value;
       state.currentEpisodeId = null;
@@ -1730,6 +1932,8 @@
       setInputValue("episodeNumber", nextEpisodeNumber());
       renderProject();
       renderBible();
+      renderAssets();
+      renderConsistency();
       saveDraft(false);
       setStatus(`已切换到项目：${currentProject()?.name || "未命名项目"}`);
     });
@@ -1848,6 +2052,11 @@
         reportError("项目集数", error);
       }
     });
+    $("#assetLibrary").addEventListener("click", (event) => {
+      const deleteButton = event.target.closest("[data-asset-delete]");
+      if (!deleteButton) return;
+      deleteAsset(deleteButton.dataset.assetDelete);
+    });
     $("#topicGrid").addEventListener("click", async (event) => {
       const generateButton = event.target.closest("[data-topic-generate]");
       const continueButton = event.target.closest("[data-topic-continue]");
@@ -1886,6 +2095,8 @@
       renderCreativePack();
       renderProject();
       renderBible();
+      renderAssets();
+      renderConsistency();
       renderExample();
       checkAiStatus();
     } catch (error) {
