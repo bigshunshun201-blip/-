@@ -14,6 +14,7 @@
       name,
       logline: "",
       bible: { ...defaultBible },
+      planBatches: [],
       episodes: [],
       assets: [],
       createdAt: now,

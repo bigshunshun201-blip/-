@@ -17,6 +17,7 @@
     topicBatch: 0,
     planOptions: [],
     selectedPlanOptionId: null,
+    activePlanBatchId: null,
     activeAiOperation: null,
   };
 
@@ -120,7 +121,7 @@
       const control = document.getElementById(id);
       if (control) control.disabled = isBusy;
     });
-    $$('[data-topic-generate], [data-topic-continue], [data-topic-replace], [data-plan-option]').forEach((button) => {
+    $$('[data-topic-generate], [data-topic-continue], [data-topic-replace], [data-plan-option], [data-plan-batch-restore]').forEach((button) => {
       button.disabled = isBusy;
     });
     document.body?.setAttribute("aria-busy", String(isBusy));
@@ -171,6 +172,7 @@
     state.selectedTopic = null;
     state.planOptions = [];
     state.selectedPlanOptionId = null;
+    state.activePlanBatchId = null;
     setInputValue("episodeNumber", nextEpisodeNumber());
     renderPlanSuggestions();
     renderScript();
@@ -229,6 +231,10 @@
         endingSuspense: $("#planEndingSuspense")?.value.trim() || "",
         targetEmotion: $("#planTargetEmotion")?.value.trim() || "",
       },
+      episodePlanRef: {
+        batchId: state.activePlanBatchId || "",
+        planId: state.selectedPlanOptionId || "",
+      },
     };
   }
 
@@ -274,11 +280,77 @@
           <button class="small-action" type="button" data-plan-option="${index}">${option.id === state.selectedPlanOptionId ? "已采用" : "采用"}</button>
         </div>
         <p>${escapeHtml(option.why)}</p>
+        ${(option.innovation || option.memeMechanic || option.visualSetpiece) ? `<div class="plan-option-insights">
+          ${option.innovation ? `<span><strong>创新：</strong>${escapeHtml(option.innovation)}</span>` : ""}
+          ${option.memeMechanic ? `<span><strong>梗机制：</strong>${escapeHtml(option.memeMechanic)}</span>` : ""}
+          ${option.visualSetpiece ? `<span><strong>强画面：</strong>${escapeHtml(option.visualSetpiece)}</span>` : ""}
+        </div>` : ""}
         <ul class="plan-option-preview">
           ${Object.entries(labels).map(([key, label]) => `<li><strong>${label}：</strong>${escapeHtml(option.plan[key])}</li>`).join("")}
         </ul>
       </article>
     `).join("");
+  }
+
+  function renderPlanHistory() {
+    const project = currentProject();
+    const batches = Array.isArray(project?.planBatches) ? project.planBatches : [];
+    const count = $("#planHistoryCount");
+    const target = $("#planHistoryList");
+    if (count) count.textContent = String(batches.length);
+    if (!target) return;
+    target.innerHTML = batches.length
+      ? batches.slice(0, 8).map((batch) => {
+        const selected = (batch.plans || []).find((plan) => plan.id === batch.selectedPlanId);
+        const time = new Date(batch.createdAt).toLocaleString("zh-CN", { hour12: false });
+        return `<div class="plan-history-item">
+          <div>
+            <strong>第 ${escapeHtml(batch.episodeNumber || 1)} 集 · ${escapeHtml(batch.theme || "未命名选题")}</strong>
+            <span>${escapeHtml(time)} · ${escapeHtml(batch.model || "DeepSeek")} · ${escapeHtml(selected ? `已采用 ${selected.angle}` : "3 套待筛选")}</span>
+          </div>
+          <button class="small-action" type="button" data-plan-batch-restore="${escapeHtml(batch.id)}">恢复三案</button>
+        </div>`;
+      }).join("")
+      : `<p class="helper">每次让 DeepSeek 生成的 3 套策划都会保存在当前项目中。</p>`;
+  }
+
+  async function archivePlanBatch(options, response, input) {
+    const project = currentProject();
+    if (!project) return null;
+    const inputKeys = ["theme", "roles", "scene", "direction", "audience", "duration", "episodeCount", "episodeNumber", "style", "memeSeed", "aiModel", "continueInstruction"];
+    const batchInput = Object.fromEntries(inputKeys.map((key) => [key, input[key]]));
+    const batch = {
+      id: newId("plan-batch"),
+      createdAt: new Date().toISOString(),
+      episodeNumber: Number(input.episodeNumber || 1),
+      theme: input.theme || "未命名选题",
+      model: response.model || "",
+      source: response.source || "",
+      input: batchInput,
+      plans: options.map((option) => ({ ...option, plan: { ...option.plan } })),
+      selectedPlanId: null,
+    };
+    project.planBatches = [batch, ...(project.planBatches || [])].slice(0, 30);
+    project.updatedAt = batch.createdAt;
+    state.activePlanBatchId = batch.id;
+    await persistProjects();
+    renderPlanHistory();
+    return batch;
+  }
+
+  function restorePlanBatch(id) {
+    const batch = (currentProject()?.planBatches || []).find((item) => item.id === id);
+    if (!batch) throw new Error("没有找到这批策划记录。");
+    Object.entries(batch.input || {}).forEach(([key, value]) => {
+      if (!["episodePlan", "episodePlanRef"].includes(key)) setInputValue(key, value);
+    });
+    state.planOptions = (batch.plans || []).map((option) => ({ ...option, plan: { ...option.plan } }));
+    state.activePlanBatchId = batch.id;
+    state.selectedPlanOptionId = batch.selectedPlanId || null;
+    applyEpisodePlan(state.planOptions.find((option) => option.id === batch.selectedPlanId)?.plan || {});
+    renderPlanSuggestions();
+    saveDraft(false);
+    setStatus(`已恢复第 ${batch.episodeNumber || 1} 集的 3 套策划，可以重新筛选`);
   }
 
   async function suggestEpisodePlans() {
@@ -296,6 +368,7 @@
       if (options.length !== 3) throw new Error("DeepSeek 没有返回 3 套完整策划，请重新生成。");
       state.planOptions = options;
       state.selectedPlanOptionId = null;
+      await archivePlanBatch(options, response, input);
       renderPlanSuggestions();
       saveDraft(false);
       setStatus(`DeepSeek 已生成 3 套本集策划 ${nowTime()} · ${response.model || "model"}${usageSuffix(response)}`);
@@ -312,7 +385,10 @@
       seed: options.seed || Date.now(),
     });
     applyEpisodePlan(plan);
+    state.planOptions = [];
     state.selectedPlanOptionId = null;
+    state.activePlanBatchId = null;
+    renderPlanSuggestions();
     saveDraft(false);
     setStatus("本集策划已自动填好，可以直接修改或生成剧本");
     return plan;
@@ -323,6 +399,13 @@
     if (!option) throw new Error("没有找到这套策划，请重新生成灵感。");
     applyEpisodePlan(option.plan);
     state.selectedPlanOptionId = option.id;
+    const batch = (currentProject()?.planBatches || []).find((item) => item.id === state.activePlanBatchId);
+    if (batch) {
+      batch.selectedPlanId = option.id;
+      batch.updatedAt = new Date().toISOString();
+      persistProjects();
+      renderPlanHistory();
+    }
     renderPlanSuggestions();
     saveDraft(false);
     setStatus(`已采用“${option.angle}”方案，可以继续微调`);
@@ -355,6 +438,7 @@
       bible: { ...defaultBible, ...(project.bible || {}) },
       episodes: Array.isArray(project.episodes) ? project.episodes : [],
       assets: Array.isArray(project.assets) ? project.assets : [],
+      planBatches: Array.isArray(project.planBatches) ? project.planBatches : [],
     })).map(normalizeProjectEpisodes);
     state.currentProjectId = state.projects.some((project) => project.id === state.currentProjectId)
       ? state.currentProjectId
@@ -453,6 +537,7 @@
     $("#projectOverview").innerHTML = [
       ["系列主线", project.logline || "尚未填写主线"],
       ["已归档集数", `${episodes.length} 集`],
+      ["策划批次", `${(project.planBatches || []).length} 批`],
       ["已完成复盘", `${reviewed} 集`],
       ["可复用资产", `${(project.assets || []).length} 条`],
     ].map(([label, value]) => `<div><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`).join("");
@@ -474,6 +559,7 @@
         </article>`).join("")
       : `<p class="helper">当前项目还没有集数。填写圣经后，回到剧本页生成第一集。</p>`;
     renderReviewForm();
+    renderPlanHistory();
   }
 
   function saveProjectMeta() {
@@ -550,6 +636,10 @@
           name: `${String(imported.name).trim()}（导入）`,
           bible: { ...defaultBible, ...(imported.bible || {}) },
           assets: Array.isArray(imported.assets) ? imported.assets.map((asset) => ({ ...asset, id: newId("asset") })) : [],
+          planBatches: Array.isArray(imported.planBatches) ? imported.planBatches.map((batch) => ({
+            ...batch,
+            plans: (batch.plans || []).map((plan) => ({ ...plan, plan: { ...(plan.plan || {}) } })),
+          })) : [],
           episodes: Array.isArray(imported.episodes) ? imported.episodes : [],
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
@@ -623,6 +713,11 @@
     state.storyboard = episode.storyboard || [];
     state.creativePack = episode.creativePack || null;
     state.currentHistoryId = episode.historyId || null;
+    state.activePlanBatchId = episode.input?.episodePlanRef?.batchId || null;
+    state.selectedPlanOptionId = episode.input?.episodePlanRef?.planId || null;
+    const episodePlanBatch = (project.planBatches || []).find((batch) => batch.id === state.activePlanBatchId);
+    state.planOptions = episodePlanBatch?.plans?.map((option) => ({ ...option, plan: { ...option.plan } })) || [];
+    renderPlanSuggestions();
     renderScript(); renderStoryboard(); renderCreativePack(); renderProject(); renderAssets(); renderConsistency(); renderExample(); saveDraft(false);
     switchTab("script");
     const versionIndex = (episode.versions || []).findIndex((version) => version.id === episode.activeVersionId) + 1;
@@ -814,6 +909,7 @@
     applyEpisodePlan({});
     state.planOptions = [];
     state.selectedPlanOptionId = null;
+    state.activePlanBatchId = null;
     renderPlanSuggestions();
     if (mode === "new") {
       state.currentEpisodeId = null;
@@ -1102,6 +1198,9 @@
     script.dialogue = Array.isArray(script.dialogue) ? script.dialogue : [];
     script.rhythm = Array.isArray(script.rhythm) ? script.rhythm : [];
     script.reversals = Array.isArray(script.reversals) ? script.reversals : [];
+    script.innovationPoints = Array.isArray(script.innovationPoints) ? script.innovationPoints : [];
+    script.comedyBeats = Array.isArray(script.comedyBeats) ? script.comedyBeats : [];
+    script.visualHighlights = Array.isArray(script.visualHighlights) ? script.visualHighlights : [];
     script.hooks = Array.isArray(script.hooks) ? script.hooks : [];
     script.tags = Array.isArray(script.tags) ? script.tags : [];
     return {
@@ -1137,6 +1236,9 @@
     script.dialogue = Array.isArray(script.dialogue) ? script.dialogue : [];
     script.rhythm = Array.isArray(script.rhythm) ? script.rhythm : [];
     script.reversals = Array.isArray(script.reversals) ? script.reversals : [];
+    script.innovationPoints = Array.isArray(script.innovationPoints) ? script.innovationPoints : [];
+    script.comedyBeats = Array.isArray(script.comedyBeats) ? script.comedyBeats : [];
+    script.visualHighlights = Array.isArray(script.visualHighlights) ? script.visualHighlights : [];
     script.hooks = Array.isArray(script.hooks) ? script.hooks : [];
     script.tags = Array.isArray(script.tags) ? script.tags : [];
     return { script, storyboard: [], creativePack: null };
@@ -1371,6 +1473,11 @@
     state.storyboard = item.storyboard || [];
     state.creativePack = item.creativePack || null;
     state.currentHistoryId = item.id || null;
+    state.activePlanBatchId = item.input?.episodePlanRef?.batchId || null;
+    state.selectedPlanOptionId = item.input?.episodePlanRef?.planId || null;
+    const historyPlanBatch = (currentProject()?.planBatches || []).find((batch) => batch.id === state.activePlanBatchId);
+    state.planOptions = historyPlanBatch?.plans?.map((option) => ({ ...option, plan: { ...option.plan } })) || [];
+    renderPlanSuggestions();
     renderProject();
     renderBible();
     renderAssets();
@@ -1789,6 +1896,8 @@
       currentHistoryId: state.currentHistoryId,
       currentProjectId: state.currentProjectId,
       currentEpisodeId: state.currentEpisodeId,
+      activePlanBatchId: state.activePlanBatchId,
+      selectedPlanOptionId: state.selectedPlanOptionId,
       topics: state.topics,
       analysis: state.analysis,
       competitors: state.competitors,
@@ -1811,6 +1920,8 @@
       }
       state.currentEpisodeId = draft.currentEpisodeId || null;
       state.reviewEpisodeId = state.currentEpisodeId;
+      state.activePlanBatchId = draft.activePlanBatchId || draft.input?.episodePlanRef?.batchId || null;
+      state.selectedPlanOptionId = draft.selectedPlanOptionId || draft.input?.episodePlanRef?.planId || null;
       Object.entries(draft.input || {}).forEach(([key, value]) => {
         const el = document.getElementById(key);
         if (el) el.value = value;
@@ -1833,6 +1944,9 @@
         state.creativePack = draft.creativePack || null;
       }
       state.currentHistoryId = draft.currentHistoryId || null;
+      const activeBatch = (currentProject()?.planBatches || []).find((batch) => batch.id === state.activePlanBatchId);
+      state.planOptions = activeBatch?.plans?.map((option) => ({ ...option, plan: { ...option.plan } })) || [];
+      renderPlanSuggestions();
       setStatus("已恢复草稿");
     } catch (error) {
       // A malformed legacy draft is ignored; valid project archives remain intact.
@@ -1981,6 +2095,15 @@
         adoptPlanOption(Number(button.dataset.planOption));
       } catch (error) {
         reportError("采用本集策划", error);
+      }
+    });
+    $("#planHistoryList").addEventListener("click", (event) => {
+      const button = event.target.closest("[data-plan-batch-restore]");
+      if (!button) return;
+      try {
+        restorePlanBatch(button.dataset.planBatchRestore);
+      } catch (error) {
+        reportError("恢复策划记录", error);
       }
     });
     ["planOpeningHook", "planConflict", "planReversal", "planEndingSuspense", "planTargetEmotion"].forEach((id) => {

@@ -124,8 +124,12 @@
             <input id="customStyle" class="inline-custom" placeholder="也可以自己输入风格，例如：抽象、发疯文学、冷幽默、嘴替吐槽" />
           </label>
           <label>
-            热梗/搞笑语录
-            <textarea id="memeSeed" rows="2" placeholder="可选。比如：邪修、外耗、丝瓜汤文学、爱你老己、望周知、来都来了、谁懂啊、这合理吗"></textarea>
+            <span class="label-row">
+              <span>短视频热梗素材</span>
+              <a href="https://so-landing.douyin.com/landings/hotlist?board_type=0" target="_blank" rel="noreferrer">打开抖音实时热榜</a>
+            </span>
+            <textarea id="memeSeed" rows="3" placeholder="粘贴 3-8 个当周热梗、情绪句式或评论区高频词，每行一个。"></textarea>
+            <small class="field-hint">系统会把热梗转成动作、道具、规则和笑点，不会只塞进台词。</small>
           </label>
           <label>
             DeepSeek 模型
@@ -154,6 +158,10 @@
             </div>
           </div>
           <div class="plan-suggestions" id="planSuggestions" aria-live="polite" hidden></div>
+          <details class="plan-history" id="planHistory">
+            <summary>策划记录 <span id="planHistoryCount">0</span></summary>
+            <div class="plan-history-list" id="planHistoryList"></div>
+          </details>
           <label>开头钩子<textarea id="planOpeningHook" rows="2" placeholder="前 3 秒必须看见的异常、危机或反常信息"></textarea></label>
           <label>核心冲突<textarea id="planConflict" rows="2" placeholder="本集主角现在必须解决的对立问题"></textarea></label>
           <label>反转信息<textarea id="planReversal" rows="2" placeholder="中后段改变观众判断的新信息"></textarea></label>
@@ -450,13 +458,13 @@
       粉丝向二创工作台示例，不代表官方内容或授权关系。发布前请核对平台规范与 IP 授权边界。
     </footer>
 
-    <script src="./generator.js?v=20260713-plan-gate"></script>
-    <script src="./workflow-core.js?v=20260713-plan-gate"></script>
-    <script src="./project-domain.js?v=20260713-plan-gate"></script>
-    <script src="./episode-planner.js?v=20260713-plan-gate"></script>
-    <script src="./ui-templates.js?v=20260713-plan-gate"></script>
-    <script src="./api-client.js?v=20260713-plan-gate"></script>
-    <script src="./data-store.js?v=20260713-plan-gate"></script>
-    <script src="./app.js?v=20260713-plan-gate"></script>
+    <script src="./generator.js?v=20260713-story-spark"></script>
+    <script src="./workflow-core.js?v=20260713-story-spark"></script>
+    <script src="./project-domain.js?v=20260713-story-spark"></script>
+    <script src="./episode-planner.js?v=20260713-story-spark"></script>
+    <script src="./ui-templates.js?v=20260713-story-spark"></script>
+    <script src="./api-client.js?v=20260713-story-spark"></script>
+    <script src="./data-store.js?v=20260713-story-spark"></script>
+    <script src="./app.js?v=20260713-story-spark"></script>
   </body>
 </html>

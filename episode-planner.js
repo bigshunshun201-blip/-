@@ -159,6 +159,9 @@
         angle: clean(item?.angle, `方案 ${index + 1}`),
         title: clean(item?.title, "未命名策划"),
         why: clean(item?.why, "根据当前创作资料生成"),
+        innovation: clean(item?.innovation),
+        memeMechanic: clean(item?.memeMechanic),
+        visualSetpiece: clean(item?.visualSetpiece),
         plan: Object.fromEntries(requiredPlanKeys.map((key) => [key, clean(plan[key])])),
       };
     }).filter((item) => planIsComplete(item.plan));

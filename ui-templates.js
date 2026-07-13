@@ -68,6 +68,9 @@
       ${renderList("台词", scriptValue.dialogue || [])}
       ${renderList("情绪节奏", scriptValue.rhythm || [])}
       ${renderList("反转点", scriptValue.reversals || [])}
+      ${(scriptValue.innovationPoints || []).length ? renderList("创新机制", scriptValue.innovationPoints) : ""}
+      ${(scriptValue.comedyBeats || []).length ? renderList("笑点设计", scriptValue.comedyBeats) : ""}
+      ${(scriptValue.visualHighlights || []).length ? renderList("视觉爆点", scriptValue.visualHighlights) : ""}
       ${renderList("爆点与结尾钩子", scriptValue.hooks || [])}
     `;
   }

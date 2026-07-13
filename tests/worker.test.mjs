@@ -53,6 +53,9 @@ test("AI plan normalizer requires three complete episode plans", () => {
       angle,
       title: `方案${index + 1}`,
       why: "适合当前选题",
+      innovation: `创新机制${index + 1}`,
+      memeMechanic: `梗机制${index + 1}`,
+      visualSetpiece: `强画面${index + 1}`,
       plan: {
         openingHook: `开头${index + 1}`,
         conflict: `冲突${index + 1}`,
@@ -64,14 +67,23 @@ test("AI plan normalizer requires three complete episode plans", () => {
   });
   assert.equal(result.plans.length, 3);
   assert.equal(result.plans[1].plan.reversal, "反转2");
+  assert.equal(result.plans[1].innovation, "创新机制2");
   assert.throws(() => __test.normalizePlans({ plans: result.plans.slice(0, 2) }), /3 套完整策划/);
 });
 
 test("UI contains the production workflow controls", async () => {
   const html = await readFile(new URL("../index.html", import.meta.url), "utf8");
-  for (const id of ["planOpeningHook", "autoPlanBtn", "suggestPlansBtn", "planSuggestions", "planReadyState", "checkContinuityBtn", "assetLibrary", "reviewCommentThemes", "exportProjectBtn"]) {
+  for (const id of ["planOpeningHook", "autoPlanBtn", "suggestPlansBtn", "planSuggestions", "planHistoryList", "planReadyState", "checkContinuityBtn", "assetLibrary", "reviewCommentThemes", "exportProjectBtn"]) {
     assert.match(html, new RegExp(`id="${id}"`));
   }
+  assert.match(html, /so-landing\.douyin\.com\/landings\/hotlist/);
+});
+
+test("JSON extraction repairs common missing commas from model output", () => {
+  const betweenObjects = __test.extractJson('{"storyboard":[{"shot":1} {"shot":2}]}');
+  assert.deepEqual(betweenObjects.storyboard.map((shot) => shot.shot), [1, 2]);
+  const betweenProperties = __test.extractJson('{"shots":[1,2] "title":"分镜"}');
+  assert.equal(betweenProperties.title, "分镜");
 });
 
 test("episode planner produces three complete and distinct starting plans", () => {
@@ -235,6 +247,7 @@ test("data store migrates legacy JSON and preserves a localStorage fallback", as
 
 test("project domain appends versions without overwriting an episode", () => {
   const project = projectDomain.createProjectRecord("版本测试", { worldRules: "规则" });
+  assert.deepEqual(project.planBatches, []);
   const first = projectDomain.upsertEpisodeVersion(project, {
     mode: "new",
     input: { episodeNumber: 1, theme: "第一版" },
@@ -267,10 +280,15 @@ test("UI templates escape model content and keep production controls", () => {
   const scriptHtml = uiTemplates.script({
     synopsis: "<img src=x onerror=alert(1)>",
     tags: ["<script>"],
-    characters: [], structure: [], dialogue: [], rhythm: [], reversals: [], hooks: [],
+    characters: [], structure: [], dialogue: [], rhythm: [], reversals: [],
+    innovationPoints: ["道具会说反话"], comedyBeats: [{ setup: "铺垫", payoff: "回扣", visualAction: "道具翻面" }],
+    visualHighlights: [{ moment: "爆点", verticalComposition: "前中后景", effect: "反色" }], hooks: [],
   });
   assert.doesNotMatch(scriptHtml, /<img|<script>/);
   assert.match(scriptHtml, /&lt;img/);
+  assert.match(scriptHtml, /创新机制/);
+  assert.match(scriptHtml, /笑点设计/);
+  assert.match(scriptHtml, /视觉爆点/);
 
   const storyboardHtml = uiTemplates.storyboard([{ shot: 1, seconds: 3, assetStatus: "待制作" }], true);
   assert.match(storyboardHtml, /data-shot-field="assetLinks"/);
