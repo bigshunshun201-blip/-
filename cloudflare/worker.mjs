@@ -12,6 +12,7 @@ const fallbackDailyUsage = new Map();
 const AI_PATH_COST = new Map([
   ["/api/script", 1],
   ["/api/storyboard", 1],
+  ["/api/plans", 1],
   ["/api/topics", 1],
   ["/api/continuity-check", 1],
   ["/api/generate", 2],
@@ -325,6 +326,47 @@ function continuityPrompt(input) {
 限制：checks 必须包含“角色性格”“精灵能力”“人物关系”“悬念承接”四项；score 为 0-100 整数。`;
 }
 
+function plansPrompt(input) {
+  const payload = normalizeInput(input);
+  const names = roleNames(payload);
+  return `你是《洛克王国：世界》手游抖音连续短剧的单集策划。根据本次选题、短剧圣经、前集连续性和热梗偏好，实时创作 3 套彼此明显不同的本集策划。只输出严格 JSON，不要 Markdown、解释或代码围栏。
+
+要求：
+1. 三套方案不能只是替换措辞；开头事件、核心冲突、反转机制和结尾悬念都必须不同。
+2. 只做单集策划，不写完整剧本和台词列表。
+3. 前 3 秒必须出现可见异常、危机、关系破裂或反常结果，不能用背景介绍开场。
+4. 本集只解决阶段问题，必须推进主线并留下下一集可直接承接的行动问题。
+5. 必须遵守角色性格、精灵能力边界、人物关系、反派动机和世界规则；不能靠突然升级、无代价新能力或无依据失忆反转。
+6. 以《洛克王国：世界》手游开放世界为语境，不要套用旧页游剧情。
+7. 必须使用这些角色名：${names.length ? names.join("、") : "根据输入选择 2-4 个明确角色"}。
+8. 网络梗只能自然点缀，不能让三套方案都依赖同一个梗。
+9. 目标时长 ${payload.duration} 秒，本集为第 ${payload.episodeNumber} 集。
+
+项目与连续性资料：${bibleContext(payload)}
+
+本集输入：${creativeInputSummary(payload)}
+${payload.previousScript ? `上一集剧本（只用于承接，不得重写）：${stringify(payload.previousScript, 7000)}` : ""}
+
+返回结构：
+{
+  "plans": [
+    {
+      "angle": "6字以内的差异化角度",
+      "title": "这套策划的一句话方向",
+      "why": "适合当前选题的理由",
+      "plan": {
+        "openingHook": "前3秒具体画面和事件",
+        "conflict": "本集必须解决的对立问题与代价",
+        "reversal": "改变观众判断的新事实",
+        "endingSuspense": "下一集必须行动或回答的问题",
+        "targetEmotion": "情绪A -> 情绪B -> 情绪C"
+      }
+    }
+  ]
+}
+限制：plans 必须正好 3 条；每项都必须具体到角色和场景，不得出现“制造冲突”“留下悬念”等空泛表述。`;
+}
+
 function topicsPrompt(input) {
   const payload = normalizeInput(input);
   const count = Math.max(1, Math.min(Number(input.count || 8), 12));
@@ -399,6 +441,23 @@ function normalizeContinuity(result) {
     mustPreserve: Array.isArray(report.mustPreserve) ? report.mustPreserve.map(String).slice(0, 5) : [],
     nextEpisodeCarryover: String(report.nextEpisodeCarryover || ""),
   };
+}
+
+function normalizePlans(result) {
+  const source = Array.isArray(result?.plans) ? result.plans : [];
+  const requiredKeys = ["openingHook", "conflict", "reversal", "endingSuspense", "targetEmotion"];
+  const plans = source.slice(0, 3).map((item, index) => {
+    const plan = item?.plan && typeof item.plan === "object" ? item.plan : {};
+    return {
+      id: `ai-plan-${crypto.randomUUID()}`,
+      angle: String(item?.angle || `方案 ${index + 1}`),
+      title: String(item?.title || "未命名策划"),
+      why: String(item?.why || "根据当前创作资料生成"),
+      plan: Object.fromEntries(requiredKeys.map((key) => [key, String(plan[key] || "").trim()])),
+    };
+  }).filter((item) => requiredKeys.every((key) => item.plan[key]));
+  if (plans.length !== 3) throw new Error("AI 没有返回 3 套完整策划，请重新生成");
+  return { plans };
 }
 
 function normalizeTopics(result, count) {
@@ -541,6 +600,11 @@ async function api(request, env, url) {
     return json({ ok: true, source: "deepseek", model, usage, result });
   }
 
+  if (url.pathname === "/api/plans") {
+    const result = normalizePlans(await askDeepSeek(env, input, plansPrompt(input), 1800));
+    return json({ ok: true, source: "deepseek", model, usage, result });
+  }
+
   if (url.pathname === "/api/topics") {
     const count = Math.max(1, Math.min(Number(input.count || 8), 12));
     const result = normalizeTopics(await askDeepSeek(env, input, topicsPrompt(input), 1700), count);
@@ -590,6 +654,7 @@ export const __test = {
   normalizeInput,
   normalizeStoryboard,
   normalizeContinuity,
+  normalizePlans,
   creativeInputSummary,
   requestUnits,
   usageDay,

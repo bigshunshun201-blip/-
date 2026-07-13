@@ -154,6 +154,7 @@ node server.js
 - `workflow-core.js`：项目连续性选集和作品库去重规则。
 - `project-domain.js`：内容项目、集数版本、本集策划校验和发布复盘规则。
 - `episode-planner.js`：不消耗 AI 积分的本集策划起步器与补全规则。
+- 本集策划支持免费快速填充和 DeepSeek 实时生成三套方案；从选题库进入时只建立待策划草稿，不会跳过确认直接生成剧本。
 - `ui-templates.js`：剧本、分镜、作品库和通用表格模板。
 - `api-client.js`：访问码重试、请求超时和 API 错误解析。
 - `data-store.js`：IndexedDB 项目档案和旧数据兼容迁移。

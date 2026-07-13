@@ -47,6 +47,26 @@ test("continuity normalizer always returns the four required checks", () => {
   assert.deepEqual(result.checks.map((check) => check.area), ["角色性格", "精灵能力", "人物关系", "悬念承接"]);
 });
 
+test("AI plan normalizer requires three complete episode plans", () => {
+  const result = __test.normalizePlans({
+    plans: ["危机", "关系", "规则"].map((angle, index) => ({
+      angle,
+      title: `方案${index + 1}`,
+      why: "适合当前选题",
+      plan: {
+        openingHook: `开头${index + 1}`,
+        conflict: `冲突${index + 1}`,
+        reversal: `反转${index + 1}`,
+        endingSuspense: `悬念${index + 1}`,
+        targetEmotion: "紧张 -> 错愕 -> 追更",
+      },
+    })),
+  });
+  assert.equal(result.plans.length, 3);
+  assert.equal(result.plans[1].plan.reversal, "反转2");
+  assert.throws(() => __test.normalizePlans({ plans: result.plans.slice(0, 2) }), /3 套完整策划/);
+});
+
 test("UI contains the production workflow controls", async () => {
   const html = await readFile(new URL("../index.html", import.meta.url), "utf8");
   for (const id of ["planOpeningHook", "autoPlanBtn", "suggestPlansBtn", "planSuggestions", "checkContinuityBtn", "assetLibrary", "reviewCommentThemes", "exportProjectBtn"]) {
@@ -127,9 +147,18 @@ test("frontend includes request timeout and stale-result protection", async () =
   assert.doesNotMatch(source, /window\.prompt\("新项目名称"/);
 });
 
+test("topic selection prepares planning without directly generating a script", async () => {
+  const source = await readFile(new URL("../app.js", import.meta.url), "utf8");
+  assert.match(source, /function prepareTopicPlanning\(index, mode = "new"\)/);
+  assert.doesNotMatch(source, /function generateFromTopic/);
+  assert.match(source, /prepareTopicPlanning\(Number\(generateButton\.dataset\.topicGenerate\), "new"\)/);
+  assert.match(source, /applyEpisodePlan\(\{\}\)/);
+});
+
 test("daily budget weights Pro requests and blocks requests over the limit", async () => {
   const env = { DAILY_AI_UNIT_LIMIT: "10" };
   assert.equal(__test.requestUnits("/api/script", "deepseek-v4-flash"), 1);
+  assert.equal(__test.requestUnits("/api/plans", "deepseek-v4-flash"), 1);
   assert.equal(__test.requestUnits("/api/generate", "deepseek-v4-pro"), 6);
   const first = await __test.reserveDailyBudget(env, "/api/generate", "deepseek-v4-pro");
   assert.equal(first.usedUnits, 6);

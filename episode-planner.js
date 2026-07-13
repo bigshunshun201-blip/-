@@ -143,5 +143,26 @@
     return Object.fromEntries(requiredPlanKeys.map((key) => [key, clean(current[key]) || suggested[key]]));
   }
 
-  return { requiredPlanKeys, planIsComplete, generatePlanOptions, completePlan };
+  function normalizePlanOptions(result = {}, options = {}) {
+    const source = Array.isArray(result?.plans)
+      ? result.plans
+      : Array.isArray(result?.options)
+        ? result.options
+        : Array.isArray(result)
+          ? result
+          : [];
+    const prefix = clean(options.prefix, "plan");
+    return source.slice(0, 3).map((item, index) => {
+      const plan = item?.plan && typeof item.plan === "object" ? item.plan : item || {};
+      return {
+        id: clean(item?.id, `${prefix}-${Date.now()}-${index}`),
+        angle: clean(item?.angle, `方案 ${index + 1}`),
+        title: clean(item?.title, "未命名策划"),
+        why: clean(item?.why, "根据当前创作资料生成"),
+        plan: Object.fromEntries(requiredPlanKeys.map((key) => [key, clean(plan[key])])),
+      };
+    }).filter((item) => planIsComplete(item.plan));
+  }
+
+  return { requiredPlanKeys, planIsComplete, generatePlanOptions, completePlan, normalizePlanOptions };
 });

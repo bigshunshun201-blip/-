@@ -106,11 +106,11 @@
       continueButton.disabled = isBusy || !hasScript;
       continueButton.title = hasScript ? "承接当前剧本的结尾钩子续写下一集" : "请先生成一版剧本";
     }
-    ["checkContinuityBtn", "regenerateTopicsBtn", "projectSelect", "newProjectBtn", "importProjectBtn"].forEach((id) => {
+    ["checkContinuityBtn", "regenerateTopicsBtn", "suggestPlansBtn", "autoPlanBtn", "projectSelect", "newProjectBtn", "importProjectBtn"].forEach((id) => {
       const control = document.getElementById(id);
       if (control) control.disabled = isBusy;
     });
-    $$('[data-topic-generate], [data-topic-continue], [data-topic-replace]').forEach((button) => {
+    $$('[data-topic-generate], [data-topic-continue], [data-topic-replace], [data-plan-option]').forEach((button) => {
       button.disabled = isBusy;
     });
     document.body?.setAttribute("aria-busy", String(isBusy));
@@ -270,15 +270,27 @@
     `).join("");
   }
 
-  function suggestEpisodePlans() {
-    state.planOptions = episodePlanner.generatePlanOptions(getInput(), {
-      ...plannerContext(),
-      count: 3,
-      seed: Date.now(),
-    });
-    state.selectedPlanOptionId = null;
-    renderPlanSuggestions();
-    setStatus("已给出 3 套本集策划，不消耗 AI 积分");
+  async function suggestEpisodePlans() {
+    const operation = beginAiOperation("本集策划生成");
+    try {
+      setStatus("DeepSeek 正在生成 3 套本集策划...");
+      const input = {
+        ...getInput(),
+        episodePlan: {},
+        previousScript: state.script || null,
+      };
+      const response = await apiRequest("/api/plans", { input: generationContext(input) });
+      assertActiveAiOperation(operation);
+      const options = episodePlanner.normalizePlanOptions(response.result, { prefix: "ai-plan" });
+      if (options.length !== 3) throw new Error("DeepSeek 没有返回 3 套完整策划，请重新生成。");
+      state.planOptions = options;
+      state.selectedPlanOptionId = null;
+      renderPlanSuggestions();
+      saveDraft(false);
+      setStatus(`DeepSeek 已生成 3 套本集策划 ${nowTime()} · ${response.model || "model"}${usageSuffix(response)}`);
+    } finally {
+      endAiOperation(operation);
+    }
   }
 
   function autoFillEpisodePlan(options = {}) {
@@ -764,40 +776,60 @@
 
   function applyTopicToInputs(topic) {
     state.selectedTopic = topic;
+    setInputValue("customScene", "");
+    setInputValue("customDirection", "");
+    setInputValue("customAudience", "");
+    setInputValue("customDuration", "");
     setInputValue("theme", topic.title);
     if (topic.roles) setInputValue("roles", topic.roles);
     if (topic.world) setInputValue("scene", topic.world);
     setInputValue("direction", topicPrompt(topic));
     setInputValue("audience", topic.audience);
     setInputValue("duration", topic.duration);
-    autoFillEpisodePlan({ fresh: true, topic });
-    state.planOptions = [];
-    renderPlanSuggestions();
+  }
+
+  function focusEpisodePlanning() {
     switchTab("script");
+    const panel = document.querySelector(".episode-plan-panel");
+    panel?.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
+    window.setTimeout(() => $("#suggestPlansBtn")?.focus(), 180);
+  }
+
+  function prepareTopicPlanning(index, mode = "new") {
+    const topic = state.topics[index];
+    if (!topic) throw new Error("没有找到这个选题，请先重新生成选题库。");
+    if (mode === "continue" && !state.script) throw new Error("还没有可续写的剧本，请先生成或恢复上一集。");
+    applyTopicToInputs(topic);
+    applyEpisodePlan({});
+    state.planOptions = [];
+    state.selectedPlanOptionId = null;
+    renderPlanSuggestions();
+    if (mode === "new") {
+      state.currentEpisodeId = null;
+      state.reviewEpisodeId = null;
+      state.currentHistoryId = null;
+      state.script = null;
+      state.storyboard = [];
+      state.creativePack = null;
+      renderScript();
+      renderStoryboard();
+      renderCreativePack();
+      renderConsistency();
+    } else {
+      setInputValue(
+        "continueInstruction",
+        [
+          "沿着这个选题继续生成下一集，不要重写上一集。",
+          topicPrompt(topic),
+          "承接当前剧本结尾钩子，升级冲突，保留同一组核心角色。",
+        ].join("\n"),
+      );
+    }
     saveDraft(false);
-  }
-
-  async function generateFromTopic(index) {
-    const topic = state.topics[index];
-    if (!topic) throw new Error("没有找到这个选题，请先重新生成选题库。");
-    applyTopicToInputs(topic);
-    await runGeneration("new");
-  }
-
-  async function continueFromTopic(index) {
-    const topic = state.topics[index];
-    if (!topic) throw new Error("没有找到这个选题，请先重新生成选题库。");
-    if (!state.script) throw new Error("还没有可续写的剧本，请先用这个选题生成第一集。");
-    applyTopicToInputs(topic);
-    setInputValue(
-      "continueInstruction",
-      [
-        "沿着这个选题继续生成下一集，不要重写上一集。",
-        topicPrompt(topic),
-        "承接当前剧本结尾钩子，升级冲突，保留同一组核心角色。",
-      ].join("\n"),
-    );
-    await runGeneration("continue");
+    focusEpisodePlanning();
+    setStatus(mode === "continue"
+      ? `已选择“${topic.title}”，请先确定下一集策划，再点击“续写下一集”`
+      : `已选择“${topic.title}”，请先确定本集策划，再生成剧本`);
   }
 
   function normalizeTopicList(topics) {
@@ -1427,8 +1459,8 @@
               <span class="tag">优先级 ${escapeHtml(topic.priority)}</span>
             </div>
             <div class="topic-actions">
-              <button class="small-action" data-topic-generate="${index}">用这个选题生成本集</button>
-              <button class="small-action" data-topic-continue="${index}">沿这个选题续写下一集</button>
+              <button class="small-action" data-topic-generate="${index}">选择并策划本集</button>
+              <button class="small-action" data-topic-continue="${index}">策划这个方向的下一集</button>
               <button class="small-action" data-topic-replace="${index}">替换这条</button>
             </div>
           </article>
@@ -1924,7 +1956,13 @@
     });
     $("#saveBibleBtn").addEventListener("click", saveBible);
     $("#autoPlanBtn").addEventListener("click", () => autoFillEpisodePlan());
-    $("#suggestPlansBtn").addEventListener("click", suggestEpisodePlans);
+    $("#suggestPlansBtn").addEventListener("click", async () => {
+      try {
+        await suggestEpisodePlans();
+      } catch (error) {
+        reportError("本集策划生成", error);
+      }
+    });
     $("#planSuggestions").addEventListener("click", (event) => {
       const button = event.target.closest("[data-plan-option]");
       if (!button) return;
@@ -2092,11 +2130,11 @@
       const replaceButton = event.target.closest("[data-topic-replace]");
       if (!generateButton && !continueButton && !replaceButton) return;
       try {
-        if (generateButton) await generateFromTopic(Number(generateButton.dataset.topicGenerate));
-        if (continueButton) await continueFromTopic(Number(continueButton.dataset.topicContinue));
+        if (generateButton) prepareTopicPlanning(Number(generateButton.dataset.topicGenerate), "new");
+        if (continueButton) prepareTopicPlanning(Number(continueButton.dataset.topicContinue), "continue");
         if (replaceButton) await replaceTopic(Number(replaceButton.dataset.topicReplace));
       } catch (error) {
-        reportError(generateButton ? "选题生成" : continueButton ? "选题续写" : "替换选题", error);
+        reportError(generateButton ? "选择本集选题" : continueButton ? "选择续写选题" : "替换选题", error);
       }
     });
     $$("[data-copy]").forEach((button) => {
