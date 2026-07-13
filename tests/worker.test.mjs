@@ -47,14 +47,14 @@ test("storyboard normalizer retains production fields", () => {
   assert.equal(result.storyboard[1].timeRange, "10-15秒");
 });
 
-test("continuity normalizer always returns the four required checks", () => {
+test("continuity normalizer always returns the five required checks", () => {
   const result = __test.normalizeContinuity({
     score: 86,
     summary: "主线承接正常",
     checks: [{ area: "角色性格", status: "pass", evidence: "阿洛仍然嘴硬", fix: "无需调整" }],
   });
   assert.equal(result.score, 86);
-  assert.deepEqual(result.checks.map((check) => check.area), ["角色性格", "精灵能力", "人物关系", "悬念承接"]);
+  assert.deepEqual(result.checks.map((check) => check.area), ["角色性格", "角色标志性特征", "精灵能力", "人物关系", "悬念承接"]);
 });
 
 test("bible normalizer requires all continuity fields", () => {
@@ -75,6 +75,18 @@ test("meme lab normalizer requires six usable mechanisms", () => {
   }));
   assert.equal(__test.normalizeMemeIdeas({ ideas }).ideas.length, 6);
   assert.throws(() => __test.normalizeMemeIdeas({ ideas: ideas.slice(0, 5) }), /6 个完整梗机制/);
+});
+
+test("character card normalizer keeps repeatable character signatures", () => {
+  const result = __test.normalizeCharacterCard({ card: {
+    name: "洛小岚", role: "遗迹向导", traits: "越慌越装专业", contrast: "怕黑却专接夜间任务",
+    desire: "找到失踪的探索记录", weakness: "逞强时会忽略退路", catchphrases: ["问题不大", "我是在尊重未知"],
+    mannerism: "撒谎时把徽章转半圈", comedyTrigger: "越维护专业形象，道具越拆台", boundary: "不牺牲精灵伙伴",
+  } });
+  assert.equal(result.card.name, "洛小岚");
+  assert.equal(result.card.catchphrases.length, 2);
+  assert.match(result.card.comedyTrigger, /道具/);
+  assert.throws(() => __test.normalizeCharacterCard({ card: { name: "空角色" } }), /不完整/);
 });
 
 test("AI plan normalizer requires three complete episode plans", () => {
@@ -103,7 +115,7 @@ test("AI plan normalizer requires three complete episode plans", () => {
 
 test("UI contains the production workflow controls", async () => {
   const html = await readFile(new URL("../index.html", import.meta.url), "utf8");
-  for (const id of ["planOpeningHook", "autoPlanBtn", "suggestPlansBtn", "planSuggestions", "planHistoryList", "planReadyState", "memeLabBtn", "memeInspireBtn", "memeLabResults", "generateBibleBtn", "applyBibleTemplateBtn", "storyboardHistory", "checkContinuityBtn", "assetLibrary", "reviewCommentThemes", "exportProjectBtn"]) {
+  for (const id of ["planOpeningHook", "autoPlanBtn", "suggestPlansBtn", "planSuggestions", "planHistoryList", "planReadyState", "memeLabBtn", "memeInspireBtn", "memeLabResults", "memeLibrary", "addMemeBtn", "generateBibleBtn", "applyBibleTemplateBtn", "generateCharacterBtn", "saveCharacterBtn", "characterLibrary", "storyboardHistory", "checkContinuityBtn", "assetLibrary", "reviewCommentThemes", "exportProjectBtn"]) {
     assert.match(html, new RegExp(`id="${id}"`));
   }
   assert.match(html, /open\.douyin\.com\/platform\/resource\/docs\/openapi\/data-open-service\/tops-data\/hot-video-list/);
@@ -213,6 +225,7 @@ test("daily budget weights Pro requests and blocks requests over the limit", asy
   assert.equal(__test.requestUnits("/api/plans", "deepseek-v4-flash"), 1);
   assert.equal(__test.requestUnits("/api/bible", "deepseek-v4-flash"), 1);
   assert.equal(__test.requestUnits("/api/meme-lab", "deepseek-v4-flash"), 1);
+  assert.equal(__test.requestUnits("/api/character-card", "deepseek-v4-pro"), 3);
   assert.equal(__test.requestUnits("/api/generate", "deepseek-v4-pro"), 6);
   const first = await __test.reserveDailyBudget(env, "/api/generate", "deepseek-v4-pro");
   assert.equal(first.usedUnits, 6);

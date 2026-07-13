@@ -13,6 +13,7 @@ const AI_PATH_COST = new Map([
   ["/api/script", 1],
   ["/api/storyboard", 1],
   ["/api/bible", 1],
+  ["/api/character-card", 1],
   ["/api/meme-lab", 1],
   ["/api/plans", 1],
   ["/api/topics", 1],
@@ -141,6 +142,9 @@ function normalizeInput(input = {}) {
     projectBible: input.projectBible && typeof input.projectBible === "object" ? input.projectBible : {},
     projectContinuity: Array.isArray(input.projectContinuity) ? input.projectContinuity.slice(-3) : [],
     projectAssets: Array.isArray(input.projectAssets) ? input.projectAssets.slice(-24) : [],
+    projectMemes: Array.isArray(input.projectMemes) ? input.projectMemes.slice(0, 20) : [],
+    projectCharacterCards: Array.isArray(input.projectCharacterCards) ? input.projectCharacterCards.slice(0, 24) : [],
+    characterDraft: input.characterDraft && typeof input.characterDraft === "object" ? input.characterDraft : {},
     latestReview: input.latestReview && typeof input.latestReview === "object" ? input.latestReview : null,
     episodePlan: input.episodePlan && typeof input.episodePlan === "object" ? input.episodePlan : {},
   };
@@ -233,6 +237,12 @@ ${continuity}
 可复用内容资产（优先复用其中适配本集的角色立绘、场景、口头禅、冲突/标题/封面模板和 BGM/SFX 方案；不适配时不要生硬套用）：
 ${stringify(payload.projectAssets || [], 5000)}
 
+结构化角色卡（只启用本集输入中出现的角色；一旦启用，性格、反差、口头禅、动作习惯、喜剧触发器和底线均为连续性事实）：
+${stringify(payload.projectCharacterCards || [], 6500)}
+
+项目梗库（优先选择与本集情绪和角色匹配的 1-2 条；不得把所有梗同时塞入，也不得声称其为实时热榜）：
+${stringify(payload.projectMemes || [], 5000)}
+
 最近发布复盘（用于调整下一集钩子、标题与封面方向；无数据时忽略）：
 ${stringify(payload.latestReview || {}, 2200)}`;
 }
@@ -259,6 +269,7 @@ function scriptPrompt(input) {
 10. 至少制造 2 次意外的概念碰撞，例如“精灵能力限制 + 当代生活困境”或“开放世界机关 + 社交误会”；因果必须成立，不能为了怪而怪。
 11. 至少设计 2 个笑点，使用“铺垫 -> 误导 -> 回扣”或可静音看懂的视觉笑点；至少 3 个竖屏强画面，主体动作和前后景变化要明确。
 12. 除非本集输入明确要求，不得重复使用失忆、万能黑衣人、契约突然失效、无代价升级等通用套路。反转必须来自本集已出现的规则、道具或人物选择。
+13. 本集角色若有结构化角色卡，必须让鲜明特质通过选择和动作表现；每名核心角色最多自然使用 1 次口头禅，并在后文用动作、道具或语义反转完成回扣，禁止机械重复。
 
 项目连续性资料：${canon}
 
@@ -313,6 +324,7 @@ function storyboardPrompt(input) {
 9. visualPrompt 必须包含前景、中景、背景、主体动作、明暗或色彩反差、9:16 字幕安全区；音效必须与画面动作卡点。
 10. 每段 visualPrompt 要能脱离上下文直接交给视频模型，但 continuityIn 和 continuityOut 必须精确描述首尾人物位置、朝向、表情、道具和环境状态，使相邻视频段能无缝拼接。
 11. 所有视频段合起来必须完整实现当前剧本；最后一段必须呈现剧本结尾悬念，不能擅自增加新反转或混入其他剧本内容。
+12. 角色若有结构化角色卡，动作链和画面提示词必须体现其标志性动作、反差或喜剧触发器；口头禅只能出现在剧本已有台词中，不得为分镜擅自加戏。
 
 项目连续性资料：${canon}
 
@@ -336,7 +348,8 @@ function continuityPrompt(input) {
 2. 精灵能力是否突破设定或无代价解决危机。
 3. 前后集人物关系、反派动机和世界规则是否矛盾。
 4. 上一集结尾悬念是否被正确承接；若没有上一集，标记 pass。
-5. 只列可执行的问题和修正建议，不能泛泛而谈。
+5. 结构化角色卡中的鲜明特质、口头禅触发条件、动作习惯和底线是否被正确表现，是否出现机械重复口头禅。
+6. 只列可执行的问题和修正建议，不能泛泛而谈。
 
 项目资料：${bibleContext(payload)}
 当前剧本：${stringify(payload.script || payload.previousScript || {}, 12000)}
@@ -350,7 +363,7 @@ function continuityPrompt(input) {
   "mustPreserve":["下一集必须保留的事实"],
   "nextEpisodeCarryover":"下一集承接提示"
 }
-限制：checks 必须包含“角色性格”“精灵能力”“人物关系”“悬念承接”四项；score 为 0-100 整数。`;
+限制：checks 必须包含“角色性格”“角色标志性特征”“精灵能力”“人物关系”“悬念承接”五项；score 为 0-100 整数。`;
 }
 
 function biblePrompt(input) {
@@ -382,6 +395,40 @@ function biblePrompt(input) {
     "worldRules":"至少4条固定世界规则",
     "mainConflict":"系列主线起点、三次升级和阶段终点",
     "hookRules":"前3秒、中段、10秒段衔接与结尾钩子规则"
+  }
+}`;
+}
+
+function characterCardPrompt(input) {
+  const payload = normalizeInput(input);
+  return `你是连续短剧的角色设计师。请根据当前《洛克王国：世界》手游短剧项目，为一个能长期连载的角色补全鲜明角色卡。只输出严格 JSON，不要 Markdown、解释或代码围栏。
+
+要求：
+1. 优先保留用户已填写的名字、身份和特点，不得擅自替换；缺少名字时，从本集角色输入中选择一个尚未被完整设定的角色。
+2. 角色必须有“稳定底色 + 意外反差 + 可重复的行为模式”，不能只写勇敢、善良、搞笑等空词。
+3. 给出 2-3 句原创、短促、口语化的口头禅；每句都要对应具体触发情境，不能照搬现实人物或流行作品台词。
+4. 动作习惯必须能在竖屏画面中被看见，并可成为撒谎、紧张、逞强或关系变化的视觉线索。
+5. 喜剧触发器要能重复制造“铺垫 -> 误导 -> 回扣”，但不能让角色变成只负责出丑的工具人。
+6. 欲望、弱点和底线要能制造选择；底线不能与当前短剧圣经冲突。
+7. 使用手游开放世界语境，不套用旧页游剧情，不冒充官方设定。
+
+项目资料：${bibleContext(payload)}
+当前创作输入：${creativeInputSummary(payload)}
+用户已填写草稿：${stringify(payload.characterDraft || {}, 3000)}
+
+返回结构：
+{
+  "card": {
+    "name":"角色名",
+    "role":"一句身份定位",
+    "traits":"能通过行为证明的核心特质",
+    "contrast":"最有记忆点的反差",
+    "desire":"长期核心欲望",
+    "weakness":"弱点、触发条件与代价",
+    "catchphrases":["口头禅1","口头禅2","口头禅3"],
+    "mannerism":"可见的动作习惯及触发条件",
+    "comedyTrigger":"可重复的喜剧触发与回扣方式",
+    "boundary":"绝不能做的事"
   }
 }`;
 }
@@ -542,7 +589,7 @@ function normalizeStoryboard(result, duration) {
 function normalizeContinuity(result) {
   const report = result && typeof result === "object" ? result : {};
   const checks = Array.isArray(report.checks) ? report.checks : [];
-  const requiredAreas = ["角色性格", "精灵能力", "人物关系", "悬念承接"];
+  const requiredAreas = ["角色性格", "角色标志性特征", "精灵能力", "人物关系", "悬念承接"];
   return {
     score: Math.max(0, Math.min(100, Number(report.score) || 0)),
     summary: String(report.summary || "一致性检查完成"),
@@ -582,6 +629,19 @@ function normalizeMemeIdeas(result) {
   })).filter((idea) => idea.phrase && idea.mechanism && idea.comedy);
   if (ideas.length !== 6) throw new Error("AI 没有返回 6 个完整梗机制，请重新生成");
   return { ideas };
+}
+
+function normalizeCharacterCard(result) {
+  const source = result?.card || result;
+  if (!source || typeof source !== "object") throw new Error("AI 没有返回可用角色卡");
+  const card = {
+    name: String(source.name || "").trim(), role: String(source.role || "").trim(), traits: String(source.traits || "").trim(),
+    contrast: String(source.contrast || "").trim(), desire: String(source.desire || "").trim(), weakness: String(source.weakness || "").trim(),
+    catchphrases: (Array.isArray(source.catchphrases) ? source.catchphrases : []).map((item) => String(item).trim()).filter(Boolean).slice(0, 5),
+    mannerism: String(source.mannerism || "").trim(), comedyTrigger: String(source.comedyTrigger || "").trim(), boundary: String(source.boundary || "").trim(),
+  };
+  if (!card.name || !card.role || !card.traits || !card.catchphrases.length || !card.boundary) throw new Error("AI 返回的角色卡不完整");
+  return { card };
 }
 
 function normalizePlans(result) {
@@ -803,6 +863,11 @@ async function api(request, env, url) {
     return json({ ok: true, source: "deepseek", model, usage, result });
   }
 
+  if (url.pathname === "/api/character-card") {
+    const result = normalizeCharacterCard(await askDeepSeek(env, input, characterCardPrompt(input), 1500));
+    return json({ ok: true, source: "deepseek", model, usage, result });
+  }
+
   if (url.pathname === "/api/meme-lab") {
     if (input.memeLabMode !== "inspire" && !String(input.memeRawMaterial || input.memeSeed || "").trim()) {
       return error("请先提供热榜标题、分享文案或评论素材", "MEME_MATERIAL_REQUIRED", 400);
@@ -863,6 +928,7 @@ export const __test = {
   normalizeStoryboard,
   normalizeContinuity,
   normalizeBible,
+  normalizeCharacterCard,
   normalizeMemeIdeas,
   normalizePlans,
   extractJson,

@@ -28,6 +28,7 @@
   const accessCodeKey = "roco-shortdrama-access-code";
   const maxHistoryItems = 60;
   const apiTimeoutMs = 90_000;
+  const characterFieldIds = ["characterName", "characterRole", "characterTraits", "characterContrast", "characterDesire", "characterWeakness", "characterCatchphrases", "characterMannerism", "characterComedyTrigger", "characterBoundary"];
   const apiClient = window.RocoApiClient.create({ accessCodeKey, timeoutMs: apiTimeoutMs });
   const archiveStore = window.RocoDataStore.create();
 
@@ -119,7 +120,7 @@
       continueButton.disabled = isBusy || !hasScript;
       continueButton.title = hasScript ? "承接当前剧本的结尾钩子续写下一集" : "请先生成一版剧本";
     }
-    ["checkContinuityBtn", "regenerateTopicsBtn", "suggestPlansBtn", "autoPlanBtn", "generateBibleBtn", "applyBibleTemplateBtn", "memeLabBtn", "memeInspireBtn", "projectSelect", "newProjectBtn", "importProjectBtn"].forEach((id) => {
+    ["checkContinuityBtn", "regenerateTopicsBtn", "suggestPlansBtn", "autoPlanBtn", "generateBibleBtn", "generateCharacterBtn", "applyBibleTemplateBtn", "memeLabBtn", "memeInspireBtn", "projectSelect", "newProjectBtn", "importProjectBtn"].forEach((id) => {
       const control = document.getElementById(id);
       if (control) control.disabled = isBusy;
     });
@@ -460,7 +461,10 @@
           <p><b>笑点：</b>${escapeHtml(idea.comedy)}</p>
           <small>${escapeHtml(idea.fit)}${idea.risk ? ` · 注意：${escapeHtml(idea.risk)}` : ""}</small>
         </div>
-        <button class="small-action" type="button" data-meme-idea-add="${index}">加入创作</button>
+        <div class="meme-idea-actions">
+          <button class="small-action" type="button" data-meme-idea-add="${index}">加入本集</button>
+          <button class="small-action ${memeIdeaIsSaved(idea) ? "is-saved" : ""}" type="button" data-meme-idea-save="${index}" ${memeIdeaIsSaved(idea) ? "disabled" : ""}>${memeIdeaIsSaved(idea) ? "已收藏" : "收藏到梗库"}</button>
+        </div>
       </article>
     `).join("");
   }
@@ -496,6 +500,190 @@
     setStatus(`已把“${idea.phrase}”加入本集创作素材`);
   }
 
+  function memeIdeaIsSaved(idea) {
+    const key = `${String(idea?.phrase || "").trim()}|${String(idea?.mechanism || "").trim()}`;
+    return (currentProject()?.memes || []).some((item) => `${String(item.phrase || "").trim()}|${String(item.mechanism || "").trim()}` === key);
+  }
+
+  function saveMemeIdea(index) {
+    const idea = state.memeIdeas[index];
+    if (!idea) throw new Error("没有找到这个梗结构。");
+    if (memeIdeaIsSaved(idea)) throw new Error("这个梗已经收藏过了。");
+    currentProject().memes.push({ ...idea, id: newId("meme"), tags: [], useCount: 0, createdAt: new Date().toISOString() });
+    persistProjects();
+    renderMemeLab();
+    renderMemeLibrary();
+    renderProject();
+    setStatus(`已收藏“${idea.phrase}”，以后可在资产库的项目梗库中复用`);
+  }
+
+  function addManualMeme() {
+    const phrase = $("#memeName").value.trim();
+    const mechanism = $("#memeMechanism").value.trim();
+    const comedy = $("#memeComedy").value.trim();
+    if (!phrase || !mechanism || !comedy) throw new Error("请填写梗名称、剧情机制和铺垫回扣。");
+    const idea = {
+      id: newId("meme"), phrase, mechanism, comedy,
+      meaning: "", fit: "", risk: "", sourceType: "手动录入", useCount: 0,
+      tags: $("#memeTags").value.split(/[,，、\n]/).map((tag) => tag.trim()).filter(Boolean).slice(0, 8),
+      createdAt: new Date().toISOString(),
+    };
+    if (memeIdeaIsSaved(idea)) throw new Error("这个梗已经收藏过了。");
+    currentProject().memes.push(idea);
+    ["memeName", "memeMechanism", "memeComedy", "memeTags"].forEach((id) => setInputValue(id, ""));
+    persistProjects();
+    renderMemeLibrary();
+    renderProject();
+    setStatus(`已把“${phrase}”存入项目梗库`);
+  }
+
+  function renderMemeLibrary() {
+    const target = $("#memeLibrary");
+    if (!target) return;
+    const memes = currentProject()?.memes || [];
+    const query = String($("#memeLibrarySearch")?.value || "").trim().toLowerCase();
+    const source = $("#memeLibrarySource")?.value || "all";
+    const filtered = memes.filter((item) => {
+      const haystack = [item.phrase, item.mechanism, item.comedy, ...(item.tags || [])].join(" ").toLowerCase();
+      return (!query || haystack.includes(query)) && (source === "all" || item.sourceType === source);
+    });
+    $("#memeLibraryCount").textContent = `${memes.length} 条梗`;
+    target.innerHTML = filtered.length ? filtered.slice().reverse().map((item) => `
+      <article class="library-card meme-library-card">
+        <div class="library-card-meta"><span>${escapeHtml(item.sourceType || "收藏")}</span><span>使用 ${escapeHtml(item.useCount || 0)} 次</span></div>
+        <h4>${escapeHtml(item.phrase)}</h4>
+        <p><strong>机制：</strong>${escapeHtml(item.mechanism)}</p>
+        <p><strong>笑点：</strong>${escapeHtml(item.comedy)}</p>
+        <div class="tagline">${(item.tags || []).map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join("")}</div>
+        <div class="library-card-actions"><button class="small-action" data-saved-meme-use="${escapeHtml(item.id)}">加入本集</button><button class="small-action danger-action" data-saved-meme-delete="${escapeHtml(item.id)}">移除</button></div>
+      </article>`).join("") : `<p class="helper">${memes.length ? "没有符合当前筛选的梗。" : "梗库还是空的。可从左侧 AI 结果收藏，或在这里手动录入。"}</p>`;
+  }
+
+  function adoptSavedMeme(id) {
+    const meme = (currentProject()?.memes || []).find((item) => item.id === id);
+    if (!meme) throw new Error("没有找到这条梗。");
+    const addition = `梗机制：${meme.phrase}｜${meme.mechanism}｜笑点：${meme.comedy}`;
+    const current = $("#memeSeed").value.trim();
+    if (!current.includes(addition)) setInputValue("memeSeed", [current, addition].filter(Boolean).join("\n"));
+    meme.useCount = Number(meme.useCount || 0) + 1;
+    meme.lastUsedAt = new Date().toISOString();
+    persistProjects();
+    renderMemeLibrary();
+    saveDraft(false);
+    setStatus(`已把“${meme.phrase}”加入本集素材`);
+  }
+
+  function deleteSavedMeme(id) {
+    const project = currentProject();
+    project.memes = (project.memes || []).filter((item) => item.id !== id);
+    persistProjects();
+    renderMemeLibrary();
+    renderMemeLab();
+    renderProject();
+    setStatus("已从梗库移除");
+  }
+
+  function characterDraftFromForm() {
+    const catchphrases = $("#characterCatchphrases").value.split(/\n|[；;]/).map((item) => item.trim()).filter(Boolean).slice(0, 5);
+    return {
+      name: $("#characterName").value.trim(), role: $("#characterRole").value.trim(), traits: $("#characterTraits").value.trim(),
+      contrast: $("#characterContrast").value.trim(), desire: $("#characterDesire").value.trim(), weakness: $("#characterWeakness").value.trim(),
+      catchphrases, mannerism: $("#characterMannerism").value.trim(), comedyTrigger: $("#characterComedyTrigger").value.trim(), boundary: $("#characterBoundary").value.trim(),
+    };
+  }
+
+  function normalizeCharacterCard(card = {}) {
+    return {
+      id: card.id || newId("character"), name: String(card.name || "").trim(), role: String(card.role || "").trim(),
+      traits: String(card.traits || "").trim(), contrast: String(card.contrast || "").trim(), desire: String(card.desire || "").trim(),
+      weakness: String(card.weakness || "").trim(), catchphrases: (Array.isArray(card.catchphrases) ? card.catchphrases : String(card.catchphrases || "").split(/\n|[；;]/)).map((item) => String(item).trim()).filter(Boolean).slice(0, 5),
+      mannerism: String(card.mannerism || "").trim(), comedyTrigger: String(card.comedyTrigger || "").trim(), boundary: String(card.boundary || "").trim(),
+      createdAt: card.createdAt || new Date().toISOString(), updatedAt: card.updatedAt || new Date().toISOString(),
+    };
+  }
+
+  function applyCharacterDraft(card = {}) {
+    const normalized = normalizeCharacterCard(card);
+    const fields = {
+      characterName: normalized.name, characterRole: normalized.role, characterTraits: normalized.traits,
+      characterContrast: normalized.contrast, characterDesire: normalized.desire, characterWeakness: normalized.weakness,
+      characterCatchphrases: normalized.catchphrases.join("\n"), characterMannerism: normalized.mannerism,
+      characterComedyTrigger: normalized.comedyTrigger, characterBoundary: normalized.boundary,
+    };
+    Object.entries(fields).forEach(([id, value]) => setInputValue(id, value));
+  }
+
+  function clearCharacterDraft() {
+    characterFieldIds.forEach((id) => setInputValue(id, ""));
+    $("#characterName")?.focus();
+  }
+
+  function saveCharacterCard() {
+    const card = normalizeCharacterCard(characterDraftFromForm());
+    if (!card.name || !card.role || !card.traits || !card.catchphrases.length || !card.boundary) {
+      throw new Error("请至少填写角色名、身份定位、鲜明特质、口头禅和底线。");
+    }
+    const project = currentProject();
+    const existing = (project.characterCards || []).find((item) => item.name === card.name);
+    if (existing) Object.assign(existing, card, { id: existing.id, createdAt: existing.createdAt, updatedAt: new Date().toISOString() });
+    else project.characterCards.push(card);
+    persistProjects();
+    renderCharacterCards();
+    renderProject();
+    clearCharacterDraft();
+    setStatus(existing ? `已更新角色卡：${card.name}` : `已保存角色卡：${card.name}`);
+  }
+
+  function renderCharacterCards() {
+    const target = $("#characterLibrary");
+    if (!target) return;
+    const cards = currentProject()?.characterCards || [];
+    $("#characterCardCount").textContent = `${cards.length} 个角色`;
+    target.innerHTML = cards.length ? cards.map((card) => `
+      <article class="library-card character-card">
+        <div class="library-card-meta"><span>${escapeHtml(card.role || "角色")}</span><span>${escapeHtml(card.contrast || "待补反差")}</span></div>
+        <h4>${escapeHtml(card.name)}</h4>
+        <p>${escapeHtml(card.traits)}</p>
+        <blockquote>${escapeHtml(card.catchphrases?.[0] || "尚未设置口头禅")}</blockquote>
+        <p><strong>动作：</strong>${escapeHtml(card.mannerism || "待补")}</p><p><strong>笑点触发：</strong>${escapeHtml(card.comedyTrigger || "待补")}</p>
+        <div class="library-card-actions"><button class="small-action" data-character-use="${escapeHtml(card.id)}">加入本集</button><button class="small-action" data-character-edit="${escapeHtml(card.id)}">编辑</button><button class="small-action danger-action" data-character-delete="${escapeHtml(card.id)}">移除</button></div>
+      </article>`).join("") : `<p class="helper">还没有结构化角色卡。可以先填写名字和定位，再让 DeepSeek 补全鲜明特点。</p>`;
+  }
+
+  async function generateCharacterDraft() {
+    const operation = beginAiOperation("角色卡起草");
+    try {
+      setStatus("DeepSeek 正在设计角色反差、口头禅和可重复笑点...");
+      const initialResponse = await apiRequest("/api/character-card", { input: generationContext({ ...getInput(), characterDraft: characterDraftFromForm() }) });
+      const response = await resolveAiJob(initialResponse, "角色卡");
+      assertActiveAiOperation(operation);
+      applyCharacterDraft(response.result?.card || response.result);
+      setStatus(`角色卡草稿已生成，请确认后保存 ${nowTime()} · ${response.model || "model"}${usageSuffix(response)}`);
+    } finally {
+      endAiOperation(operation);
+    }
+  }
+
+  function useCharacterCard(id) {
+    const card = (currentProject()?.characterCards || []).find((item) => item.id === id);
+    if (!card) throw new Error("没有找到这个角色。");
+    const catchphrase = card.catchphrases?.[0] ? `；口头禅“${card.catchphrases[0]}”` : "";
+    const addition = `${card.name}：${card.role}；${card.traits}；反差：${card.contrast}${catchphrase}；动作习惯：${card.mannerism}；底线：${card.boundary}`;
+    const current = $("#roles").value.trim();
+    if (!current.includes(`${card.name}：`)) setInputValue("roles", [current, addition].filter(Boolean).join("\n"));
+    saveDraft(false);
+    setStatus(`已把角色“${card.name}”加入本集`);
+  }
+
+  function deleteCharacterCard(id) {
+    const project = currentProject();
+    project.characterCards = (project.characterCards || []).filter((item) => item.id !== id);
+    persistProjects();
+    renderCharacterCards();
+    renderProject();
+    setStatus("已移除角色卡");
+  }
+
   function currentProject() {
     return state.projects.find((project) => project.id === state.currentProjectId) || state.projects[0] || null;
   }
@@ -523,6 +711,8 @@
       bible: { ...defaultBible, ...(project.bible || {}) },
       episodes: Array.isArray(project.episodes) ? project.episodes : [],
       assets: Array.isArray(project.assets) ? project.assets : [],
+      memes: Array.isArray(project.memes) ? project.memes : [],
+      characterCards: Array.isArray(project.characterCards) ? project.characterCards.map(normalizeCharacterCard) : [],
       planBatches: Array.isArray(project.planBatches) ? project.planBatches : [],
     })).map(normalizeProjectEpisodes);
     state.currentProjectId = state.projects.some((project) => project.id === state.currentProjectId)
@@ -556,6 +746,8 @@
       projectBible: project?.bible || defaultBible,
       projectContinuity: projectContinuity(project, input.episodeNumber),
       projectAssets: (project?.assets || []).slice(-24),
+      projectMemes: (project?.memes || []).slice().sort((a, b) => String(b.lastUsedAt || b.createdAt || "").localeCompare(String(a.lastUsedAt || a.createdAt || ""))).slice(0, 20),
+      projectCharacterCards: (project?.characterCards || []).slice(0, 24),
       latestReview,
     };
   }
@@ -687,6 +879,8 @@
       ["已归档集数", `${episodes.length} 集`],
       ["策划批次", `${(project.planBatches || []).length} 批`],
       ["已完成复盘", `${reviewed} 集`],
+      ["角色卡", `${(project.characterCards || []).length} 个`],
+      ["项目梗库", `${(project.memes || []).length} 条`],
       ["可复用资产", `${(project.assets || []).length} 条`],
     ].map(([label, value]) => `<div><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`).join("");
     const target = $("#projectEpisodeList");
@@ -708,6 +902,8 @@
       : `<p class="helper">当前项目还没有集数。填写圣经后，回到剧本页生成第一集。</p>`;
     renderReviewForm();
     renderPlanHistory();
+    renderCharacterCards();
+    renderMemeLibrary();
   }
 
   function saveProjectMeta() {
@@ -747,6 +943,8 @@
     persistProjects();
     renderProject();
     renderBible();
+    renderCharacterCards();
+    renderMemeLibrary();
     saveDraft(false);
     switchTab("project");
     $("#projectName")?.focus();
@@ -784,6 +982,8 @@
           name: `${String(imported.name).trim()}（导入）`,
           bible: { ...defaultBible, ...(imported.bible || {}) },
           assets: Array.isArray(imported.assets) ? imported.assets.map((asset) => ({ ...asset, id: newId("asset") })) : [],
+          memes: Array.isArray(imported.memes) ? imported.memes.map((meme) => ({ ...meme, id: newId("meme") })) : [],
+          characterCards: Array.isArray(imported.characterCards) ? imported.characterCards.map((card) => normalizeCharacterCard({ ...card, id: newId("character") })) : [],
           planBatches: Array.isArray(imported.planBatches) ? imported.planBatches.map((batch) => ({
             ...batch,
             plans: (batch.plans || []).map((plan) => ({ ...plan, plan: { ...(plan.plan || {}) } })),
@@ -808,7 +1008,7 @@
         state.currentProjectId = project.id;
         resetCurrentCreation();
         persistProjects();
-        renderProject(); renderBible(); renderAssets(); renderConsistency(); saveDraft(false);
+        renderProject(); renderBible(); renderCharacterCards(); renderMemeLibrary(); renderAssets(); renderConsistency(); saveDraft(false);
         setStatus(`项目已导入：${project.name}`);
       } catch (error) {
         reportError("项目导入", error);
@@ -965,7 +1165,7 @@
       return;
     }
     if (!report) {
-      target.innerHTML = `<p class="helper">当前集尚未检查。点击“检查当前集”会核对角色性格、精灵能力、人物关系和上一集悬念承接。</p>`;
+      target.innerHTML = `<p class="helper">当前集尚未检查。点击“检查当前集”会核对角色性格、口头禅与标志动作、精灵能力、人物关系和上一集悬念承接。</p>`;
       return;
     }
     const checks = Array.isArray(report.checks) ? report.checks : [];
@@ -2343,13 +2543,27 @@
       }
     });
     $("#memeLabResults").addEventListener("click", (event) => {
-      const button = event.target.closest("[data-meme-idea-add]");
-      if (!button) return;
+      const addButton = event.target.closest("[data-meme-idea-add]");
+      const saveButton = event.target.closest("[data-meme-idea-save]");
+      if (!addButton && !saveButton) return;
       try {
-        adoptMemeIdea(Number(button.dataset.memeIdeaAdd));
+        if (addButton) adoptMemeIdea(Number(addButton.dataset.memeIdeaAdd));
+        if (saveButton) saveMemeIdea(Number(saveButton.dataset.memeIdeaSave));
       } catch (error) {
-        reportError("加入热梗素材", error);
+        reportError(saveButton ? "收藏剧情梗" : "加入热梗素材", error);
       }
+    });
+    $("#addMemeBtn").addEventListener("click", () => {
+      try { addManualMeme(); } catch (error) { reportError("梗库保存", error); }
+    });
+    ["memeLibrarySearch", "memeLibrarySource"].forEach((id) => document.getElementById(id)?.addEventListener(id === "memeLibrarySearch" ? "input" : "change", renderMemeLibrary));
+    $("#memeLibrary").addEventListener("click", (event) => {
+      const useButton = event.target.closest("[data-saved-meme-use]");
+      const deleteButton = event.target.closest("[data-saved-meme-delete]");
+      try {
+        if (useButton) adoptSavedMeme(useButton.dataset.savedMemeUse);
+        if (deleteButton) deleteSavedMeme(deleteButton.dataset.savedMemeDelete);
+      } catch (error) { reportError("梗库操作", error); }
     });
     $("#applyBibleTemplateBtn").addEventListener("click", async () => {
       try {
@@ -2365,6 +2579,28 @@
       } catch (error) {
         reportError("短剧圣经生成", error);
       }
+    });
+    $("#generateCharacterBtn").addEventListener("click", async () => {
+      try { await generateCharacterDraft(); } catch (error) { reportError("角色卡生成", error); }
+    });
+    $("#saveCharacterBtn").addEventListener("click", () => {
+      try { saveCharacterCard(); } catch (error) { reportError("角色卡保存", error); }
+    });
+    $("#clearCharacterBtn").addEventListener("click", clearCharacterDraft);
+    $("#characterLibrary").addEventListener("click", (event) => {
+      const useButton = event.target.closest("[data-character-use]");
+      const editButton = event.target.closest("[data-character-edit]");
+      const deleteButton = event.target.closest("[data-character-delete]");
+      try {
+        if (useButton) useCharacterCard(useButton.dataset.characterUse);
+        if (editButton) {
+          const card = (currentProject()?.characterCards || []).find((item) => item.id === editButton.dataset.characterEdit);
+          if (!card) throw new Error("没有找到这个角色。");
+          applyCharacterDraft(card);
+          $("#characterName")?.focus();
+        }
+        if (deleteButton) deleteCharacterCard(deleteButton.dataset.characterDelete);
+      } catch (error) { reportError("角色卡操作", error); }
     });
     $("#autoPlanBtn").addEventListener("click", () => autoFillEpisodePlan());
     $("#suggestPlansBtn").addEventListener("click", async () => {
@@ -2414,6 +2650,8 @@
       resetCurrentCreation();
       renderProject();
       renderBible();
+      renderCharacterCards();
+      renderMemeLibrary();
       renderAssets();
       renderConsistency();
       saveDraft(false);

@@ -17,6 +17,8 @@
       planBatches: [],
       episodes: [],
       assets: [],
+      memes: [],
+      characterCards: [],
       createdAt: now,
       updatedAt: now,
     };

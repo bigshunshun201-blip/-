@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>洛克王国短剧创作工作台</title>
-    <link rel="stylesheet" href="./styles.css?v=20260713-asset-safe-system" />
+    <link rel="stylesheet" href="./styles.css?v=20260713-character-meme-library" />
   </head>
   <body>
     <a class="skip-link" href="#workspace">跳到创作工作区</a>
@@ -328,6 +328,32 @@
               <label>主线矛盾<textarea id="bibleMainConflict" rows="5" placeholder="系列始终未解决的核心问题，以及阶段性升级路径。"></textarea></label>
               <label class="bible-wide">每集钩子规则<textarea id="bibleHookRules" rows="4" placeholder="例如：每集结尾只揭开一个新信息，同时留下一个必须在下一集行动的问题；不能用无理由失忆或突然复活。"></textarea></label>
             </div>
+            <section class="character-section" aria-labelledby="characterSectionTitle">
+              <div class="section-heading">
+                <div><p class="eyebrow">可复用人物资产</p><h3 id="characterSectionTitle">鲜明角色卡</h3></div>
+                <span id="characterCardCount">0 个角色</span>
+              </div>
+              <p class="helper">把角色的稳定特征拆成结构化设定。加入本集后，剧本、分镜和一致性检查都会引用其口头禅、行为习惯、反差与底线。</p>
+              <div class="character-editor">
+                <label>角色名<input id="characterName" placeholder="例如：洛小岚" /></label>
+                <label>身份定位<input id="characterRole" placeholder="例如：嘴硬的遗迹向导" /></label>
+                <label>鲜明特质<input id="characterTraits" placeholder="例如：凡事先算成功率，却总在最后一秒冲出去" /></label>
+                <label>反差特点<input id="characterContrast" placeholder="例如：怕黑，却专接夜间探索任务" /></label>
+                <label>核心欲望<input id="characterDesire" placeholder="角色长期真正想得到什么" /></label>
+                <label>弱点与代价<input id="characterWeakness" placeholder="什么情况下会失误或付出代价" /></label>
+                <label class="character-wide">口头禅（每行一句）<textarea id="characterCatchphrases" rows="3" placeholder="稳住，问题不大。&#10;我不是怕，我是在尊重未知。"></textarea></label>
+                <label>动作习惯<input id="characterMannerism" placeholder="例如：撒谎时会把徽章转半圈" /></label>
+                <label>喜剧触发器<input id="characterComedyTrigger" placeholder="例如：越想维持专业形象，道具越拆台" /></label>
+                <label class="character-wide">绝不能做的事<input id="characterBoundary" placeholder="例如：不会为了完成任务牺牲精灵伙伴" /></label>
+              </div>
+              <div class="character-actions">
+                <div data-ai-model-switch aria-label="角色卡生成模型"></div>
+                <button class="ghost-action" id="generateCharacterBtn" type="button">DeepSeek 起草角色</button>
+                <button class="secondary-action" id="saveCharacterBtn" type="button">保存角色卡</button>
+                <button class="small-action" id="clearCharacterBtn" type="button">清空</button>
+              </div>
+              <div class="character-library" id="characterLibrary"></div>
+            </section>
           </article>
 
           <article class="tab-panel" id="tab-consistency">
@@ -341,6 +367,25 @@
 
           <article class="tab-panel" id="tab-assets">
             <div class="result-header"><div><p class="eyebrow">可复用资产</p><h2>内容资产库</h2></div></div>
+            <section class="meme-library-section" aria-labelledby="memeLibraryTitle">
+              <div class="section-heading">
+                <div><p class="eyebrow">喜剧与热点资产</p><h3 id="memeLibraryTitle">项目梗库</h3></div>
+                <span id="memeLibraryCount">0 条梗</span>
+              </div>
+              <p class="helper">AI 提炼出的梗可以直接收藏；也可以手动录入。加入本集后会进入当前策划和剧本上下文。</p>
+              <div class="meme-library-entry">
+                <label>梗名称<input id="memeName" placeholder="一句能快速识别的梗名" /></label>
+                <label>适用标签<input id="memeTags" placeholder="例如：嘴硬, 道具拆台, 开头" /></label>
+                <label class="meme-wide">剧情机制<textarea id="memeMechanism" rows="3" placeholder="这个梗如何改变动作、道具、规则或人物误会，而不只是一句台词。"></textarea></label>
+                <label class="meme-wide">铺垫与回扣<textarea id="memeComedy" rows="2" placeholder="写清铺垫 -> 误导 -> 回扣，或静音也能看懂的视觉笑点。"></textarea></label>
+                <button class="secondary-action" id="addMemeBtn" type="button">存入梗库</button>
+              </div>
+              <div class="library-toolbar">
+                <input id="memeLibrarySearch" type="search" placeholder="搜索梗名、机制或标签" />
+                <select id="memeLibrarySource" aria-label="筛选梗来源"><option value="all">全部来源</option><option value="用户素材">用户素材</option><option value="原创结构">原创结构</option><option value="手动录入">手动录入</option></select>
+              </div>
+              <div class="meme-library" id="memeLibrary"></div>
+            </section>
             <div class="asset-entry">
               <label>资产类型<select id="assetType"><option value="角色立绘">角色立绘</option><option value="场景">场景</option><option value="口头禅">口头禅</option><option value="冲突模板">冲突模板</option><option value="标题模板">标题模板</option><option value="封面文案">封面文案</option><option value="BGM/SFX">BGM/SFX</option></select></label>
               <label>资产名称<input id="assetName" placeholder="例如：迪莫·雨夜回归立绘" /></label>
@@ -484,13 +529,13 @@
       粉丝向二创工作台示例，不代表官方内容或授权关系。发布前请核对平台规范与 IP 授权边界。
     </footer>
 
-    <script src="./generator.js?v=20260713-meme-model-copy"></script>
-    <script src="./workflow-core.js?v=20260713-meme-model-copy"></script>
-    <script src="./project-domain.js?v=20260713-meme-model-copy"></script>
-    <script src="./episode-planner.js?v=20260713-meme-model-copy"></script>
-    <script src="./ui-templates.js?v=20260713-meme-model-copy"></script>
-    <script src="./api-client.js?v=20260713-meme-model-copy"></script>
-    <script src="./data-store.js?v=20260713-meme-model-copy"></script>
-    <script src="./app.js?v=20260713-meme-model-copy"></script>
+    <script src="./generator.js?v=20260713-character-meme-library"></script>
+    <script src="./workflow-core.js?v=20260713-character-meme-library"></script>
+    <script src="./project-domain.js?v=20260713-character-meme-library"></script>
+    <script src="./episode-planner.js?v=20260713-character-meme-library"></script>
+    <script src="./ui-templates.js?v=20260713-character-meme-library"></script>
+    <script src="./api-client.js?v=20260713-character-meme-library"></script>
+    <script src="./data-store.js?v=20260713-character-meme-library"></script>
+    <script src="./app.js?v=20260713-character-meme-library"></script>
   </body>
 </html>
