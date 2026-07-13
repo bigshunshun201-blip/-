@@ -125,6 +125,7 @@ function normalizeInput(input = {}) {
     direction: String(input.direction || "").trim(),
     audience: String(input.audience || "").trim(),
     duration: Math.max(15, Math.min(Number(input.duration || 60), 180)),
+    clipMode: ["smart", "5", "8", "10"].includes(String(input.clipMode)) ? String(input.clipMode) : "smart",
     episodeCount: Math.max(1, Math.min(Number(input.episodeCount || 1), 12)),
     episodeNumber: Math.max(1, Math.min(Number(input.episodeNumber || 1), 999)),
     style: String(input.style || "").trim(),
@@ -148,6 +149,35 @@ function normalizeInput(input = {}) {
     latestReview: input.latestReview && typeof input.latestReview === "object" ? input.latestReview : null,
     episodePlan: input.episodePlan && typeof input.episodePlan === "object" ? input.episodePlan : {},
   };
+}
+
+function storyboardSegmentPlan(duration, clipMode = "smart") {
+  const total = Math.max(15, Math.min(Number(duration || 60), 180));
+  let targetSeconds = Number(clipMode);
+  const isSmart = !Number.isFinite(targetSeconds);
+  if (isSmart) targetSeconds = 8;
+  const smartCount = isSmart ? Math.ceil(total / targetSeconds) : 0;
+  const smartBase = isSmart ? Math.floor(total / smartCount) : 0;
+  const smartRemainder = isSmart ? total % smartCount : 0;
+  const segments = [];
+  let start = 0;
+  while (start < total) {
+    const seconds = isSmart
+      ? smartBase + (segments.length < smartRemainder ? 1 : 0)
+      : Math.min(targetSeconds, total - start);
+    const generationSeconds = isSmart || seconds >= 4 ? seconds : targetSeconds;
+    segments.push({
+      shot: segments.length + 1,
+      start,
+      end: start + seconds,
+      seconds,
+      generationSeconds,
+      trimSeconds: Math.max(0, generationSeconds - seconds),
+      timeRange: `${String(start).padStart(2, "0")}-${String(start + seconds).padStart(2, "0")}秒`,
+    });
+    start += seconds;
+  }
+  return { clipMode, targetSeconds, total, segments };
 }
 
 function roleNames(input) {
@@ -308,21 +338,21 @@ function storyboardPrompt(input) {
   const script = payload.script || payload.previousScript;
   const names = roleNames(payload);
   const canon = bibleContext(payload);
-  const segmentCount = Math.ceil(payload.duration / 10);
-  const finalSegmentSeconds = payload.duration - ((segmentCount - 1) * 10);
+  const segmentPlan = storyboardSegmentPlan(payload.duration, payload.clipMode);
+  const segmentCount = segmentPlan.segments.length;
   return `你是抖音竖屏 9:16 短剧分镜导演。只根据给定剧本生成分镜，不能改写或另起剧情。只输出严格 JSON，不要 Markdown 或解释。
 
 要求：
 1. 必须延续剧本的标题、冲突、反转、结尾钩子及核心角色；不新增无关主角。
-2. 整集 ${payload.duration} 秒必须拆成正好 ${segmentCount} 个连续视频段。前 ${Math.max(0, segmentCount - 1)} 段各 10 秒，最后一段 ${finalSegmentSeconds} 秒；每段对应一次独立的 AI 视频生成任务。
-3. 每个视频段内部用 beatBreakdown 拆成 2-4 个连续节拍，时间必须覆盖该段全部时长；第 1 段的前 3 秒必须完成强画面钩子。
+2. 整集 ${payload.duration} 秒必须严格按下面的制作段计划拆成正好 ${segmentCount} 段，每段对应一次独立 AI 视频生成任务：${stringify(segmentPlan.segments, 3000)}。
+3. 每段只允许一个连续场景、一个主动作和最多一个角色反应，不允许在一次生成里硬切多个场景或堆叠复杂动作。beatBreakdown 是同一镜头内的动作阶段，不是多个剪辑镜头；第 1 段的前 3 秒必须完成强画面钩子。
 4. 场景为《洛克王国：世界》手游开放世界，主要场景：${compact(payload.scene)}。
 5. 必须使用这些角色名：${names.length ? names.join("、") : "以剧本为准"}。
 6. 必须服从短剧圣经：镜头不能让角色使用超出能力边界的能力，角色关系和反派线索必须延续已完成集数。
 7. 每段都必须填写段目标、承接入点、承接出点、角色、场景、动作、台词/旁白、景别、画面提示词、音效/配乐、关联资产和素材状态；素材状态只能是“已有”“待制作”“待采集”。
 8. 必须把剧本中的 visualHighlights 和 comedyBeats 落到具体视频段；至少 3 段有清晰的动作变化、遮挡转场、道具反应或环境异变，避免只写“角色震惊”“光芒闪烁”。
 9. visualPrompt 必须包含前景、中景、背景、主体动作、明暗或色彩反差、9:16 字幕安全区；音效必须与画面动作卡点。
-10. 每段 visualPrompt 要能脱离上下文直接交给视频模型，但 continuityIn 和 continuityOut 必须精确描述首尾人物位置、朝向、表情、道具和环境状态，使相邻视频段能无缝拼接。
+10. 每段 visualPrompt 要能脱离上下文直接交给视频模型，并明确“单场景连续镜头、无硬切”；continuityIn 和 continuityOut 必须精确描述首尾人物位置、朝向、表情、道具和环境状态，使相邻视频段能用首尾帧或参考图衔接。
 11. 所有视频段合起来必须完整实现当前剧本；最后一段必须呈现剧本结尾悬念，不能擅自增加新反转或混入其他剧本内容。
 12. 角色若有结构化角色卡，动作链和画面提示词必须体现其标志性动作、反差或喜剧触发器；口头禅只能出现在剧本已有台词中，不得为分镜擅自加戏。
 
@@ -333,7 +363,7 @@ function storyboardPrompt(input) {
 返回结构：
 {
   "storyboard": [
-    {"shot":1,"timeRange":"00-10秒","seconds":10,"segmentGoal":"这10秒推进的唯一剧情任务","continuityIn":"段首人物、道具和环境状态","continuityOut":"段尾人物、道具和环境状态","beatBreakdown":[{"range":"0-3秒","content":"画面、动作与信息变化"},{"range":"3-10秒","content":"画面、动作与信息变化"}],"characters":"出镜角色","scene":"场景","visual":"整段画面概述","action":"角色动作链","line":"台词/旁白","scale":"景别组合","movement":"镜头运动","sound":"音效/配乐建议","subtitle":"字幕文案","visualPrompt":"可直接给AI视频模型使用的完整9:16提示词","assetLinks":"资产库名称或待采集素材","assetNote":"制作备注","assetStatus":"待制作"}
+    {"shot":1,"timeRange":"00-08秒","seconds":8,"generationSeconds":8,"segmentGoal":"本段推进的唯一剧情任务","continuityIn":"段首人物、道具和环境状态","continuityOut":"段尾人物、道具和环境状态","beatBreakdown":[{"range":"0-3秒","content":"同一镜头内的动作阶段"},{"range":"3-8秒","content":"同一镜头内的动作阶段"}],"characters":"出镜角色","scene":"单一场景","visual":"整段画面概述","action":"一个主动作和最多一个反应","line":"台词/旁白","scale":"单一主景别或平滑景别变化","movement":"一种主要镜头运动","sound":"音效/配乐建议","subtitle":"字幕文案","visualPrompt":"单场景连续镜头、无硬切的完整9:16提示词","assetLinks":"资产库名称或待采集素材","assetNote":"制作备注","assetStatus":"待制作"}
   ]
 }
 限制：storyboard 必须正好 ${segmentCount} 条，按时间顺序排列；每段内容只能来自当前剧本。`;
@@ -379,7 +409,7 @@ function biblePrompt(input) {
 4. 关系要写明当前状态、共同秘密和未来可变化的方向；反派要有合理目标、手段、底线和私人连接。
 5. 世界规则必须服务剧情，至少给出 4 条可反复制造冲突的规则；使用《洛克王国：世界》手游开放世界语境，不套旧页游剧情。
 6. 主线矛盾应包含起点、三次升级和阶段终点，但不能提前写死每集剧情。
-7. 钩子规则必须明确前 3 秒、中段信息变化、10 秒视频段衔接和结尾悬念的执行标准。
+7. 钩子规则必须明确前 3 秒、中段信息变化、AI 视频制作段衔接和结尾悬念的执行标准。
 8. 当前圣经若只是泛用占位文本，可以重写；若已有具体人名和规则，要继承而不是推翻。
 
 当前项目与已有圣经：${bibleContext(payload)}
@@ -394,7 +424,7 @@ function biblePrompt(input) {
     "antagonist":"反派目标、手段、底线与私人连接",
     "worldRules":"至少4条固定世界规则",
     "mainConflict":"系列主线起点、三次升级和阶段终点",
-    "hookRules":"前3秒、中段、10秒段衔接与结尾钩子规则"
+    "hookRules":"前3秒、中段、AI视频段衔接与结尾钩子规则"
   }
 }`;
 }
@@ -445,7 +475,7 @@ ${extractMode
 
 要求：
 1. 每个梗必须改变角色动作、道具用途、任务规则、场景机关或人物误会，不能只给一句网络化台词。
-2. 笑点必须包含铺垫和回扣，尽量做到静音也能看懂；能在 10 秒视频段内完成一次可见变化。
+2. 笑点必须包含铺垫和回扣，尽量做到静音也能看懂；能在一个 5-10 秒 AI 视频段内完成一次可见变化。
 3. 结合当前主题、角色、场景、短剧圣经和目标受众；不得默认换成迪莫、小洛克或黑衣人。
 4. 六个梗的机制必须不同，至少覆盖视觉反差、规则误导、关系错位、道具回扣四类。
 5. 标注适用位置和使用风险，避免生硬蹭热点、冒犯现实人物、整段照搬台词或破坏世界观。
@@ -547,20 +577,22 @@ function normalizeScript(result) {
   return { script };
 }
 
-function normalizeStoryboard(result, duration) {
+function normalizeStoryboard(result, duration, clipMode = "smart") {
   const source = Array.isArray(result?.storyboard) ? result.storyboard : Array.isArray(result) ? result : [];
   if (!source.length) throw new Error("AI 没有返回可用分镜");
-  const targetDuration = Math.max(15, Math.min(Number(duration || source.length * 10), 180));
-  const expectedSegments = Math.ceil(targetDuration / 10);
+  const plan = storyboardSegmentPlan(duration || source.reduce((sum, item) => sum + Number(item?.seconds || 0), 0), clipMode);
+  const expectedSegments = plan.segments.length;
   if (source.length < expectedSegments) throw new Error(`AI 只返回了 ${source.length} 个视频段，需要 ${expectedSegments} 个，请重新生成`);
   return {
     storyboard: source.slice(0, expectedSegments).map((shot, index) => {
-      const seconds = index === expectedSegments - 1 ? targetDuration - (index * 10) : 10;
-      const start = index * 10;
+      const planned = plan.segments[index];
       return {
         shot: index + 1,
-        timeRange: `${String(start).padStart(2, "0")}-${String(start + seconds).padStart(2, "0")}秒`,
-        seconds,
+        timeRange: planned.timeRange,
+        seconds: planned.seconds,
+        generationSeconds: planned.generationSeconds,
+        trimSeconds: planned.trimSeconds,
+        generationMode: "单场景连续镜头",
         segmentGoal: String(shot.segmentGoal || ""),
         continuityIn: String(shot.continuityIn || ""),
         continuityOut: String(shot.continuityOut || ""),
@@ -828,6 +860,13 @@ async function api(request, env, url) {
     });
   }
   const input = await readInput(request);
+  if (url.pathname === "/api/storyboard" && !input.script && !input.previousScript) {
+    return error("请先生成或恢复一个剧本，再生成分镜", "SCRIPT_REQUIRED", 400);
+  }
+  if (["/api/storyboard", "/api/generate"].includes(url.pathname)) {
+    const plannedCount = storyboardSegmentPlan(input.duration, input.clipMode).segments.length;
+    if (plannedCount > 24) return error("当前分段会产生超过 24 个视频段，请改用智能/8秒/10秒模式或缩短总时长。", "TOO_MANY_SEGMENTS", 400);
+  }
   const model = modelFor(input, env);
   if (!env.DEEPSEEK_API_KEY) return error("未配置 DeepSeek API Key", "NO_DEEPSEEK_KEY", 500);
   let usage;
@@ -846,10 +885,10 @@ async function api(request, env, url) {
   }
 
   if (url.pathname === "/api/storyboard") {
-    if (!input.script && !input.previousScript) return error("请先生成或恢复一个剧本，再生成分镜", "SCRIPT_REQUIRED", 400);
     const storyboardDuration = Math.max(15, Math.min(Number(input.duration || 60), 180));
-    const segmentTokens = Math.min(7000, 1600 + (Math.ceil(storyboardDuration / 10) * 380));
-    const result = normalizeStoryboard(await askDeepSeek(env, input, storyboardPrompt(input), segmentTokens), storyboardDuration);
+    const segmentCount = storyboardSegmentPlan(storyboardDuration, input.clipMode).segments.length;
+    const segmentTokens = Math.min(7000, 1600 + (segmentCount * 380));
+    const result = normalizeStoryboard(await askDeepSeek(env, input, storyboardPrompt(input), segmentTokens), storyboardDuration, input.clipMode);
     return json({ ok: true, source: "deepseek", model, usage, result });
   }
 
@@ -891,8 +930,9 @@ async function api(request, env, url) {
   if (url.pathname === "/api/generate") {
     const scriptResult = normalizeScript(await askDeepSeek(env, input, scriptPrompt(input), 2200));
     const storyboardDuration = Math.max(15, Math.min(Number(input.duration || 60), 180));
-    const segmentTokens = Math.min(7000, 1600 + (Math.ceil(storyboardDuration / 10) * 380));
-    const storyboardResult = normalizeStoryboard(await askDeepSeek(env, { ...input, script: scriptResult.script }, storyboardPrompt({ ...input, script: scriptResult.script }), segmentTokens), storyboardDuration);
+    const segmentCount = storyboardSegmentPlan(storyboardDuration, input.clipMode).segments.length;
+    const segmentTokens = Math.min(7000, 1600 + (segmentCount * 380));
+    const storyboardResult = normalizeStoryboard(await askDeepSeek(env, { ...input, script: scriptResult.script }, storyboardPrompt({ ...input, script: scriptResult.script }), segmentTokens), storyboardDuration, input.clipMode);
     return json({ ok: true, source: "deepseek", model, usage, result: { ...scriptResult, ...storyboardResult } });
   }
 
@@ -925,6 +965,7 @@ export default {
 
 export const __test = {
   normalizeInput,
+  storyboardSegmentPlan,
   normalizeStoryboard,
   normalizeContinuity,
   normalizeBible,

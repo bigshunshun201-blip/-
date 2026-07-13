@@ -42,9 +42,34 @@ test("storyboard normalizer retains production fields", () => {
   assert.equal(result.storyboard[0].assetStatus, "待制作");
   assert.equal(result.storyboard[0].assetLinks, "迪莫雨夜立绘");
   assert.equal(result.storyboard[0].characters, "阿洛、迪莫");
-  assert.equal(result.storyboard[0].seconds, 10);
-  assert.equal(result.storyboard[1].seconds, 5);
-  assert.equal(result.storyboard[1].timeRange, "10-15秒");
+  assert.equal(result.storyboard[0].seconds, 8);
+  assert.equal(result.storyboard[0].generationSeconds, 8);
+  assert.equal(result.storyboard[1].seconds, 7);
+  assert.equal(result.storyboard[1].timeRange, "08-15秒");
+  assert.equal(result.storyboard[1].generationMode, "单场景连续镜头");
+});
+
+test("storyboard segment planner adapts duration and marks fixed-mode trimming", () => {
+  const sixty = __test.storyboardSegmentPlan(60, "smart");
+  assert.equal(sixty.targetSeconds, 8);
+  assert.equal(sixty.segments.length, 8);
+  assert.deepEqual(sixty.segments.map((segment) => segment.seconds), [8, 8, 8, 8, 7, 7, 7, 7]);
+  const seventyFive = __test.storyboardSegmentPlan(75, "smart");
+  assert.equal(seventyFive.targetSeconds, 8);
+  assert.deepEqual(seventyFive.segments.map((segment) => segment.seconds), [8, 8, 8, 8, 8, 7, 7, 7, 7, 7]);
+  const fixedEight = __test.storyboardSegmentPlan(75, "8");
+  assert.equal(fixedEight.segments.at(-1).seconds, 3);
+  assert.equal(fixedEight.segments.at(-1).generationSeconds, 8);
+  assert.equal(fixedEight.segments.at(-1).trimSeconds, 5);
+  for (const mode of ["smart", "5", "8", "10"]) {
+    for (let duration = 15; duration <= 180; duration += 7) {
+      const plan = __test.storyboardSegmentPlan(duration, mode);
+      assert.equal(plan.segments.reduce((sum, segment) => sum + segment.seconds, 0), duration);
+      assert.equal(plan.segments[0].start, 0);
+      assert.equal(plan.segments.at(-1).end, duration);
+      if (mode === "smart") assert.ok(plan.segments.every((segment) => segment.seconds >= 4));
+    }
+  }
 });
 
 test("continuity normalizer always returns the five required checks", () => {
@@ -115,7 +140,7 @@ test("AI plan normalizer requires three complete episode plans", () => {
 
 test("UI contains the production workflow controls", async () => {
   const html = await readFile(new URL("../index.html", import.meta.url), "utf8");
-  for (const id of ["planOpeningHook", "autoPlanBtn", "suggestPlansBtn", "planSuggestions", "planHistoryList", "planReadyState", "memeLabBtn", "memeInspireBtn", "memeLabResults", "memeLibrary", "addMemeBtn", "generateBibleBtn", "applyBibleTemplateBtn", "generateCharacterBtn", "saveCharacterBtn", "characterLibrary", "storyboardHistory", "checkContinuityBtn", "assetLibrary", "reviewCommentThemes", "exportProjectBtn"]) {
+  for (const id of ["clipMode", "planOpeningHook", "autoPlanBtn", "suggestPlansBtn", "planSuggestions", "planHistoryList", "planReadyState", "memeLabBtn", "memeInspireBtn", "memeLabResults", "memeLibrary", "addMemeBtn", "generateBibleBtn", "applyBibleTemplateBtn", "generateCharacterBtn", "saveCharacterBtn", "characterLibrary", "storyboardHistory", "checkContinuityBtn", "assetLibrary", "reviewCommentThemes", "exportProjectBtn"]) {
     assert.match(html, new RegExp(`id="${id}"`));
   }
   assert.match(html, /open\.douyin\.com\/platform\/resource\/docs\/openapi\/data-open-service\/tops-data\/hot-video-list/);
@@ -353,12 +378,13 @@ test("UI templates escape model content and keep production controls", () => {
   assert.match(scriptHtml, /笑点设计/);
   assert.match(scriptHtml, /视觉爆点/);
 
-  const storyboardHtml = uiTemplates.storyboard([{ shot: 1, timeRange: "00-10秒", seconds: 10, segmentGoal: "抛出异常", beatBreakdown: [{ range: "0-3秒", content: "徽章裂开" }], assetStatus: "待制作" }], true);
+  const storyboardHtml = uiTemplates.storyboard([{ shot: 1, timeRange: "00-08秒", seconds: 8, generationSeconds: 8, segmentGoal: "抛出异常", beatBreakdown: [{ range: "0-3秒", content: "徽章裂开" }], assetStatus: "待制作" }], true);
   assert.match(storyboardHtml, /data-shot-field="assetLinks"/);
   assert.match(storyboardHtml, /option value="待制作" selected/);
   assert.match(storyboardHtml, /第 1 段/);
   assert.match(storyboardHtml, /徽章裂开/);
   assert.match(storyboardHtml, /data-copy-storyboard-segment="0"/);
+  assert.match(storyboardHtml, /生成 8 秒/);
 });
 
 test("page loads domain and template modules before app.js", async () => {

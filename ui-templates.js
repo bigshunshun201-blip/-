@@ -88,8 +88,8 @@
   function storyboard(storyboardRows = [], hasScript = false) {
     if (!storyboardRows.length) {
       return hasScript
-        ? `<p class="helper">当前剧本版本还没有对应分镜。确认剧本方向可用后，点击“基于本版剧本生成 10 秒分镜”。</p>`
-        : `<p class="helper">请先生成或恢复一个剧本版本，再为它生成对应的 10 秒视频段分镜。</p>`;
+        ? `<p class="helper">当前剧本版本还没有对应分镜。确认剧本方向可用后，点击“基于本版剧本生成 AI 视频段”。</p>`
+        : `<p class="helper">请先生成或恢复一个剧本版本，再为它生成对应的 AI 视频段分镜。</p>`;
     }
     const statusOptions = ["已有", "待制作", "待采集"];
     const beats = (items = []) => items.map((beat) => `<div class="segment-beat"><strong>${escapeHtml(beat.range)}</strong><span>${escapeHtml(beat.content)}</span></div>`).join("");
@@ -98,7 +98,7 @@
         <thead><tr><th>视频段</th><th>本段任务</th><th>角色 / 场景</th><th>段内节拍与动作</th><th>台词 / 字幕</th><th>镜头 / 声音</th><th>首尾连续性</th><th>AI 视频提示词</th><th>关联资产</th><th>制作备注</th><th>素材状态</th></tr></thead>
         <tbody>${storyboardRows.map((shot, index) => `
           <tr>
-            <td><strong>第 ${escapeHtml(shot.shot)} 段</strong><br>${escapeHtml(shot.timeRange)}<br><small>${escapeHtml(shot.seconds)} 秒</small><br><button class="segment-copy-button" type="button" data-copy-storyboard-segment="${index}">复制本段</button></td>
+            <td><strong>第 ${escapeHtml(shot.shot)} 段</strong><br>${escapeHtml(shot.timeRange)}<br><small>成片 ${escapeHtml(shot.seconds)} 秒</small><br><small>生成 ${escapeHtml(shot.generationSeconds || shot.seconds)} 秒${Number(shot.trimSeconds || 0) ? ` · 裁 ${escapeHtml(shot.trimSeconds)} 秒` : ""}</small><br><button class="segment-copy-button" type="button" data-copy-storyboard-segment="${index}">复制本段</button></td>
             <td>${escapeHtml(shot.segmentGoal)}</td>
             <td><strong>${escapeHtml(shot.characters)}</strong><br>${escapeHtml(shot.scene)}</td>
             <td>${beats(shot.beatBreakdown)}<small>${escapeHtml(shot.visual)}；${escapeHtml(shot.action)}</small></td>

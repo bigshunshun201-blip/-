@@ -114,7 +114,7 @@
     }
     if (storyboardButton) {
       storyboardButton.disabled = isBusy || !hasScript;
-      storyboardButton.title = hasScript ? "仅根据当前剧本版本，生成每段约 10 秒的对应分镜" : "请先生成并确认一版剧本";
+      storyboardButton.title = hasScript ? "仅根据当前剧本版本，按所选视频分段模式生成对应分镜" : "请先生成并确认一版剧本";
     }
     if (continueButton) {
       continueButton.disabled = isBusy || !hasScript;
@@ -223,6 +223,7 @@
       direction: $("#customDirection")?.value.trim() || $("#direction").value,
       audience: $("#customAudience")?.value.trim() || $("#audience").value,
       duration: customDuration || Number($("#duration").value),
+      clipMode: $("#clipMode")?.value || "smart",
       episodeCount: Number($("#episodeCount").value),
       episodeNumber: Number($("#episodeNumber")?.value || 1),
       style: $("#customStyle")?.value.trim() || $("#style").value,
@@ -341,7 +342,7 @@
   async function archivePlanBatch(options, response, input) {
     const project = currentProject();
     if (!project) return null;
-    const inputKeys = ["theme", "roles", "scene", "direction", "audience", "duration", "episodeCount", "episodeNumber", "style", "memeSeed", "aiModel", "continueInstruction"];
+    const inputKeys = ["theme", "roles", "scene", "direction", "audience", "duration", "clipMode", "episodeCount", "episodeNumber", "style", "memeSeed", "aiModel", "continueInstruction"];
     const batchInput = Object.fromEntries(inputKeys.map((key) => [key, input[key]]));
     const batch = {
       id: newId("plan-batch"),
@@ -778,7 +779,7 @@
     const shared = {
       abilities: `${partner}：核心能力只能解决局部问题；连续使用会进入疲劳状态，情绪失控时准确率下降。在${scene}之外使用时效果减弱，不能突然获得未铺垫的新能力。`,
       worldRules: `1. 每个区域任务都要付出可见代价，奖励不能凭空出现。\n2. 传送点只能连接已经探索并稳定的区域，危机中强行传送会丢失一件关键物品。\n3. 精灵能拒绝指令，关系变化会影响配合，但不能直接突破能力边界。\n4. 区域首领与环境规则绑定，必须先理解场景机制，再解决战斗或任务。`,
-      hookRules: "前 3 秒先展示异常结果，不解释背景；每个 10 秒视频段只完成一个信息或动作变化，段尾保留明确的动作承接点；中段至少两次改变观众判断；结尾只揭开一个新事实，并留下下一集必须执行的问题。",
+      hookRules: "前 3 秒先展示异常结果，不解释背景；每个 AI 视频制作段只完成一个信息或主动作变化，段尾保留明确的动作承接点；中段至少两次改变观众判断；结尾只揭开一个新事实，并留下下一集必须执行的问题。",
     };
     const templates = {
       comedy: {
@@ -1563,6 +1564,9 @@
         shot: shot.shot || index + 1,
         timeRange: shot.timeRange || "",
         seconds: shot.seconds || "",
+        generationSeconds: shot.generationSeconds || shot.seconds || "",
+        trimSeconds: shot.trimSeconds || 0,
+        generationMode: shot.generationMode || "单场景连续镜头",
         segmentGoal: shot.segmentGoal || "",
         continuityIn: shot.continuityIn || "",
         continuityOut: shot.continuityOut || "",
@@ -1612,6 +1616,9 @@
       shot: shot.shot || index + 1,
       timeRange: shot.timeRange || "",
       seconds: shot.seconds || "",
+      generationSeconds: shot.generationSeconds || shot.seconds || "",
+      trimSeconds: shot.trimSeconds || 0,
+      generationMode: shot.generationMode || "单场景连续镜头",
       segmentGoal: shot.segmentGoal || "",
       continuityIn: shot.continuityIn || "",
       continuityOut: shot.continuityOut || "",
@@ -1700,6 +1707,7 @@
   function storyboardSegmentText(segment) {
     return [
       `第 ${segment.shot} 段｜${segment.timeRange || `${segment.seconds || 10}秒`}`,
+      `生成规格：${segment.generationMode || "单场景连续镜头"}｜生成 ${segment.generationSeconds || segment.seconds || ""} 秒｜成片保留 ${segment.seconds || ""} 秒${Number(segment.trimSeconds || 0) ? `｜尾部裁剪 ${segment.trimSeconds} 秒` : ""}`,
       `所属剧本：${state.script?.title || "未命名剧本"}`,
       `本段任务：${segment.segmentGoal || ""}`,
       `角色：${segment.characters || ""}`,
@@ -2435,7 +2443,7 @@
       "## 剧本",
       scriptText,
       "",
-      "## 10 秒视频段分镜",
+      "## AI 视频段分镜",
       storyboardText,
       "",
       "## 选题库",
@@ -2483,7 +2491,7 @@
       "### 结尾钩子",
       (item.script?.hooks || []).map((hook) => `- ${formatItem(hook)}`).join("\n"),
       "",
-      "### 10 秒视频段分镜",
+      "### AI 视频段分镜",
       storyboardText,
     ].join("\n");
   }

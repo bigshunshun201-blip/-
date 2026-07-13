@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>洛克王国短剧创作工作台</title>
-    <link rel="stylesheet" href="./styles.css?v=20260713-character-meme-library" />
+    <link rel="stylesheet" href="./styles.css?v=20260713-smart-video-segments" />
   </head>
   <body>
     <a class="skip-link" href="#workspace">跳到创作工作区</a>
@@ -109,6 +109,15 @@
               <input id="episodeCount" type="number" min="1" max="12" value="3" />
             </label>
             <label>
+              AI 视频分段
+              <select id="clipMode">
+                <option value="smart">智能均衡 5-8 秒（推荐）</option>
+                <option value="5">固定 5 秒</option>
+                <option value="8">固定 8 秒</option>
+                <option value="10">固定 10 秒</option>
+              </select>
+            </label>
+            <label>
               当前集数
               <input id="episodeNumber" type="number" min="1" max="999" value="1" />
             </label>
@@ -179,7 +188,7 @@
             <p class="plan-ready-state" id="planReadyState" role="status">请先完整填写或采用一套本集策划</p>
             <div class="ai-model-line"><span>剧本 / 分镜模型</span><div data-ai-model-switch aria-label="剧本和分镜生成模型"></div></div>
             <button class="primary-action" id="generateBtn" disabled>先完成本集策划</button>
-            <button class="secondary-action" id="storyboardBtn" disabled>基于本版剧本生成 10 秒分镜</button>
+            <button class="secondary-action" id="storyboardBtn" disabled>基于本版剧本生成 AI 视频段</button>
             <button class="ghost-action" id="continueBtn" disabled>续写下一集</button>
           </div>
         </section>
@@ -411,11 +420,11 @@
             <div class="result-header">
               <div>
                 <p class="eyebrow">9:16 竖屏镜头表</p>
-                <h2>10 秒视频段分镜脚本</h2>
+                <h2>AI 视频段分镜脚本</h2>
               </div>
               <button class="small-action" data-copy="storyboardTable">复制分镜</button>
             </div>
-            <p class="helper bible-intro">每段约 10 秒，对应一次独立的 AI 视频生成；按段号顺序拼接后组成当前剧本的完整视频。</p>
+            <p class="helper bible-intro">每段对应一次独立 AI 视频生成。智能模式会按总时长均衡拆成 5-8 秒制作段；每段限制为一个连续场景和一个主动作，减少人物漂移与镜头断裂。</p>
             <div class="storyboard-version-list" id="storyboardHistory"></div>
             <div class="table-wrap" id="storyboardTable"></div>
           </article>
@@ -529,13 +538,13 @@
       粉丝向二创工作台示例，不代表官方内容或授权关系。发布前请核对平台规范与 IP 授权边界。
     </footer>
 
-    <script src="./generator.js?v=20260713-character-meme-library"></script>
-    <script src="./workflow-core.js?v=20260713-character-meme-library"></script>
-    <script src="./project-domain.js?v=20260713-character-meme-library"></script>
-    <script src="./episode-planner.js?v=20260713-character-meme-library"></script>
-    <script src="./ui-templates.js?v=20260713-character-meme-library"></script>
-    <script src="./api-client.js?v=20260713-character-meme-library"></script>
-    <script src="./data-store.js?v=20260713-character-meme-library"></script>
-    <script src="./app.js?v=20260713-character-meme-library"></script>
+    <script src="./generator.js?v=20260713-smart-video-segments"></script>
+    <script src="./workflow-core.js?v=20260713-smart-video-segments"></script>
+    <script src="./project-domain.js?v=20260713-smart-video-segments"></script>
+    <script src="./episode-planner.js?v=20260713-smart-video-segments"></script>
+    <script src="./ui-templates.js?v=20260713-smart-video-segments"></script>
+    <script src="./api-client.js?v=20260713-smart-video-segments"></script>
+    <script src="./data-store.js?v=20260713-smart-video-segments"></script>
+    <script src="./app.js?v=20260713-smart-video-segments"></script>
   </body>
 </html>
