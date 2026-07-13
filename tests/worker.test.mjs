@@ -8,6 +8,8 @@ const require = createRequire(import.meta.url);
 const workflow = require("../workflow-core.js");
 const apiClientModule = require("../api-client.js");
 const dataStoreModule = require("../data-store.js");
+const projectDomain = require("../project-domain.js");
+const uiTemplates = require("../ui-templates.js");
 
 test("storyboard normalizer retains production fields", () => {
   const result = __test.normalizeStoryboard({
@@ -166,4 +168,56 @@ test("data store migrates legacy JSON and preserves a localStorage fallback", as
   assert.deepEqual(await store.get("projects"), [{ id: "legacy-project" }]);
   assert.equal(await store.set("draft", { currentProjectId: "legacy-project" }), "localStorage");
   assert.deepEqual(JSON.parse(values.get("draft")), { currentProjectId: "legacy-project" });
+});
+
+test("project domain appends versions without overwriting an episode", () => {
+  const project = projectDomain.createProjectRecord("版本测试", { worldRules: "规则" });
+  const first = projectDomain.upsertEpisodeVersion(project, {
+    mode: "new",
+    input: { episodeNumber: 1, theme: "第一版" },
+    versionSnapshot: { script: { title: "第一版" }, historyId: "history-1" },
+  });
+  const second = projectDomain.upsertEpisodeVersion(project, {
+    currentEpisodeId: first.episode.id,
+    mode: "new",
+    input: { episodeNumber: 1, theme: "第二版" },
+    versionSnapshot: { script: { title: "第二版" }, historyId: "history-2" },
+  });
+  assert.equal(project.episodes.length, 1);
+  assert.equal(second.episode.versions.length, 2);
+  assert.equal(second.episode.script.title, "第二版");
+  projectDomain.applyEpisodeVersion(second.episode, first.version.id);
+  assert.equal(second.episode.script.title, "第一版");
+});
+
+test("project domain validates episode plans and preserves review thresholds", () => {
+  assert.throws(
+    () => projectDomain.validateEpisodePlan({ episodePlan: { openingHook: "异常" } }),
+    /核心冲突.*反转信息.*结尾悬念.*目标情绪/,
+  );
+  const insights = projectDomain.deriveReviewInsights({ views: 10000, completionRate: 20, likes: 500, comments: 20, shares: 10 });
+  assert.match(insights.hook, /前 3 秒取消铺垫/);
+  assert.equal(insights.interactionRate, 5.3);
+});
+
+test("UI templates escape model content and keep production controls", () => {
+  const scriptHtml = uiTemplates.script({
+    synopsis: "<img src=x onerror=alert(1)>",
+    tags: ["<script>"],
+    characters: [], structure: [], dialogue: [], rhythm: [], reversals: [], hooks: [],
+  });
+  assert.doesNotMatch(scriptHtml, /<img|<script>/);
+  assert.match(scriptHtml, /&lt;img/);
+
+  const storyboardHtml = uiTemplates.storyboard([{ shot: 1, seconds: 3, assetStatus: "待制作" }], true);
+  assert.match(storyboardHtml, /data-shot-field="assetLinks"/);
+  assert.match(storyboardHtml, /option value="待制作" selected/);
+});
+
+test("page loads domain and template modules before app.js", async () => {
+  const html = await readFile(new URL("../index.html", import.meta.url), "utf8");
+  const domainIndex = html.indexOf("project-domain.js");
+  const templatesIndex = html.indexOf("ui-templates.js");
+  const appIndex = html.indexOf("app.js");
+  assert.ok(domainIndex > 0 && templatesIndex > domainIndex && appIndex > templatesIndex);
 });

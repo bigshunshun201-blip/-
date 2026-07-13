@@ -36,6 +36,21 @@
     mainConflict: "主角必须在个人愿望与守护精灵/世界秩序之间做选择，主线问题不能被单集轻易解决。",
     hookRules: "前 3 秒抛出可见危机或异常信息；结尾只揭开一个新信息，并留下下一集必须行动的问题。",
   };
+  const projectDomain = window.RocoProjectDomain;
+  const newId = projectDomain.newId;
+  const activeEpisodeVersion = projectDomain.activeEpisodeVersion;
+  const applyEpisodeVersion = projectDomain.applyEpisodeVersion;
+  const normalizeProjectEpisodes = projectDomain.normalizeProjectEpisodes;
+  const validateEpisodePlan = projectDomain.validateEpisodePlan;
+  const deriveReviewInsights = projectDomain.deriveReviewInsights;
+  const uiTemplates = window.RocoUiTemplates;
+  const escapeHtml = uiTemplates.escapeHtml;
+  const formatItem = uiTemplates.formatItem;
+  const renderList = uiTemplates.renderList;
+
+  function createProjectRecord(name = "未命名短剧项目") {
+    return projectDomain.createProjectRecord(name, defaultBible);
+  }
 
   function nowTime() {
     return new Date().toLocaleTimeString("zh-CN", { hour12: false });
@@ -209,68 +224,6 @@
     setInputValue("planTargetEmotion", plan.targetEmotion || "");
   }
 
-  function newId(prefix) {
-    return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  }
-
-  function createProjectRecord(name = "未命名短剧项目") {
-    return {
-      id: newId("project"),
-      name,
-      logline: "",
-      bible: { ...defaultBible },
-      episodes: [],
-      assets: [],
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-  }
-
-  function createEpisodeVersion(snapshot = {}) {
-    return {
-      id: snapshot.id || newId("version"),
-      createdAt: snapshot.createdAt || new Date().toISOString(),
-      input: { ...(snapshot.input || {}) },
-      script: snapshot.script || null,
-      storyboard: Array.isArray(snapshot.storyboard) ? snapshot.storyboard : [],
-      creativePack: snapshot.creativePack || null,
-      historyId: snapshot.historyId || null,
-      source: snapshot.source || "",
-      model: snapshot.model || "",
-      consistency: snapshot.consistency || null,
-    };
-  }
-
-  function activeEpisodeVersion(episode) {
-    return (episode?.versions || []).find((version) => version.id === episode.activeVersionId) || episode?.versions?.at(-1) || null;
-  }
-
-  function applyEpisodeVersion(episode, versionId = episode.activeVersionId) {
-    const version = (episode.versions || []).find((item) => item.id === versionId) || activeEpisodeVersion(episode);
-    if (!version) return episode;
-    episode.activeVersionId = version.id;
-    episode.input = { ...(version.input || {}) };
-    episode.script = version.script || null;
-    episode.storyboard = Array.isArray(version.storyboard) ? version.storyboard : [];
-    episode.creativePack = version.creativePack || null;
-    episode.historyId = version.historyId || null;
-    episode.source = version.source || "";
-    episode.model = version.model || "";
-    episode.consistency = version.consistency || null;
-    return episode;
-  }
-
-  function normalizeProjectEpisodes(project) {
-    project.episodes = (project.episodes || []).map((episode) => {
-      const versions = Array.isArray(episode.versions) && episode.versions.length
-        ? episode.versions.map(createEpisodeVersion)
-        : [createEpisodeVersion(episode)];
-      const normalized = { ...episode, versions, activeVersionId: episode.activeVersionId || versions.at(-1).id };
-      return applyEpisodeVersion(normalized);
-    });
-    return project;
-  }
-
   function currentProject() {
     return state.projects.find((project) => project.id === state.currentProjectId) || state.projects[0] || null;
   }
@@ -306,8 +259,7 @@
   }
 
   function nextEpisodeNumber(project = currentProject()) {
-    const numbers = (project?.episodes || []).map((episode) => Number(episode.episodeNumber) || 0);
-    return Math.max(0, ...numbers) + 1;
+    return projectDomain.nextEpisodeNumber(project);
   }
 
   function currentProjectEpisode() {
@@ -333,19 +285,6 @@
       projectAssets: (project?.assets || []).slice(-24),
       latestReview,
     };
-  }
-
-  function validateEpisodePlan(input) {
-    const plan = input.episodePlan || {};
-    const labels = {
-      openingHook: "开头钩子",
-      conflict: "核心冲突",
-      reversal: "反转信息",
-      endingSuspense: "结尾悬念",
-      targetEmotion: "目标情绪",
-    };
-    const missing = Object.entries(labels).filter(([key]) => !String(plan[key] || "").trim()).map(([, label]) => label);
-    if (missing.length) throw new Error(`请先完成本集策划：${missing.join("、")}`);
   }
 
   function renderBible() {
@@ -534,32 +473,21 @@
   function upsertProjectEpisode({ mode, input, response, generated, historyId }) {
     const project = currentProject();
     if (!project) return null;
-    const episodeNumber = Math.max(1, Number(input.episodeNumber) || nextEpisodeNumber(project));
-    let episode = project.episodes.find((item) => item.id === state.currentEpisodeId);
-    if (!episode || (Number(episode.episodeNumber) !== episodeNumber && mode === "new")) {
-      episode = project.episodes.find((item) => Number(item.episodeNumber) === episodeNumber) || null;
-    }
-    if (!episode) {
-      episode = { id: newId("episode"), episodeNumber, review: { status: "draft" } };
-      project.episodes.push(episode);
-    }
-    const version = createEpisodeVersion({
+    const { episode } = projectDomain.upsertEpisodeVersion(project, {
+      currentEpisodeId: state.currentEpisodeId,
+      mode,
       input,
-      script: generated.script,
-      storyboard: generated.storyboard || [],
-      creativePack: generated.creativePack || null,
-      historyId,
-      source: response.source || "",
-      model: response.model || "",
-      consistency: null,
+      versionSnapshot: {
+        input,
+        script: generated.script,
+        storyboard: generated.storyboard || [],
+        creativePack: generated.creativePack || null,
+        historyId,
+        source: response.source || "",
+        model: response.model || "",
+        consistency: null,
+      },
     });
-    episode.versions = Array.isArray(episode.versions) ? episode.versions : [];
-    episode.versions.push(version);
-    episode.episodeNumber = episodeNumber;
-    episode.activeVersionId = version.id;
-    applyEpisodeVersion(episode, version.id);
-    episode.updatedAt = new Date().toISOString();
-    project.updatedAt = new Date().toISOString();
     state.currentEpisodeId = episode.id;
     state.reviewEpisodeId = episode.id;
     persistProjects();
@@ -571,15 +499,8 @@
     const episode = currentProjectEpisode();
     const project = currentProject();
     if (!episode || !project) return;
-    const version = activeEpisodeVersion(episode);
-    if (version) {
-      version.storyboard = state.storyboard;
-      version.source = response.source || version.source || "";
-      version.model = response.model || version.model || "";
-      applyEpisodeVersion(episode, version.id);
-    }
-    episode.updatedAt = new Date().toISOString();
-    project.updatedAt = new Date().toISOString();
+    projectDomain.updateActiveStoryboard(episode, state.storyboard, response);
+    project.updatedAt = episode.updatedAt;
     persistProjects();
     renderProject();
   }
@@ -624,27 +545,6 @@
     persistProjects();
     renderProject();
     setStatus(`第 ${episode.episodeNumber} 集复盘已保存`);
-  }
-
-  function deriveReviewInsights(review = {}) {
-    const views = Number(review.views || 0);
-    const completion = Number(review.completionRate || 0);
-    const comments = Number(review.comments || 0);
-    const shares = Number(review.shares || 0);
-    const follows = Number(review.follows || 0);
-    const interactionRate = views ? ((Number(review.likes || 0) + comments + shares) / views) * 100 : 0;
-    const hook = completion && completion < 35
-      ? "前 3 秒取消铺垫，直接给出倒计时、精灵异常或关系破裂的可见证据。"
-      : comments && views && comments / views < 0.003
-        ? "结尾改成二选一追问，让观众决定下一集先救谁、先查哪条线索。"
-        : "沿用当前信息密度，下一集在前 3 秒先兑现上一集留下的一个问题。";
-    const title = shares && views && shares / views > 0.01
-      ? "标题沿用情绪共鸣结构，加入角色名和不可逆代价。"
-      : "标题用“角色 + 异常问题”结构，避免解释世界观，例如“迪莫为什么不肯回月牙镇？”";
-    const cover = follows && views && follows / views > 0.01
-      ? "封面保留账号主角和系列标记，强化追更识别。"
-      : "封面只保留一张角色表情、一处异常道具和 6-10 字冲突词。";
-    return { hook, title, cover, interactionRate };
   }
 
   function renderReviewInsights(review = {}) {
@@ -1139,83 +1039,10 @@
     }));
   }
 
-  function escapeHtml(value) {
-    return String(value ?? "")
-      .replaceAll("&", "&amp;")
-      .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;")
-      .replaceAll('"', "&quot;");
-  }
-
-  function renderList(title, items) {
-    return `
-      <section class="content-block">
-        <h3>${escapeHtml(title)}</h3>
-        <ul>${items.map((item) => `<li>${escapeHtml(formatItem(item))}</li>`).join("")}</ul>
-      </section>
-    `;
-  }
-
-  function formatItem(item) {
-    if (typeof item === "string") return item;
-    if (item.name && item.description) return `${item.name}：${item.description}`;
-    if (item.beat && item.content) return `${item.beat}：${item.content}`;
-    if (item.role && item.line) return `${item.role}：“${item.line}”`;
-    return Object.values(item).join("：");
-  }
-
   function renderEmptyStudio() {
     const input = getInput();
     $("#scriptTitle").textContent = "开始一集短剧";
-    $("#scriptOutput").innerHTML = `
-      <section class="studio-empty">
-        <div class="empty-hero">
-          <img class="empty-hero-art" src="./assets/moonlit-wind-tower.png" alt="" aria-hidden="true" />
-          <p class="eyebrow">月牙镇 · 本集创作入口</p>
-          <h3>先生成剧本，满意后再拆分镜。</h3>
-          <p>当前主题会进入剧本生成；选题库和热梗素材会辅助标题、冲突和台词方向。</p>
-          <div class="empty-actions">
-            <button class="primary-action compact-action" data-empty-generate="true">AI 生成剧本</button>
-            <button class="ghost-action compact-action" data-empty-topics="true">查看选题库</button>
-          </div>
-        </div>
-        <div class="input-brief">
-          <div>
-            <span>主题</span>
-            <strong>${escapeHtml(input.theme || "未填写")}</strong>
-          </div>
-          <div>
-            <span>场景</span>
-            <strong>${escapeHtml(input.scene || "未填写")}</strong>
-          </div>
-          <div>
-            <span>受众</span>
-            <strong>${escapeHtml(input.audience || "未填写")}</strong>
-          </div>
-          <div>
-            <span>时长</span>
-            <strong>${escapeHtml(input.duration || 60)} 秒</strong>
-          </div>
-        </div>
-        <div class="workflow-strip">
-          <article>
-            <span>01</span>
-            <strong>生成剧本</strong>
-            <p>标题、梗概、人物、结构、台词和结尾钩子。</p>
-          </article>
-          <article>
-            <span>02</span>
-            <strong>拆分镜</strong>
-            <p>确认剧本可用后，再基于同一版剧本生成镜头表。</p>
-          </article>
-          <article>
-            <span>03</span>
-            <strong>筛候选</strong>
-            <p>生成记录会留档，方便入围、恢复和导出。</p>
-          </article>
-        </div>
-      </section>
-    `;
+    $("#scriptOutput").innerHTML = uiTemplates.emptyStudio(input);
   }
 
   function renderScript() {
@@ -1226,70 +1053,16 @@
       return;
     }
     $("#scriptTitle").textContent = script.title;
-    $("#scriptOutput").innerHTML = `
-      <section class="content-block">
-        <h3>故事梗概</h3>
-        <p>${escapeHtml(script.synopsis)}</p>
-        <div class="tagline">${(script.tags || []).map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join("")}</div>
-      </section>
-      ${renderList("人物设定", script.characters || [])}
-      ${renderList("剧情结构", script.structure || [])}
-      ${renderList("台词", script.dialogue || [])}
-      ${renderList("情绪节奏", script.rhythm || [])}
-      ${renderList("反转点", script.reversals || [])}
-      ${renderList("爆点与结尾钩子", script.hooks || [])}
-    `;
+    $("#scriptOutput").innerHTML = uiTemplates.script(script);
   }
 
   function renderTable(target, rows, columns) {
-    if (!rows.length) {
-      target.innerHTML = `<p class="helper">暂无数据。</p>`;
-      return;
-    }
-
-    target.innerHTML = `
-      <table>
-        <thead>
-          <tr>${columns.map((column) => `<th>${escapeHtml(column.label)}</th>`).join("")}</tr>
-        </thead>
-        <tbody>
-          ${rows
-            .map(
-              (row) => `
-                <tr>
-                  ${columns.map((column) => `<td>${escapeHtml(row[column.key])}</td>`).join("")}
-                </tr>
-              `,
-            )
-            .join("")}
-        </tbody>
-      </table>
-    `;
+    target.innerHTML = uiTemplates.table(rows, columns);
   }
 
   function renderStoryboard() {
     refreshCreationActions();
-    if (!state.storyboard.length && state.script) {
-      $("#storyboardTable").innerHTML = `<p class="helper">当前剧本还没有生成分镜。确认剧本方向可用后，点击“AI 生成分镜”。</p>`;
-      return;
-    }
-    const statusOptions = ["已有", "待制作", "待采集"];
-    $("#storyboardTable").innerHTML = `
-      <table class="storyboard-production-table">
-        <thead><tr><th>镜头</th><th>时长</th><th>角色 / 场景</th><th>画面与动作</th><th>台词 / 字幕</th><th>镜头 / 声音</th><th>画面提示词</th><th>关联资产</th><th>制作备注</th><th>素材状态</th></tr></thead>
-        <tbody>${state.storyboard.map((shot, index) => `
-          <tr>
-            <td>${escapeHtml(shot.shot)}</td><td>${escapeHtml(shot.seconds)} 秒</td>
-            <td><strong>${escapeHtml(shot.characters)}</strong><br>${escapeHtml(shot.scene)}</td>
-            <td>${escapeHtml(shot.visual)}<br><small>${escapeHtml(shot.action)}</small></td>
-            <td>${escapeHtml(shot.line)}<br><small>${escapeHtml(shot.subtitle)}</small></td>
-            <td>${escapeHtml(shot.scale)} · ${escapeHtml(shot.movement)}<br><small>${escapeHtml(shot.sound)}</small></td>
-            <td>${escapeHtml(shot.visualPrompt)}</td>
-            <td><input data-shot-field="assetLinks" data-shot-index="${index}" value="${escapeHtml(shot.assetLinks)}" placeholder="资产库名称 / 待采集素材" /></td>
-            <td><input data-shot-field="assetNote" data-shot-index="${index}" value="${escapeHtml(shot.assetNote)}" placeholder="负责人、截止时间或备注" /></td>
-            <td><select data-shot-field="assetStatus" data-shot-index="${index}">${statusOptions.map((status) => `<option value="${status}" ${shot.assetStatus === status ? "selected" : ""}>${status}</option>`).join("")}</select></td>
-          </tr>`).join("")}</tbody>
-      </table>`;
+    $("#storyboardTable").innerHTML = uiTemplates.storyboard(state.storyboard, Boolean(state.script));
   }
 
   function updateStoryboardProductionField(index, field, value) {
@@ -1367,59 +1140,10 @@
     `;
   }
 
-  function historyMeta(item) {
-    return [
-      item.mode === "continue" ? "续写" : "新生成",
-      item.model || "model",
-      `${item.storyboard?.length || 0}镜`,
-      `${item.input?.duration || "-"}秒`,
-    ].filter(Boolean);
-  }
-
   function renderHistory() {
     const target = $("#historyList");
     if (!target) return;
-    if (!state.history.length) {
-      target.innerHTML = `<p class="helper">还没有生成记录。每次点击 AI 生成或 AI 续写后，结果都会自动保存在这里。</p>`;
-      return;
-    }
-    target.innerHTML = state.history
-      .map((item, index) => {
-        const hooks = item.script?.hooks || [];
-        return `
-          <article class="history-card ${item.pinned ? "is-pinned" : ""}">
-            <div class="history-card-main">
-              <div>
-                <div class="history-meta">
-                  <span>${escapeHtml(item.createdAtText || "")}</span>
-                  ${historyMeta(item).map((meta) => `<span>${escapeHtml(meta)}</span>`).join("")}
-                  ${item.pinned ? "<span>已入围</span>" : ""}
-                </div>
-                <h3>${escapeHtml(item.script?.title || "未命名剧本")}</h3>
-                <p>${escapeHtml(item.script?.synopsis || "")}</p>
-                <div class="tagline">
-                  ${(item.script?.tags || []).slice(0, 5).map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join("")}
-                </div>
-              </div>
-              <div class="history-actions">
-                <button class="small-action" data-history-restore="${index}">查看/恢复</button>
-                <button class="small-action" data-history-continue="${index}">基于它续写</button>
-                <button class="small-action" data-history-pin="${index}">${item.pinned ? "取消入围" : "标记入围"}</button>
-                <button class="small-action danger-action" data-history-delete="${index}">删除</button>
-              </div>
-            </div>
-            ${
-              hooks.length
-                ? `<div class="history-hooks">${hooks
-                    .slice(0, 3)
-                    .map((hook) => `<span>${escapeHtml(formatItem(hook))}</span>`)
-                    .join("")}</div>`
-                : ""
-            }
-          </article>
-        `;
-      })
-      .join("");
+    target.innerHTML = uiTemplates.history(state.history);
   }
 
   async function loadHistory() {
@@ -2286,7 +2010,7 @@
   }
 
   async function init() {
-    if (!window.RocoStudio || !window.RocoWorkflowCore || !window.RocoApiClient || !window.RocoDataStore) {
+    if (!window.RocoStudio || !window.RocoWorkflowCore || !window.RocoProjectDomain || !window.RocoUiTemplates || !window.RocoApiClient || !window.RocoDataStore) {
       setStatus("生成器未加载，请用本地服务打开或刷新缓存", true);
       return;
     }
