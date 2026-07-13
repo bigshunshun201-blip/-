@@ -3,6 +3,8 @@
   if (typeof module === "object" && module.exports) module.exports = api;
   if (root) root.RocoProjectDomain = api;
 })(typeof globalThis !== "undefined" ? globalThis : this, function () {
+  const PROJECT_SCHEMA_VERSION = 2;
+
   function newId(prefix) {
     return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   }
@@ -10,6 +12,7 @@
   function createProjectRecord(name = "未命名短剧项目", defaultBible = {}) {
     const now = new Date().toISOString();
     return {
+      schemaVersion: PROJECT_SCHEMA_VERSION,
       id: newId("project"),
       name,
       logline: "",
@@ -102,6 +105,53 @@
       return applyEpisodeVersion(normalized);
     });
     return project;
+  }
+
+  function normalizeIdList(value) {
+    return [...new Set((Array.isArray(value) ? value : []).map(String).map((item) => item.trim()).filter(Boolean))];
+  }
+
+  function migrateProjectRecord(source = {}, defaultBible = {}) {
+    const incomingVersion = Math.max(1, Number(source.schemaVersion || 1));
+    if (incomingVersion > PROJECT_SCHEMA_VERSION) {
+      throw new Error(`项目数据版本 ${incomingVersion} 高于当前支持版本 ${PROJECT_SCHEMA_VERSION}，请先升级应用。`);
+    }
+
+    const project = {
+      ...source,
+      schemaVersion: incomingVersion,
+      bible: { ...defaultBible, ...(source.bible || {}) },
+      episodes: Array.isArray(source.episodes) ? source.episodes : [],
+      assets: Array.isArray(source.assets) ? source.assets : [],
+      memes: Array.isArray(source.memes) ? source.memes : [],
+      characterCards: Array.isArray(source.characterCards) ? source.characterCards : [],
+      planBatches: Array.isArray(source.planBatches) ? source.planBatches : [],
+    };
+
+    if (project.schemaVersion < 2) {
+      project.episodes = project.episodes.map((episode) => ({
+        ...episode,
+        input: {
+          ...(episode.input || {}),
+          activeMemeIds: normalizeIdList(episode.input?.activeMemeIds),
+          activeCharacterIds: normalizeIdList(episode.input?.activeCharacterIds),
+        },
+        versions: Array.isArray(episode.versions)
+          ? episode.versions.map((version) => ({
+            ...version,
+            input: {
+              ...(version.input || {}),
+              activeMemeIds: normalizeIdList(version.input?.activeMemeIds),
+              activeCharacterIds: normalizeIdList(version.input?.activeCharacterIds),
+            },
+          }))
+          : episode.versions,
+      }));
+      project.schemaVersion = 2;
+    }
+
+    project.schemaVersion = PROJECT_SCHEMA_VERSION;
+    return normalizeProjectEpisodes(project);
   }
 
   function nextEpisodeNumber(project) {
@@ -200,6 +250,7 @@
   }
 
   return {
+    PROJECT_SCHEMA_VERSION,
     newId,
     createProjectRecord,
     createStoryboardVersion,
@@ -207,6 +258,7 @@
     activeEpisodeVersion,
     applyEpisodeVersion,
     normalizeProjectEpisodes,
+    migrateProjectRecord,
     nextEpisodeNumber,
     validateEpisodePlan,
     deriveReviewInsights,

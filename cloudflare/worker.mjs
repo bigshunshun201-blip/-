@@ -74,6 +74,10 @@ function requestUnits(path, model) {
   return requestCost * modelCost;
 }
 
+function providerCallUnits(model) {
+  return model === "deepseek-v4-pro" ? 3 : 1;
+}
+
 async function dailyUsageStatus(env) {
   const day = usageDay();
   const limit = usageLimit(env);
@@ -87,10 +91,10 @@ async function dailyUsageStatus(env) {
   return { day, ...current, limit, fallback: true };
 }
 
-async function reserveDailyBudget(env, path, model) {
+async function reserveUsageUnits(env, units) {
   const day = usageDay();
   const limit = usageLimit(env);
-  const units = requestUnits(path, model);
+  const safeUnits = Math.max(1, Math.min(Number(units || 1), limit));
   if (env.USAGE_DB) {
     const row = await env.USAGE_DB.prepare(`
       INSERT INTO ai_daily_usage (usage_day, used_units, request_count, updated_at)
@@ -101,22 +105,88 @@ async function reserveDailyBudget(env, path, model) {
         updated_at = excluded.updated_at
       WHERE used_units + excluded.used_units <= ?
       RETURNING used_units AS usedUnits, request_count AS requestCount
-    `).bind(day, units, new Date().toISOString(), limit).first();
+    `).bind(day, safeUnits, new Date().toISOString(), limit).first();
     if (!row) throw codedError("今日 AI 调用额度已用完，请明天再试或由管理员调整预算。", "DAILY_BUDGET_EXCEEDED");
-    return { day, units, usedUnits: Number(row.usedUnits), requestCount: Number(row.requestCount), limit, remaining: limit - Number(row.usedUnits) };
+    return { day, units: safeUnits, usedUnits: Number(row.usedUnits), requestCount: Number(row.requestCount), limit, remaining: limit - Number(row.usedUnits) };
   }
 
   const current = fallbackDailyUsage.get(day) || { usedUnits: 0, requestCount: 0 };
-  if (current.usedUnits + units > limit) {
+  if (current.usedUnits + safeUnits > limit) {
     throw codedError("今日 AI 调用额度已用完，请明天再试或由管理员调整预算。", "DAILY_BUDGET_EXCEEDED");
   }
-  const next = { usedUnits: current.usedUnits + units, requestCount: current.requestCount + 1 };
+  const next = { usedUnits: current.usedUnits + safeUnits, requestCount: current.requestCount + 1 };
   fallbackDailyUsage.clear();
   fallbackDailyUsage.set(day, next);
-  return { day, units, ...next, limit, remaining: limit - next.usedUnits, fallback: true };
+  return { day, units: safeUnits, ...next, limit, remaining: limit - next.usedUnits, fallback: true };
+}
+
+async function reserveDailyBudget(env, path, model) {
+  return reserveUsageUnits(env, requestUnits(path, model));
+}
+
+async function releaseDailyBudget(env, reservation) {
+  if (!reservation?.day || !reservation?.units) return null;
+  const limit = usageLimit(env);
+  if (env.USAGE_DB) {
+    const row = await env.USAGE_DB.prepare(`
+      UPDATE ai_daily_usage
+      SET used_units = MAX(0, used_units - ?),
+          request_count = MAX(0, request_count - 1),
+          updated_at = ?
+      WHERE usage_day = ?
+      RETURNING used_units AS usedUnits, request_count AS requestCount
+    `).bind(reservation.units, new Date().toISOString(), reservation.day).first();
+    return { day: reservation.day, usedUnits: Number(row?.usedUnits || 0), requestCount: Number(row?.requestCount || 0), limit, remaining: limit - Number(row?.usedUnits || 0) };
+  }
+  const current = fallbackDailyUsage.get(reservation.day) || { usedUnits: 0, requestCount: 0 };
+  const next = {
+    usedUnits: Math.max(0, current.usedUnits - reservation.units),
+    requestCount: Math.max(0, current.requestCount - 1),
+  };
+  fallbackDailyUsage.set(reservation.day, next);
+  return { day: reservation.day, ...next, limit, remaining: limit - next.usedUnits, fallback: true };
+}
+
+function createUsageMeter(env, model) {
+  let latest = null;
+  let totalUnits = 0;
+  let providerCalls = 0;
+  return {
+    async reserve(label = "generation") {
+      try {
+        const reservation = await reserveUsageUnits(env, providerCallUnits(model));
+        reservation.label = label;
+        latest = reservation;
+        totalUnits += reservation.units;
+        providerCalls += 1;
+        return reservation;
+      } catch (cause) {
+        if (cause?.code === "DAILY_BUDGET_EXCEEDED") throw cause;
+        throw codedError("AI 用量保护暂时不可用，为避免产生失控费用，本次请求未执行。", "USAGE_GUARD_UNAVAILABLE");
+      }
+    },
+    async release(reservation) {
+      try {
+        latest = await releaseDailyBudget(env, reservation) || latest;
+        totalUnits = Math.max(0, totalUnits - Number(reservation?.units || 0));
+        providerCalls = Math.max(0, providerCalls - 1);
+      } catch (cause) {
+        console.error(JSON.stringify({ event: "usage_release_failed", error: cause?.message || String(cause) }));
+      }
+    },
+    snapshot() {
+      return latest ? { ...latest, units: totalUnits, providerCalls } : null;
+    },
+  };
+}
+
+function normalizeIdList(value, limit = 24) {
+  return [...new Set((Array.isArray(value) ? value : []).map(String).map((item) => item.trim()).filter(Boolean))].slice(0, limit);
 }
 
 function normalizeInput(input = {}) {
+  const activeMemeIds = normalizeIdList(input.activeMemeIds, 6);
+  const activeCharacterIds = normalizeIdList(input.activeCharacterIds, 8);
   return {
     mode: String(input.mode || "new").trim(),
     theme: String(input.theme || "").trim(),
@@ -143,8 +213,10 @@ function normalizeInput(input = {}) {
     projectBible: input.projectBible && typeof input.projectBible === "object" ? input.projectBible : {},
     projectContinuity: Array.isArray(input.projectContinuity) ? input.projectContinuity.slice(-3) : [],
     projectAssets: Array.isArray(input.projectAssets) ? input.projectAssets.slice(-24) : [],
-    projectMemes: Array.isArray(input.projectMemes) ? input.projectMemes.slice(0, 20) : [],
-    projectCharacterCards: Array.isArray(input.projectCharacterCards) ? input.projectCharacterCards.slice(0, 24) : [],
+    activeMemeIds,
+    activeCharacterIds,
+    projectMemes: activeMemeIds.length && Array.isArray(input.projectMemes) ? input.projectMemes.filter((item) => activeMemeIds.includes(String(item?.id || ""))).slice(0, 6) : [],
+    projectCharacterCards: activeCharacterIds.length && Array.isArray(input.projectCharacterCards) ? input.projectCharacterCards.filter((item) => activeCharacterIds.includes(String(item?.id || ""))).slice(0, 8) : [],
     characterDraft: input.characterDraft && typeof input.characterDraft === "object" ? input.characterDraft : {},
     latestReview: input.latestReview && typeof input.latestReview === "object" ? input.latestReview : null,
     episodePlan: input.episodePlan && typeof input.episodePlan === "object" ? input.episodePlan : {},
@@ -567,24 +639,65 @@ function topicsPrompt(input) {
 }`;
 }
 
-function normalizeScript(result) {
-  const script = result?.script || result;
-  if (!script || typeof script !== "object") throw new Error("AI 没有返回可用剧本");
-  for (const key of ["characters", "structure", "dialogue", "rhythm", "reversals", "innovationPoints", "comedyBeats", "visualHighlights", "hooks", "tags"]) {
-    script[key] = Array.isArray(script[key]) ? script[key] : [];
-  }
-  if (!script.title || !script.synopsis) throw new Error("AI 返回的剧本不完整");
+function validationError(scope, issues) {
+  const error = codedError(`${scope}结构不完整：${issues.slice(0, 8).join("；")}`, "AI_OUTPUT_INVALID");
+  error.validationIssues = issues;
+  return error;
+}
+
+function textValue(value) {
+  return String(value || "").trim();
+}
+
+function normalizedLine(value) {
+  return textValue(value).replace(/[\s，。！？、：；,.!?:;“”"'（）()\-]/g, "");
+}
+
+function normalizeScript(result, input = {}) {
+  const source = result?.script || result;
+  if (!source || typeof source !== "object") throw validationError("剧本", ["缺少 script 对象"]);
+  const script = {
+    title: textValue(source.title),
+    synopsis: textValue(source.synopsis),
+    characters: (Array.isArray(source.characters) ? source.characters : []).map((item) => ({ name: textValue(item?.name), description: textValue(item?.description) })),
+    structure: (Array.isArray(source.structure) ? source.structure : []).map((item) => ({ beat: textValue(item?.beat), content: textValue(item?.content) })),
+    dialogue: (Array.isArray(source.dialogue) ? source.dialogue : []).map((item) => ({ role: textValue(item?.role), line: textValue(item?.line) })),
+    rhythm: (Array.isArray(source.rhythm) ? source.rhythm : []).map(textValue).filter(Boolean),
+    reversals: (Array.isArray(source.reversals) ? source.reversals : []).map(textValue).filter(Boolean),
+    innovationPoints: (Array.isArray(source.innovationPoints) ? source.innovationPoints : []).map(textValue).filter(Boolean),
+    comedyBeats: (Array.isArray(source.comedyBeats) ? source.comedyBeats : []).map((item) => ({ setup: textValue(item?.setup), payoff: textValue(item?.payoff), visualAction: textValue(item?.visualAction) })),
+    visualHighlights: (Array.isArray(source.visualHighlights) ? source.visualHighlights : []).map((item) => ({ moment: textValue(item?.moment), verticalComposition: textValue(item?.verticalComposition), effect: textValue(item?.effect) })),
+    hooks: (Array.isArray(source.hooks) ? source.hooks : []).map(textValue).filter(Boolean),
+    tags: (Array.isArray(source.tags) ? source.tags : []).map(textValue).filter(Boolean),
+  };
+  const issues = [];
+  if (!script.title) issues.push("标题为空");
+  if (!script.synopsis || script.synopsis.length < 30) issues.push("故事梗概不足30字");
+  if (script.characters.length < 2 || script.characters.length > 5 || script.characters.some((item) => !item.name || !item.description)) issues.push("人物设定需要2-5个完整角色");
+  if (script.structure.length !== 5 || script.structure.some((item) => !item.beat || !item.content)) issues.push("剧情结构必须是5个完整节拍");
+  if (script.dialogue.length < 6 || script.dialogue.length > 8 || script.dialogue.some((item) => !item.role || !item.line)) issues.push("台词必须是6-8句且角色、内容均不为空");
+  if (!script.rhythm.length || script.rhythm.length > 3) issues.push("情绪节奏需要1-3条");
+  if (!script.reversals.length || script.reversals.length > 3) issues.push("反转点需要1-3条");
+  if (script.innovationPoints.length < 2 || script.innovationPoints.length > 3) issues.push("创新机制需要2-3条");
+  if (script.comedyBeats.length !== 2 || script.comedyBeats.some((item) => !item.setup || !item.payoff || !item.visualAction)) issues.push("笑点设计必须是2条完整的铺垫、回扣和视觉动作");
+  if (script.visualHighlights.length !== 3 || script.visualHighlights.some((item) => !item.moment || !item.verticalComposition || !item.effect)) issues.push("视觉爆点必须是3条完整设计");
+  if (!script.hooks.length || script.hooks.length > 3) issues.push("爆点与结尾钩子需要1-3条");
+  if (!script.tags.length || script.tags.length > 3) issues.push("话题标签需要1-3条");
+  const requestedNames = roleNames(input);
+  const scriptNames = script.characters.map((item) => item.name);
+  const missingNames = requestedNames.filter((name) => !scriptNames.some((candidate) => candidate === name || candidate.includes(name) || name.includes(candidate)));
+  if (missingNames.length) issues.push(`缺少用户指定角色：${missingNames.join("、")}`);
+  if (issues.length) throw validationError("剧本", issues);
   return { script };
 }
 
-function normalizeStoryboard(result, duration, clipMode = "smart") {
+function normalizeStoryboard(result, duration, clipMode = "smart", script = null) {
   const source = Array.isArray(result?.storyboard) ? result.storyboard : Array.isArray(result) ? result : [];
-  if (!source.length) throw new Error("AI 没有返回可用分镜");
+  if (!source.length) throw validationError("分镜", ["缺少 storyboard 数组"]);
   const plan = storyboardSegmentPlan(duration || source.reduce((sum, item) => sum + Number(item?.seconds || 0), 0), clipMode);
   const expectedSegments = plan.segments.length;
-  if (source.length < expectedSegments) throw new Error(`AI 只返回了 ${source.length} 个视频段，需要 ${expectedSegments} 个，请重新生成`);
-  return {
-    storyboard: source.slice(0, expectedSegments).map((shot, index) => {
+  if (source.length !== expectedSegments) throw validationError("分镜", [`应返回${expectedSegments}个视频段，实际为${source.length}个`]);
+  const storyboard = source.map((shot, index) => {
       const planned = plan.segments[index];
       return {
         shot: index + 1,
@@ -597,25 +710,31 @@ function normalizeStoryboard(result, duration, clipMode = "smart") {
         continuityIn: String(shot.continuityIn || ""),
         continuityOut: String(shot.continuityOut || ""),
         beatBreakdown: (Array.isArray(shot.beatBreakdown) ? shot.beatBreakdown : []).slice(0, 4).map((beat) => ({
-          range: String(beat?.range || ""),
-          content: String(beat?.content || ""),
+          range: textValue(beat?.range),
+          content: textValue(beat?.content),
         })),
-        visual: shot.visual || "",
-        characters: shot.characters || "",
-        scene: shot.scene || "",
-        action: shot.action || "",
-        line: shot.line || "",
-        scale: shot.scale || "",
-        movement: shot.movement || "",
-        sound: shot.sound || "",
-        subtitle: shot.subtitle || "",
-        visualPrompt: shot.visualPrompt || "",
-        assetLinks: shot.assetLinks || "",
-        assetNote: shot.assetNote || "",
+        visual: textValue(shot.visual), characters: textValue(shot.characters), scene: textValue(shot.scene), action: textValue(shot.action),
+        line: textValue(shot.line), scale: textValue(shot.scale), movement: textValue(shot.movement), sound: textValue(shot.sound),
+        subtitle: textValue(shot.subtitle), visualPrompt: textValue(shot.visualPrompt), assetLinks: textValue(shot.assetLinks), assetNote: textValue(shot.assetNote),
         assetStatus: ["已有", "待制作", "待采集"].includes(shot.assetStatus) ? shot.assetStatus : "待制作",
       };
-    }),
-  };
+    });
+  const requiredFields = ["segmentGoal", "continuityIn", "continuityOut", "visual", "characters", "scene", "action", "line", "scale", "movement", "sound", "subtitle", "visualPrompt"];
+  const issues = [];
+  storyboard.forEach((shot, index) => {
+    const missing = requiredFields.filter((field) => !shot[field]);
+    if (missing.length) issues.push(`第${index + 1}段缺少${missing.join("/")}`);
+    if (!shot.beatBreakdown.length || shot.beatBreakdown.some((beat) => !beat.range || !beat.content)) issues.push(`第${index + 1}段缺少完整动作阶段`);
+  });
+  const scriptLines = (script?.dialogue || []).map((item) => normalizedLine(item?.line)).filter((line) => line.length >= 2);
+  if (scriptLines.length) {
+    const storyboardText = normalizedLine(storyboard.map((shot) => shot.line).join(" "));
+    const matched = scriptLines.filter((line) => storyboardText.includes(line)).length;
+    const minimumMatches = Math.min(3, Math.ceil(scriptLines.length * 0.4));
+    if (matched < minimumMatches) issues.push(`分镜台词仅承接剧本${matched}句，至少需要${minimumMatches}句原台词`);
+  }
+  if (issues.length) throw validationError("分镜", issues);
+  return { storyboard };
 }
 
 function normalizeContinuity(result) {
@@ -717,7 +836,8 @@ function normalizeTopics(result, count) {
   };
 }
 
-async function repairJsonWithDeepSeek(env, input, malformed, maxTokens) {
+async function repairJsonWithDeepSeek(env, input, malformed, maxTokens, usageMeter) {
+  const reservation = await usageMeter.reserve("json-repair");
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 60_000);
   let response;
@@ -742,23 +862,28 @@ async function repairJsonWithDeepSeek(env, input, malformed, maxTokens) {
       signal: controller.signal,
     });
   } catch (cause) {
+    await usageMeter.release(reservation);
     if (cause?.name === "AbortError") throw codedError("AI 返回格式异常，自动修复超时，请重新生成。", "AI_JSON_REPAIR_TIMEOUT");
     throw cause;
   } finally {
     clearTimeout(timeoutId);
   }
   const raw = await response.text();
-  if (!response.ok) throw codedError(`AI 返回格式异常，自动修复失败（${response.status}）`, "AI_JSON_REPAIR_FAILED");
+  if (!response.ok) {
+    await usageMeter.release(reservation);
+    throw codedError(`AI 返回格式异常，自动修复失败（${response.status}）`, "AI_JSON_REPAIR_FAILED");
+  }
   const data = JSON.parse(raw);
   return extractJson(data.choices?.[0]?.message?.content || raw);
 }
 
-async function askDeepSeek(env, input, prompt, maxTokens) {
+async function askDeepSeek(env, input, prompt, maxTokens, usageMeter, options = {}) {
   if (!env.DEEPSEEK_API_KEY) {
     const missing = new Error("未配置 DeepSeek API Key");
     missing.code = "NO_DEEPSEEK_KEY";
     throw missing;
   }
+  const reservation = await usageMeter.reserve(options.label || "generation");
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 75_000);
   let response;
@@ -772,10 +897,10 @@ async function askDeepSeek(env, input, prompt, maxTokens) {
       body: JSON.stringify({
         model: modelFor(input, env),
         messages: [
-          { role: "system", content: "你是严格执行用户输入的中文短剧创作助手。必须使用用户给定角色名，只输出 JSON。" },
+          { role: "system", content: options.system || "你是严格执行用户输入的中文短剧创作助手。必须使用用户给定角色名，只输出 JSON。" },
           { role: "user", content: prompt },
         ],
-        temperature: 0.88,
+        temperature: Number.isFinite(options.temperature) ? options.temperature : 0.88,
         max_tokens: maxTokens,
         response_format: { type: "json_object" },
         stream: false,
@@ -783,6 +908,7 @@ async function askDeepSeek(env, input, prompt, maxTokens) {
       signal: controller.signal,
     });
   } catch (cause) {
+    await usageMeter.release(reservation);
     if (cause?.name === "AbortError") throw codedError("DeepSeek 响应超时，请缩短输入后重试。", "UPSTREAM_TIMEOUT");
     throw cause;
   } finally {
@@ -790,6 +916,7 @@ async function askDeepSeek(env, input, prompt, maxTokens) {
   }
   const raw = await response.text();
   if (!response.ok) {
+    await usageMeter.release(reservation);
     const upstream = new Error(`DeepSeek 请求失败（${response.status}）`);
     upstream.code = response.status === 401 || response.status === 403 ? "DEEPSEEK_AUTH_ERROR" : "DEEPSEEK_API_ERROR";
     throw upstream;
@@ -801,11 +928,28 @@ async function askDeepSeek(env, input, prompt, maxTokens) {
   } catch (cause) {
     console.warn(JSON.stringify({ event: "ai_json_repair", model: modelFor(input, env), error: cause?.message || "parse failed" }));
     try {
-      return await repairJsonWithDeepSeek(env, input, content, maxTokens);
+      return await repairJsonWithDeepSeek(env, input, content, maxTokens, usageMeter);
     } catch (repairError) {
       if (repairError?.code) throw repairError;
       throw codedError("AI 返回格式异常，自动修复仍失败，请重新生成。", "AI_JSON_INVALID");
     }
+  }
+}
+
+async function normalizeWithRepair(env, input, rawResult, normalizer, maxTokens, usageMeter, scope) {
+  try {
+    return normalizer(rawResult);
+  } catch (cause) {
+    if (cause?.code !== "AI_OUTPUT_INVALID") throw cause;
+    const issues = Array.isArray(cause.validationIssues) ? cause.validationIssues : [cause.message];
+    console.warn(JSON.stringify({ event: "ai_structure_repair", scope, issues }));
+    const prompt = `你是严格 JSON 结构修复器。原结果已经是合法 JSON，但缺少必填内容。请只根据问题清单补齐或修正原结果，不要改变主题、角色、剧情因果、剧本结尾或既有台词含义。只输出完整严格 JSON。\n\n问题清单：\n${issues.map((item) => `- ${item}`).join("\n")}\n\n原结果：\n${stringify(rawResult, 24000)}`;
+    const repaired = await askDeepSeek(env, input, prompt, maxTokens, usageMeter, {
+      label: "structure-repair",
+      temperature: 0.12,
+      system: "你是 JSON 结构修复器，只补齐校验失败字段，不改写已经成立的内容。只输出 JSON。",
+    });
+    return normalizer(repaired);
   }
 }
 
@@ -869,71 +1013,75 @@ async function api(request, env, url) {
   }
   const model = modelFor(input, env);
   if (!env.DEEPSEEK_API_KEY) return error("未配置 DeepSeek API Key", "NO_DEEPSEEK_KEY", 500);
-  let usage;
-  try {
-    usage = await reserveDailyBudget(env, url.pathname, model);
-  } catch (cause) {
-    if (cause?.code === "DAILY_BUDGET_EXCEEDED") throw cause;
-    throw codedError("AI 用量保护暂时不可用，为避免产生失控费用，本次请求未执行。", "USAGE_GUARD_UNAVAILABLE");
-  }
+  const usageMeter = createUsageMeter(env, model);
   const requestId = crypto.randomUUID();
-  console.log(JSON.stringify({ event: "ai_request", requestId, path: url.pathname, model, units: usage.units, usedUnits: usage.usedUnits, at: new Date().toISOString() }));
+  const success = (result) => {
+    const usage = usageMeter.snapshot();
+    console.log(JSON.stringify({ event: "ai_request_complete", requestId, path: url.pathname, model, units: usage?.units || 0, providerCalls: usage?.providerCalls || 0, usedUnits: usage?.usedUnits, at: new Date().toISOString() }));
+    return json({ ok: true, source: "deepseek", model, usage, result });
+  };
 
   if (url.pathname === "/api/script") {
-    const result = normalizeScript(await askDeepSeek(env, input, scriptPrompt(input), 2200));
-    return json({ ok: true, source: "deepseek", model, usage, result });
+    const raw = await askDeepSeek(env, input, scriptPrompt(input), 2200, usageMeter);
+    const result = await normalizeWithRepair(env, input, raw, (value) => normalizeScript(value, input), 2200, usageMeter, "script");
+    return success(result);
   }
 
   if (url.pathname === "/api/storyboard") {
     const storyboardDuration = Math.max(15, Math.min(Number(input.duration || 60), 180));
     const segmentCount = storyboardSegmentPlan(storyboardDuration, input.clipMode).segments.length;
     const segmentTokens = Math.min(7000, 1600 + (segmentCount * 380));
-    const result = normalizeStoryboard(await askDeepSeek(env, input, storyboardPrompt(input), segmentTokens), storyboardDuration, input.clipMode);
-    return json({ ok: true, source: "deepseek", model, usage, result });
+    const raw = await askDeepSeek(env, input, storyboardPrompt(input), segmentTokens, usageMeter);
+    const script = input.script || input.previousScript;
+    const result = await normalizeWithRepair(env, input, raw, (value) => normalizeStoryboard(value, storyboardDuration, input.clipMode, script), segmentTokens, usageMeter, "storyboard");
+    return success(result);
   }
 
   if (url.pathname === "/api/plans") {
-    const result = normalizePlans(await askDeepSeek(env, input, plansPrompt(input), 2200));
-    return json({ ok: true, source: "deepseek", model, usage, result });
+    const result = normalizePlans(await askDeepSeek(env, input, plansPrompt(input), 2200, usageMeter));
+    return success(result);
   }
 
   if (url.pathname === "/api/bible") {
-    const result = normalizeBible(await askDeepSeek(env, input, biblePrompt(input), 2400));
-    return json({ ok: true, source: "deepseek", model, usage, result });
+    const result = normalizeBible(await askDeepSeek(env, input, biblePrompt(input), 2400, usageMeter));
+    return success(result);
   }
 
   if (url.pathname === "/api/character-card") {
-    const result = normalizeCharacterCard(await askDeepSeek(env, input, characterCardPrompt(input), 1500));
-    return json({ ok: true, source: "deepseek", model, usage, result });
+    const result = normalizeCharacterCard(await askDeepSeek(env, input, characterCardPrompt(input), 1500, usageMeter));
+    return success(result);
   }
 
   if (url.pathname === "/api/meme-lab") {
     if (input.memeLabMode !== "inspire" && !String(input.memeRawMaterial || input.memeSeed || "").trim()) {
       return error("请先提供热榜标题、分享文案或评论素材", "MEME_MATERIAL_REQUIRED", 400);
     }
-    const result = normalizeMemeIdeas(await askDeepSeek(env, input, memeLabPrompt(input), 2100));
-    return json({ ok: true, source: "deepseek", model, usage, result });
+    const result = normalizeMemeIdeas(await askDeepSeek(env, input, memeLabPrompt(input), 2100, usageMeter));
+    return success(result);
   }
 
   if (url.pathname === "/api/topics") {
     const count = Math.max(1, Math.min(Number(input.count || 8), 12));
-    const result = normalizeTopics(await askDeepSeek(env, input, topicsPrompt(input), 1700), count);
-    return json({ ok: true, source: "deepseek", model, usage, result });
+    const result = normalizeTopics(await askDeepSeek(env, input, topicsPrompt(input), 1700, usageMeter), count);
+    return success(result);
   }
 
   if (url.pathname === "/api/continuity-check") {
     if (!input.script && !input.previousScript) return error("请先提供需要检查的剧本", "SCRIPT_REQUIRED", 400);
-    const result = normalizeContinuity(await askDeepSeek(env, input, continuityPrompt(input), 1500));
-    return json({ ok: true, source: "deepseek", model, usage, result });
+    const result = normalizeContinuity(await askDeepSeek(env, input, continuityPrompt(input), 1500, usageMeter));
+    return success(result);
   }
 
   if (url.pathname === "/api/generate") {
-    const scriptResult = normalizeScript(await askDeepSeek(env, input, scriptPrompt(input), 2200));
+    const rawScript = await askDeepSeek(env, input, scriptPrompt(input), 2200, usageMeter);
+    const scriptResult = await normalizeWithRepair(env, input, rawScript, (value) => normalizeScript(value, input), 2200, usageMeter, "script");
     const storyboardDuration = Math.max(15, Math.min(Number(input.duration || 60), 180));
     const segmentCount = storyboardSegmentPlan(storyboardDuration, input.clipMode).segments.length;
     const segmentTokens = Math.min(7000, 1600 + (segmentCount * 380));
-    const storyboardResult = normalizeStoryboard(await askDeepSeek(env, { ...input, script: scriptResult.script }, storyboardPrompt({ ...input, script: scriptResult.script }), segmentTokens), storyboardDuration, input.clipMode);
-    return json({ ok: true, source: "deepseek", model, usage, result: { ...scriptResult, ...storyboardResult } });
+    const storyboardInput = { ...input, script: scriptResult.script };
+    const rawStoryboard = await askDeepSeek(env, storyboardInput, storyboardPrompt(storyboardInput), segmentTokens, usageMeter);
+    const storyboardResult = await normalizeWithRepair(env, storyboardInput, rawStoryboard, (value) => normalizeStoryboard(value, storyboardDuration, input.clipMode, scriptResult.script), segmentTokens, usageMeter, "storyboard");
+    return success({ ...scriptResult, ...storyboardResult });
   }
 
   return error("Not found", "NOT_FOUND", 404);
@@ -965,6 +1113,7 @@ export default {
 
 export const __test = {
   normalizeInput,
+  normalizeScript,
   storyboardSegmentPlan,
   normalizeStoryboard,
   normalizeContinuity,
@@ -975,7 +1124,9 @@ export const __test = {
   extractJson,
   creativeInputSummary,
   requestUnits,
+  providerCallUnits,
   usageDay,
   reserveDailyBudget,
+  releaseDailyBudget,
   dailyUsageStatus,
 };

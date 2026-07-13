@@ -63,15 +63,18 @@
     }
 
     function set(key, value) {
+      const snapshot = typeof structuredClone === "function"
+        ? structuredClone(value)
+        : JSON.parse(JSON.stringify(value));
       const previous = writeChains.get(key) || Promise.resolve();
       const next = previous.catch(() => {}).then(async () => {
         try {
-          await writeIndexedDb(key, value);
+          await writeIndexedDb(key, snapshot);
           fallbackStorage?.removeItem?.(key);
           return "indexeddb";
         } catch (indexedDbError) {
           if (!fallbackStorage) throw indexedDbError;
-          fallbackStorage.setItem(key, JSON.stringify(value));
+          fallbackStorage.setItem(key, JSON.stringify(snapshot));
           return "localStorage";
         }
       });

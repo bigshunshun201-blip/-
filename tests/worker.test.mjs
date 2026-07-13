@@ -17,6 +17,10 @@ test("storyboard normalizer retains production fields", () => {
     storyboard: [{
       shot: 1,
       seconds: 3,
+      segmentGoal: "抛出契约异常",
+      continuityIn: "阿洛在画面左侧，迪莫在右侧，契约完整",
+      continuityOut: "阿洛仍在左侧，迪莫后退，契约出现裂纹",
+      beatBreakdown: [{ range: "0-3秒", content: "契约发光后裂开" }],
       characters: "阿洛、迪莫",
       scene: "月牙镇",
       visual: "契约发光",
@@ -32,10 +36,20 @@ test("storyboard normalizer retains production fields", () => {
       assetStatus: "待制作",
     }, {
       shot: 2,
+      segmentGoal: "让阿洛获得线索",
+      continuityIn: "阿洛在左侧接住从契约掉落的徽章",
+      continuityOut: "阿洛举起徽章看向画外，迪莫仍在右后方",
+      beatBreakdown: [{ range: "0-4秒", content: "徽章落下，阿洛接住" }, { range: "4-7秒", content: "阿洛发现背面坐标" }],
       characters: "阿洛",
       scene: "月牙镇",
       visual: "阿洛接住徽章",
       action: "抬头",
+      line: "坐标为什么指向聆风塔？",
+      scale: "中近景",
+      movement: "跟随徽章下落后上摇",
+      sound: "金属落手声，低频悬念音",
+      subtitle: "坐标指向聆风塔",
+      visualPrompt: "9:16月牙镇单场景连续镜头，前景徽章，中景阿洛接住后抬头，背景迪莫，字幕安全区留空",
       assetStatus: "已有",
     }],
   }, 15);
@@ -70,6 +84,37 @@ test("storyboard segment planner adapts duration and marks fixed-mode trimming",
       if (mode === "smart") assert.ok(plan.segments.every((segment) => segment.seconds >= 4));
     }
   }
+});
+
+test("script normalizer rejects incomplete output and missing requested roles", () => {
+  const valid = {
+    script: {
+      title: "契约裂开的第八秒",
+      synopsis: "阿洛在月牙镇发现迪莫的契约突然裂开，追查时却发现裂纹会回应谎言。两人必须在巡逻队赶到前找出真相，结尾坐标却指向被封锁的聆风塔。",
+      characters: [{ name: "阿洛", description: "嘴硬但不放弃伙伴" }, { name: "迪莫", description: "谨慎且会主动质疑命令" }],
+      structure: Array.from({ length: 5 }, (_, index) => ({ beat: `节拍${index + 1}`, content: `推进剧情${index + 1}` })),
+      dialogue: Array.from({ length: 6 }, (_, index) => ({ role: index % 2 ? "迪莫" : "阿洛", line: `有效短台词${index + 1}` })),
+      rhythm: ["惊讶 -> 紧张 -> 悬疑"], reversals: ["裂纹回应的是谎言"],
+      innovationPoints: ["契约裂纹充当测谎机关", "徽章坐标反向指路"],
+      comedyBeats: [{ setup: "阿洛嘴硬", payoff: "契约立刻裂开", visualAction: "裂纹追着阿洛移动" }, { setup: "迪莫装镇定", payoff: "尾巴先躲开", visualAction: "尾巴缩到路牌后" }],
+      visualHighlights: Array.from({ length: 3 }, (_, index) => ({ moment: `画面${index + 1}`, verticalComposition: "前中后景分层", effect: "明暗反转" })),
+      hooks: ["坐标指向聆风塔"], tags: ["洛克王国世界", "短剧"],
+    },
+  };
+  assert.equal(__test.normalizeScript(valid, { roles: "阿洛：调查者；迪莫：搭档" }).script.dialogue.length, 6);
+  assert.throws(() => __test.normalizeScript({ script: { title: "空壳" } }), (error) => error.code === "AI_OUTPUT_INVALID");
+  assert.throws(() => __test.normalizeScript(valid, { roles: "阿洛：调查者；雪影娃娃：搭档" }), /雪影娃娃/);
+});
+
+test("generation input only accepts explicitly selected library assets", () => {
+  const normalized = __test.normalizeInput({
+    activeMemeIds: ["meme-2"], activeCharacterIds: ["character-1"],
+    projectMemes: [{ id: "meme-1", phrase: "候选" }, { id: "meme-2", phrase: "本集使用" }],
+    projectCharacterCards: [{ id: "character-1", name: "阿洛" }, { id: "character-2", name: "迪莫" }],
+  });
+  assert.deepEqual(normalized.projectMemes.map((item) => item.id), ["meme-2"]);
+  assert.deepEqual(normalized.projectCharacterCards.map((item) => item.id), ["character-1"]);
+  assert.deepEqual(__test.normalizeInput({ projectMemes: [{ id: "meme-1" }] }).projectMemes, []);
 });
 
 test("continuity normalizer always returns the five required checks", () => {
@@ -258,6 +303,10 @@ test("daily budget weights Pro requests and blocks requests over the limit", asy
     __test.reserveDailyBudget(env, "/api/generate", "deepseek-v4-pro"),
     (error) => error.code === "DAILY_BUDGET_EXCEEDED",
   );
+  assert.equal(__test.providerCallUnits("deepseek-v4-flash"), 1);
+  assert.equal(__test.providerCallUnits("deepseek-v4-pro"), 3);
+  const released = await __test.releaseDailyBudget(env, first);
+  assert.equal(released.usedUnits, 0);
   assert.equal(__test.usageDay(new Date("2026-07-13T16:30:00.000Z")), "2026-07-14");
 });
 
@@ -314,6 +363,21 @@ test("data store migrates legacy JSON and preserves a localStorage fallback", as
   assert.deepEqual(await store.get("projects"), [{ id: "legacy-project" }]);
   assert.equal(await store.set("draft", { currentProjectId: "legacy-project" }), "localStorage");
   assert.deepEqual(JSON.parse(values.get("draft")), { currentProjectId: "legacy-project" });
+  const mutable = { title: "写入时版本" };
+  const write = store.set("snapshot", mutable);
+  mutable.title = "写入后被修改";
+  await write;
+  assert.deepEqual(JSON.parse(values.get("snapshot")), { title: "写入时版本" });
+});
+
+test("project schema migrates legacy episode inputs and rejects future versions", () => {
+  const legacy = projectDomain.migrateProjectRecord({
+    id: "legacy", name: "旧项目", episodes: [{ episodeNumber: 1, input: { theme: "旧主题" }, script: { title: "旧剧本" } }],
+  });
+  assert.equal(legacy.schemaVersion, projectDomain.PROJECT_SCHEMA_VERSION);
+  assert.deepEqual(legacy.episodes[0].input.activeMemeIds, []);
+  assert.deepEqual(legacy.episodes[0].input.activeCharacterIds, []);
+  assert.throws(() => projectDomain.migrateProjectRecord({ schemaVersion: projectDomain.PROJECT_SCHEMA_VERSION + 1 }), /高于当前支持版本/);
 });
 
 test("project domain appends versions without overwriting an episode", () => {

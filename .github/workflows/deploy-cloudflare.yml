@@ -40,6 +40,10 @@ jobs:
         if: ${{ env.CF_DEPLOY_TOKEN != '' }}
         run: npm ci
 
+      - name: Run tests
+        if: ${{ env.CF_DEPLOY_TOKEN != '' }}
+        run: npm test
+
       - name: Build static assets
         if: ${{ env.CF_DEPLOY_TOKEN != '' }}
         run: npm run build

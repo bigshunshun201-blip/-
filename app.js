@@ -19,6 +19,8 @@
     selectedPlanOptionId: null,
     activePlanBatchId: null,
     memeIdeas: [],
+    activeMemeIds: [],
+    activeCharacterIds: [],
     activeAiOperation: null,
   };
 
@@ -31,6 +33,8 @@
   const characterFieldIds = ["characterName", "characterRole", "characterTraits", "characterContrast", "characterDesire", "characterWeakness", "characterCatchphrases", "characterMannerism", "characterComedyTrigger", "characterBoundary"];
   const apiClient = window.RocoApiClient.create({ accessCodeKey, timeoutMs: apiTimeoutMs });
   const archiveStore = window.RocoDataStore.create();
+  let projectWriteRevision = 0;
+  let persistedProjectRevision = 0;
 
   const defaultBible = {
     characters: "主角：有明确欲望、弱点与不可突破的底线。\n搭档精灵：有独立意志，不是随时替主角解决问题的工具。",
@@ -71,6 +75,14 @@
     if (!pill) return;
     pill.textContent = message;
     pill.classList.toggle("error", isError);
+  }
+
+  function setSaveState(status) {
+    const target = $("#saveStateText");
+    if (!target) return;
+    const labels = { saving: "正在保存", saved: "已保存", error: "保存失败" };
+    target.textContent = labels[status] || "";
+    target.dataset.state = status;
   }
 
   function reportError(context, error) {
@@ -177,6 +189,8 @@
     state.selectedPlanOptionId = null;
     state.activePlanBatchId = null;
     state.memeIdeas = [];
+    state.activeMemeIds = [];
+    state.activeCharacterIds = [];
     setInputValue("episodeNumber", nextEpisodeNumber());
     renderPlanSuggestions();
     renderMemeLab();
@@ -228,6 +242,8 @@
       episodeNumber: Number($("#episodeNumber")?.value || 1),
       style: $("#customStyle")?.value.trim() || $("#style").value,
       memeSeed: $("#memeSeed") ? $("#memeSeed").value.trim() : "",
+      activeMemeIds: [...state.activeMemeIds],
+      activeCharacterIds: [...state.activeCharacterIds],
       aiModel: $("#aiModel") ? $("#aiModel").value : "",
       continueInstruction: $("#continueInstruction") ? $("#continueInstruction").value.trim() : "",
       episodePlan: {
@@ -242,6 +258,16 @@
         planId: state.selectedPlanOptionId || "",
       },
     };
+  }
+
+  function restoreActiveSelections(input = {}) {
+    const project = currentProject();
+    const memeIds = new Set((project?.memes || []).map((item) => item.id));
+    const characterIds = new Set((project?.characterCards || []).map((item) => item.id));
+    state.activeMemeIds = (Array.isArray(input.activeMemeIds) ? input.activeMemeIds : []).filter((id) => memeIds.has(id));
+    state.activeCharacterIds = (Array.isArray(input.activeCharacterIds) ? input.activeCharacterIds : []).filter((id) => characterIds.has(id));
+    renderMemeLibrary();
+    renderCharacterCards();
   }
 
   function renderAiModelSwitches() {
@@ -556,7 +582,7 @@
         <p><strong>机制：</strong>${escapeHtml(item.mechanism)}</p>
         <p><strong>笑点：</strong>${escapeHtml(item.comedy)}</p>
         <div class="tagline">${(item.tags || []).map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join("")}</div>
-        <div class="library-card-actions"><button class="small-action" data-saved-meme-use="${escapeHtml(item.id)}">加入本集</button><button class="small-action danger-action" data-saved-meme-delete="${escapeHtml(item.id)}">移除</button></div>
+        <div class="library-card-actions"><button class="small-action ${state.activeMemeIds.includes(item.id) ? "is-active" : ""}" data-saved-meme-use="${escapeHtml(item.id)}">${state.activeMemeIds.includes(item.id) ? "移出本集" : "加入本集"}</button><button class="small-action danger-action" data-saved-meme-delete="${escapeHtml(item.id)}">移除</button></div>
       </article>`).join("") : `<p class="helper">${memes.length ? "没有符合当前筛选的梗。" : "梗库还是空的。可从左侧 AI 结果收藏，或在这里手动录入。"}</p>`;
   }
 
@@ -565,7 +591,16 @@
     if (!meme) throw new Error("没有找到这条梗。");
     const addition = `梗机制：${meme.phrase}｜${meme.mechanism}｜笑点：${meme.comedy}`;
     const current = $("#memeSeed").value.trim();
+    if (state.activeMemeIds.includes(id)) {
+      state.activeMemeIds = state.activeMemeIds.filter((item) => item !== id);
+      setInputValue("memeSeed", current.split("\n").filter((line) => line.trim() !== addition).join("\n"));
+      renderMemeLibrary();
+      saveDraft(false);
+      setStatus(`已把“${meme.phrase}”移出本集素材`);
+      return;
+    }
     if (!current.includes(addition)) setInputValue("memeSeed", [current, addition].filter(Boolean).join("\n"));
+    state.activeMemeIds.push(id);
     meme.useCount = Number(meme.useCount || 0) + 1;
     meme.lastUsedAt = new Date().toISOString();
     persistProjects();
@@ -577,6 +612,7 @@
   function deleteSavedMeme(id) {
     const project = currentProject();
     project.memes = (project.memes || []).filter((item) => item.id !== id);
+    state.activeMemeIds = state.activeMemeIds.filter((item) => item !== id);
     persistProjects();
     renderMemeLibrary();
     renderMemeLab();
@@ -647,7 +683,7 @@
         <p>${escapeHtml(card.traits)}</p>
         <blockquote>${escapeHtml(card.catchphrases?.[0] || "尚未设置口头禅")}</blockquote>
         <p><strong>动作：</strong>${escapeHtml(card.mannerism || "待补")}</p><p><strong>笑点触发：</strong>${escapeHtml(card.comedyTrigger || "待补")}</p>
-        <div class="library-card-actions"><button class="small-action" data-character-use="${escapeHtml(card.id)}">加入本集</button><button class="small-action" data-character-edit="${escapeHtml(card.id)}">编辑</button><button class="small-action danger-action" data-character-delete="${escapeHtml(card.id)}">移除</button></div>
+        <div class="library-card-actions"><button class="small-action ${state.activeCharacterIds.includes(card.id) ? "is-active" : ""}" data-character-use="${escapeHtml(card.id)}">${state.activeCharacterIds.includes(card.id) ? "移出本集" : "加入本集"}</button><button class="small-action" data-character-edit="${escapeHtml(card.id)}">编辑</button><button class="small-action danger-action" data-character-delete="${escapeHtml(card.id)}">移除</button></div>
       </article>`).join("") : `<p class="helper">还没有结构化角色卡。可以先填写名字和定位，再让 DeepSeek 补全鲜明特点。</p>`;
   }
 
@@ -668,10 +704,21 @@
   function useCharacterCard(id) {
     const card = (currentProject()?.characterCards || []).find((item) => item.id === id);
     if (!card) throw new Error("没有找到这个角色。");
+    if (state.activeCharacterIds.includes(id)) {
+      state.activeCharacterIds = state.activeCharacterIds.filter((item) => item !== id);
+      const remainingRoles = $("#roles").value.split("\n").filter((line) => !line.trim().startsWith(`${card.name}：`));
+      setInputValue("roles", remainingRoles.join("\n"));
+      renderCharacterCards();
+      saveDraft(false);
+      setStatus(`已把角色“${card.name}”移出本集`);
+      return;
+    }
     const catchphrase = card.catchphrases?.[0] ? `；口头禅“${card.catchphrases[0]}”` : "";
     const addition = `${card.name}：${card.role}；${card.traits}；反差：${card.contrast}${catchphrase}；动作习惯：${card.mannerism}；底线：${card.boundary}`;
     const current = $("#roles").value.trim();
     if (!current.includes(`${card.name}：`)) setInputValue("roles", [current, addition].filter(Boolean).join("\n"));
+    state.activeCharacterIds.push(id);
+    renderCharacterCards();
     saveDraft(false);
     setStatus(`已把角色“${card.name}”加入本集`);
   }
@@ -679,6 +726,7 @@
   function deleteCharacterCard(id) {
     const project = currentProject();
     project.characterCards = (project.characterCards || []).filter((item) => item.id !== id);
+    state.activeCharacterIds = state.activeCharacterIds.filter((item) => item !== id);
     persistProjects();
     renderCharacterCards();
     renderProject();
@@ -690,10 +738,18 @@
   }
 
   async function persistProjects() {
+    const revision = ++projectWriteRevision;
+    const snapshot = typeof structuredClone === "function"
+      ? structuredClone(state.projects)
+      : JSON.parse(JSON.stringify(state.projects));
+    setSaveState("saving");
     try {
-      await archiveStore.set(projectsKey, state.projects);
+      await archiveStore.set(projectsKey, snapshot);
+      persistedProjectRevision = Math.max(persistedProjectRevision, revision);
+      if (persistedProjectRevision === projectWriteRevision) setSaveState("saved");
       return true;
     } catch (error) {
+      setSaveState("error");
       setStatus("项目档案保存失败：浏览器本地存储空间可能已满", true);
       return false;
     }
@@ -707,15 +763,11 @@
       state.projects = [];
     }
     if (!state.projects.length) state.projects = [createProjectRecord("洛克王国短剧项目")];
-    state.projects = state.projects.map((project) => ({
-      ...project,
-      bible: { ...defaultBible, ...(project.bible || {}) },
-      episodes: Array.isArray(project.episodes) ? project.episodes : [],
-      assets: Array.isArray(project.assets) ? project.assets : [],
-      memes: Array.isArray(project.memes) ? project.memes : [],
-      characterCards: Array.isArray(project.characterCards) ? project.characterCards.map(normalizeCharacterCard) : [],
-      planBatches: Array.isArray(project.planBatches) ? project.planBatches : [],
-    })).map(normalizeProjectEpisodes);
+    state.projects = state.projects.map((source) => {
+      const project = projectDomain.migrateProjectRecord(source, defaultBible);
+      project.characterCards = project.characterCards.map(normalizeCharacterCard);
+      return project;
+    });
     state.currentProjectId = state.projects.some((project) => project.id === state.currentProjectId)
       ? state.currentProjectId
       : state.projects[0].id;
@@ -747,8 +799,8 @@
       projectBible: project?.bible || defaultBible,
       projectContinuity: projectContinuity(project, input.episodeNumber),
       projectAssets: (project?.assets || []).slice(-24),
-      projectMemes: (project?.memes || []).slice().sort((a, b) => String(b.lastUsedAt || b.createdAt || "").localeCompare(String(a.lastUsedAt || a.createdAt || ""))).slice(0, 20),
-      projectCharacterCards: (project?.characterCards || []).slice(0, 24),
+      projectMemes: (project?.memes || []).filter((item) => (input.activeMemeIds || state.activeMemeIds).includes(item.id)).slice(0, 6),
+      projectCharacterCards: (project?.characterCards || []).filter((item) => (input.activeCharacterIds || state.activeCharacterIds).includes(item.id)).slice(0, 8),
       latestReview,
     };
   }
@@ -957,7 +1009,7 @@
     const project = currentProject();
     if (!project) return;
     const payload = {
-      exportVersion: 1,
+      exportVersion: projectDomain.PROJECT_SCHEMA_VERSION,
       exportedAt: new Date().toISOString(),
       project,
     };
@@ -972,6 +1024,9 @@
     reader.onload = () => {
       try {
         const parsed = JSON.parse(String(reader.result || "{}"));
+        if (Number(parsed.exportVersion || 1) > projectDomain.PROJECT_SCHEMA_VERSION) {
+          throw new Error("这个备份来自更高版本，请先升级应用后再导入。");
+        }
         const imported = parsed.project || parsed;
         if (!imported || typeof imported !== "object" || !String(imported.name || "").trim()) {
           throw new Error("不是有效的项目备份文件。");
@@ -993,7 +1048,7 @@
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         };
-        normalizeProjectEpisodes(project);
+        Object.assign(project, projectDomain.migrateProjectRecord(project, defaultBible));
         project.episodes.forEach((episode) => {
           episode.id = newId("episode");
           (episode.versions || []).forEach((version) => {
@@ -1060,6 +1115,7 @@
     applyEpisodeVersion(episode, versionId || episode.activeVersionId);
     Object.entries(episode.input || {}).forEach(([key, value]) => setInputValue(key, value));
     applyEpisodePlan(episode.input?.episodePlan);
+    restoreActiveSelections(episode.input);
     setInputValue("episodeNumber", episode.episodeNumber);
     state.currentEpisodeId = episode.id;
     state.reviewEpisodeId = episode.id;
@@ -1905,6 +1961,7 @@
       setInputValue(key, value);
     });
     applyEpisodePlan(item.input?.episodePlan);
+    restoreActiveSelections(item.input);
     if (item.projectId && state.projects.some((project) => project.id === item.projectId)) {
       state.currentProjectId = item.projectId;
       const projectEpisode = currentProject()?.episodes?.find((episode) => episode.historyId === item.id);
@@ -2370,6 +2427,7 @@
         if (el) el.value = value;
       });
       applyEpisodePlan(draft.input?.episodePlan);
+      restoreActiveSelections(draft.input);
       $("#competitorCsv").value = draft.competitorCsv || "";
       state.topics = normalizeTopicList(draft.topics);
       state.analysis = draft.analysis || null;
@@ -2863,5 +2921,10 @@
   document.addEventListener("DOMContentLoaded", init);
   window.addEventListener("error", (event) => {
     reportError("脚本", event.error || event.message);
+  });
+  window.addEventListener("beforeunload", (event) => {
+    if (persistedProjectRevision >= projectWriteRevision) return;
+    event.preventDefault();
+    event.returnValue = "";
   });
 })();
