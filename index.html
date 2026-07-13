@@ -138,11 +138,6 @@
             续写要求
             <textarea id="continueInstruction" rows="3" placeholder="例如：接着上一集，揭晓暗影博士为什么让喵喵失忆；情绪更催泪，结尾留下第三集钩子。"></textarea>
           </label>
-          <div class="action-stack" aria-label="创作动作">
-            <button class="primary-action" id="generateBtn">生成本集剧本</button>
-            <button class="secondary-action" id="storyboardBtn" disabled>基于剧本生成分镜</button>
-            <button class="ghost-action" id="continueBtn" disabled>续写下一集</button>
-          </div>
         </section>
 
         <section class="panel-section compact episode-plan-panel">
@@ -164,6 +159,12 @@
           <label>反转信息<textarea id="planReversal" rows="2" placeholder="中后段改变观众判断的新信息"></textarea></label>
           <label>结尾悬念<textarea id="planEndingSuspense" rows="2" placeholder="下一集必须行动或回答的问题"></textarea></label>
           <label>目标情绪<input id="planTargetEmotion" placeholder="例如：压迫感 -> 反杀爽感 -> 悬念" /></label>
+          <div class="action-stack episode-actions-stack" aria-label="创作动作">
+            <p class="plan-ready-state" id="planReadyState" role="status">请先完整填写或采用一套本集策划</p>
+            <button class="primary-action" id="generateBtn" disabled>先完成本集策划</button>
+            <button class="secondary-action" id="storyboardBtn" disabled>基于剧本生成分镜</button>
+            <button class="ghost-action" id="continueBtn" disabled>续写下一集</button>
+          </div>
         </section>
 
         <section class="panel-section compact reference-panel">
@@ -449,13 +450,13 @@
       粉丝向二创工作台示例，不代表官方内容或授权关系。发布前请核对平台规范与 IP 授权边界。
     </footer>
 
-    <script src="./generator.js?v=20260713-ai-planning"></script>
-    <script src="./workflow-core.js?v=20260713-ai-planning"></script>
-    <script src="./project-domain.js?v=20260713-ai-planning"></script>
-    <script src="./episode-planner.js?v=20260713-ai-planning"></script>
-    <script src="./ui-templates.js?v=20260713-ai-planning"></script>
-    <script src="./api-client.js?v=20260713-ai-planning"></script>
-    <script src="./data-store.js?v=20260713-ai-planning"></script>
-    <script src="./app.js?v=20260713-ai-planning"></script>
+    <script src="./generator.js?v=20260713-plan-gate"></script>
+    <script src="./workflow-core.js?v=20260713-plan-gate"></script>
+    <script src="./project-domain.js?v=20260713-plan-gate"></script>
+    <script src="./episode-planner.js?v=20260713-plan-gate"></script>
+    <script src="./ui-templates.js?v=20260713-plan-gate"></script>
+    <script src="./api-client.js?v=20260713-plan-gate"></script>
+    <script src="./data-store.js?v=20260713-plan-gate"></script>
+    <script src="./app.js?v=20260713-plan-gate"></script>
   </body>
 </html>

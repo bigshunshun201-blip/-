@@ -69,7 +69,7 @@ test("AI plan normalizer requires three complete episode plans", () => {
 
 test("UI contains the production workflow controls", async () => {
   const html = await readFile(new URL("../index.html", import.meta.url), "utf8");
-  for (const id of ["planOpeningHook", "autoPlanBtn", "suggestPlansBtn", "planSuggestions", "checkContinuityBtn", "assetLibrary", "reviewCommentThemes", "exportProjectBtn"]) {
+  for (const id of ["planOpeningHook", "autoPlanBtn", "suggestPlansBtn", "planSuggestions", "planReadyState", "checkContinuityBtn", "assetLibrary", "reviewCommentThemes", "exportProjectBtn"]) {
     assert.match(html, new RegExp(`id="${id}"`));
   }
 });
@@ -153,6 +153,15 @@ test("topic selection prepares planning without directly generating a script", a
   assert.doesNotMatch(source, /function generateFromTopic/);
   assert.match(source, /prepareTopicPlanning\(Number\(generateButton\.dataset\.topicGenerate\), "new"\)/);
   assert.match(source, /applyEpisodePlan\(\{\}\)/);
+});
+
+test("script generation stays gated until the episode plan is complete", async () => {
+  const html = await readFile(new URL("../index.html", import.meta.url), "utf8");
+  const source = await readFile(new URL("../app.js", import.meta.url), "utf8");
+  assert.match(html, /id="generateBtn" disabled>先完成本集策划/);
+  assert.ok(html.indexOf("id=\"generateBtn\"") > html.indexOf("id=\"planTargetEmotion\""));
+  assert.match(source, /episodePlanner\.planIsComplete\(getInput\(\)\.episodePlan\)/);
+  assert.match(source, /generateButton\.disabled = isBusy \|\| !hasCompletePlan/);
 });
 
 test("daily budget weights Pro requests and blocks requests over the limit", async () => {

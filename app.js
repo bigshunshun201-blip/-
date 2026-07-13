@@ -92,12 +92,22 @@
     const hasScript = Boolean(state.script);
     const hasStoryboard = Boolean(state.storyboard.length);
     const isBusy = Boolean(state.activeAiOperation);
+    const hasCompletePlan = episodePlanner.planIsComplete(getInput().episodePlan);
     const generateButton = $("#generateBtn");
     const storyboardButton = $("#storyboardBtn");
     const continueButton = $("#continueBtn");
+    const planReadyState = $("#planReadyState");
     const stage = $(".stage");
 
-    if (generateButton) generateButton.disabled = isBusy;
+    if (generateButton) {
+      generateButton.disabled = isBusy || !hasCompletePlan;
+      generateButton.textContent = hasCompletePlan ? "生成本集剧本" : "先完成本集策划";
+      generateButton.title = hasCompletePlan ? "根据已确认的本集策划生成剧本" : "请先快速填充、采用一套方案或完整填写五项策划";
+    }
+    if (planReadyState) {
+      planReadyState.textContent = hasCompletePlan ? "本集策划已就绪，可以生成剧本" : "请先完整填写或采用一套本集策划";
+      planReadyState.classList.toggle("is-ready", hasCompletePlan);
+    }
     if (storyboardButton) {
       storyboardButton.disabled = isBusy || !hasScript;
       storyboardButton.title = hasScript ? "根据当前剧本生成对应分镜" : "请先生成并确认一版剧本";
@@ -228,6 +238,7 @@
     setInputValue("planReversal", plan.reversal || "");
     setInputValue("planEndingSuspense", plan.endingSuspense || "");
     setInputValue("planTargetEmotion", plan.targetEmotion || "");
+    refreshCreationActions();
   }
 
   function plannerContext(topic = state.selectedTopic) {
@@ -1971,6 +1982,9 @@
       } catch (error) {
         reportError("采用本集策划", error);
       }
+    });
+    ["planOpeningHook", "planConflict", "planReversal", "planEndingSuspense", "planTargetEmotion"].forEach((id) => {
+      document.getElementById(id)?.addEventListener("input", refreshCreationActions);
     });
     $("#checkContinuityBtn").addEventListener("click", async () => {
       try {
