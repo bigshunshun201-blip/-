@@ -102,6 +102,20 @@ test("script normalizer rejects incomplete output and missing requested roles", 
     },
   };
   assert.equal(__test.normalizeScript(valid, { roles: "阿洛：调查者；迪莫：搭档" }).script.dialogue.length, 6);
+  assert.equal(__test.normalizeScript(valid, { roles: "阿洛：调查者；反差：越怕越逞强；底线：不牺牲伙伴\n迪莫：搭档；动作习惯：紧张时后退" }).script.characters.length, 2);
+  const integrated = structuredClone(valid);
+  integrated.script.structure.forEach((item, index) => { item.beatIds = index < 4 ? [`BEAT-0${index + 1}`] : ["BEAT-05", "BEAT-06", "BEAT-07", "BEAT-08"]; });
+  integrated.script.assetIntegration = {
+    characters: [{ assetId: "char-1", name: "阿洛", storyFunction: "主动调查裂纹", choice: "公开错误或失去搭档" }],
+    memes: [{ assetId: "meme-1", name: "嘴硬检测", triggerRole: "阿洛", setup: "阿洛装镇定", payoff: "徽章播报真话", plotEffect: "迫使阿洛承认错误" }],
+  };
+  const integratedInput = {
+    roles: "阿洛：调查者；迪莫：搭档", beatSheet: Array.from({ length: 8 }, (_, index) => ({ id: `BEAT-0${index + 1}` })),
+    activeCharacterIds: ["char-1"], projectCharacterCards: [{ id: "char-1", name: "阿洛" }],
+    activeMemeIds: ["meme-1"], projectMemes: [{ id: "meme-1", phrase: "嘴硬检测" }],
+  };
+  assert.equal(__test.normalizeScript(integrated, integratedInput).script.assetIntegration.memes[0].triggerRole, "阿洛");
+  assert.throws(() => __test.normalizeScript({ script: { ...integrated.script, assetIntegration: { characters: [], memes: [] } } }, integratedInput), /已选角色卡/);
   assert.throws(() => __test.normalizeScript({ script: { title: "空壳" } }), (error) => error.code === "AI_OUTPUT_INVALID");
   assert.throws(() => __test.normalizeScript(valid, { roles: "阿洛：调查者；雪影娃娃：搭档" }), /雪影娃娃/);
 });
@@ -171,7 +185,11 @@ test("AI plan normalizer requires three complete episode plans", () => {
       plan: {
         openingHook: `开头${index + 1}`,
         conflict: `冲突${index + 1}`,
+        protagonistGoal: `目标${index + 1}`,
+        stakes: `代价${index + 1}`,
+        forcedChoice: `选择${index + 1}`,
         reversal: `反转${index + 1}`,
+        relationshipShift: `关系变化${index + 1}`,
         endingSuspense: `悬念${index + 1}`,
         targetEmotion: "紧张 -> 错愕 -> 追更",
       },
@@ -183,9 +201,42 @@ test("AI plan normalizer requires three complete episode plans", () => {
   assert.throws(() => __test.normalizePlans({ plans: result.plans.slice(0, 2) }), /3 套完整策划/);
 });
 
+test("creative mix normalizer only accepts candidate character and meme ids", () => {
+  const input = {
+    candidateCharacterCards: [{ id: "char-1", name: "阿洛" }, { id: "char-2", name: "迪莫" }],
+    candidateMemes: [{ id: "meme-1", phrase: "已读乱回" }],
+  };
+  const mixes = Array.from({ length: 3 }, (_, index) => ({
+    angle: `角度${index + 1}`, title: `搭配${index + 1}`, characterIds: ["char-1", "char-2"], memeIds: ["meme-1"],
+    relationshipCollision: "阿洛想逞强，迪莫坚持先验证规则",
+    memeMechanism: "迪莫把错误回复变成任务指令，随后用同一动作回扣",
+    plotEngine: "每次嘴硬都会生成一条更难撤销的错误任务",
+    openingImage: "阿洛头顶弹出一排错误任务指令",
+    planPatch: { protagonistGoal: "撤销错误任务", stakes: "搭档会被系统带走", forcedChoice: "认错或失去线索", relationshipShift: "从互相拆台到共同担责" },
+  }));
+  const result = __test.normalizeCreativeMixes({ mixes }, input);
+  assert.equal(result.mixes.length, 3);
+  assert.deepEqual(result.mixes[0].characterIds, ["char-1", "char-2"]);
+  assert.throws(() => __test.normalizeCreativeMixes({ mixes: mixes.map((item) => ({ ...item, characterIds: ["char-1", "unknown"] })) }, input), /3套完整搭配/);
+});
+
+test("beat sheet normalizer requires eight causal production beats", () => {
+  const beats = Array.from({ length: 8 }, (_, index) => ({
+    id: `BEAT-${String(index + 1).padStart(2, "0")}`,
+    timeRange: `${index * 8}-${(index + 1) * 8}秒`, dramaticTask: `任务${index + 1}`,
+    characterGoal: `目标${index + 1}`, action: `动作${index + 1}`, newInformation: `信息${index + 1}`,
+    emotion: `情绪${index + 1}`, causalLink: `因为上一拍，所以进入第${index + 1}拍`, assetIds: ["char-1"],
+  }));
+  const input = { activeCharacterIds: ["char-1"], projectCharacterCards: [{ id: "char-1", name: "阿洛" }] };
+  const result = __test.normalizeBeatSheet({ beats }, input);
+  assert.equal(result.beats.length, 8);
+  assert.equal(result.beats[7].id, "BEAT-08");
+  assert.throws(() => __test.normalizeBeatSheet({ beats: beats.slice(0, 7) }, input), /8个剧情节拍/);
+});
+
 test("UI contains the production workflow controls", async () => {
   const html = await readFile(new URL("../index.html", import.meta.url), "utf8");
-  for (const id of ["clipMode", "planOpeningHook", "autoPlanBtn", "suggestPlansBtn", "planSuggestions", "planHistoryList", "planReadyState", "memeLabBtn", "memeInspireBtn", "memeLabResults", "memeLibrary", "addMemeBtn", "generateBibleBtn", "applyBibleTemplateBtn", "generateCharacterBtn", "saveCharacterBtn", "characterLibrary", "storyboardHistory", "checkContinuityBtn", "assetLibrary", "reviewCommentThemes", "exportProjectBtn"]) {
+  for (const id of ["clipMode", "creativeMixBrief", "characterPicker", "memePicker", "suggestCreativeMixBtn", "creativeMixHistoryList", "planOpeningHook", "planProtagonistGoal", "planStakes", "planForcedChoice", "planRelationshipShift", "autoPlanBtn", "suggestPlansBtn", "planSuggestions", "planHistoryList", "generateBeatSheetBtn", "beatSheetList", "approveBeatSheetBtn", "beatSheetHistoryList", "planReadyState", "memeLabBtn", "memeInspireBtn", "memeLabResults", "memeLibrary", "addMemeBtn", "generateBibleBtn", "applyBibleTemplateBtn", "generateCharacterBtn", "saveCharacterBtn", "characterLibrary", "storyboardHistory", "checkContinuityBtn", "assetLibrary", "reviewCommentThemes", "exportProjectBtn"]) {
     assert.match(html, new RegExp(`id="${id}"`));
   }
   assert.match(html, /open\.douyin\.com\/platform\/resource\/docs\/openapi\/data-open-service\/tops-data\/hot-video-list/);
@@ -280,13 +331,14 @@ test("topic selection prepares planning without directly generating a script", a
   assert.match(source, /applyEpisodePlan\(\{\}\)/);
 });
 
-test("script generation stays gated until the episode plan is complete", async () => {
+test("script generation stays gated until the episode plan and beat sheet are approved", async () => {
   const html = await readFile(new URL("../index.html", import.meta.url), "utf8");
   const source = await readFile(new URL("../app.js", import.meta.url), "utf8");
   assert.match(html, /id="generateBtn" disabled>先完成本集策划/);
   assert.ok(html.indexOf("id=\"generateBtn\"") > html.indexOf("id=\"planTargetEmotion\""));
   assert.match(source, /episodePlanner\.planIsComplete\(getInput\(\)\.episodePlan\)/);
-  assert.match(source, /generateButton\.disabled = isBusy \|\| !hasCompletePlan/);
+  assert.match(source, /generateButton\.disabled = isBusy \|\| !hasCompletePlan \|\| !hasApprovedBeatSheet/);
+  assert.match(source, /state\.beatSheetApproved && state\.beatSheet\.length === 8/);
 });
 
 test("daily budget weights Pro requests and blocks requests over the limit", async () => {
@@ -377,6 +429,8 @@ test("project schema migrates legacy episode inputs and rejects future versions"
   assert.equal(legacy.schemaVersion, projectDomain.PROJECT_SCHEMA_VERSION);
   assert.deepEqual(legacy.episodes[0].input.activeMemeIds, []);
   assert.deepEqual(legacy.episodes[0].input.activeCharacterIds, []);
+  assert.deepEqual(legacy.creativeMixBatches, []);
+  assert.deepEqual(legacy.beatSheetBatches, []);
   assert.throws(() => projectDomain.migrateProjectRecord({ schemaVersion: projectDomain.PROJECT_SCHEMA_VERSION + 1 }), /高于当前支持版本/);
 });
 

@@ -3,17 +3,29 @@
   if (typeof module === "object" && module.exports) module.exports = api;
   if (root) root.RocoEpisodePlanner = api;
 })(typeof globalThis !== "undefined" ? globalThis : this, function () {
-  const requiredPlanKeys = ["openingHook", "conflict", "reversal", "endingSuspense", "targetEmotion"];
+  const requiredPlanKeys = [
+    "openingHook",
+    "conflict",
+    "protagonistGoal",
+    "stakes",
+    "forcedChoice",
+    "reversal",
+    "relationshipShift",
+    "endingSuspense",
+    "targetEmotion",
+  ];
 
   function clean(value, fallback = "") {
     return String(value || "").trim() || fallback;
   }
 
   function roleNames(roles) {
-    const names = clean(roles)
-      .split(/[\n；;,，]+/)
-      .map((item) => item.split(/[：:]/)[0].trim())
-      .filter(Boolean);
+    const text = clean(roles);
+    const fieldLabels = new Set(["反差", "口头禅", "动作习惯", "底线", "弱点", "欲望", "身份", "特点", "笑点", "喜剧触发", "能力", "代价", "限制"]);
+    const matched = [...text.matchAll(/(?:^|[\n；;])\s*([^：:\n；;]{1,20})\s*[：:]/g)]
+      .map((match) => match[1].trim())
+      .filter((name) => name && !fieldLabels.has(name));
+    const names = matched.length ? matched : text.split(/[\n；;]+/).map((item) => item.split(/[：:]/)[0].trim()).filter((name) => name && !fieldLabels.has(name));
     return [...new Set(names)];
   }
 
@@ -58,7 +70,11 @@
         plan: {
           openingHook: `${continuation}${ctx.scene}的契约倒计时突然只剩 10 秒，${ctx.partner}却让${ctx.lead}别救自己。`,
           conflict: `${ctx.lead}必须在倒计时结束前阻止${ctx.opponent}带走${ctx.partner}，但强行出手会让契约永久失效。`,
+          protagonistGoal: `${ctx.lead}想在倒计时结束前保住${ctx.partner}，并查清是谁改写了契约规则。`,
+          stakes: `失败会让${ctx.partner}永久离队，${ctx.lead}也会失去继续追查主线的资格。`,
+          forcedChoice: `${ctx.lead}必须在立刻救下${ctx.partner}和保留追查反派的唯一证据之间二选一。`,
           reversal: `倒计时不是${ctx.opponent}启动的；${ctx.partner}早已知道${ctx.reversalSeed}，并在主动隐瞒代价。`,
+          relationshipShift: `${ctx.lead}从认定${ctx.partner}需要被保护，转为意识到对方一直在替自己承担风险。`,
           endingSuspense: `${ctx.lead}刚停下倒计时，自己的契约印记却开始消失。下一集必须回答：被系统判定离开的到底是谁？`,
           targetEmotion: "紧迫压迫 -> 误判反转 -> 失去恐惧",
         },
@@ -70,7 +86,11 @@
         plan: {
           openingHook: `${ctx.lead}终于在${ctx.scene}找到${ctx.partner}，它第一句话却是：“我不认识你。”${memeBeat}`,
           conflict: `${ctx.partner}公开站到${ctx.opponent}一边，${ctx.lead}要在不伤害它的前提下证明两人的共同记忆不是伪造的。`,
+          protagonistGoal: `${ctx.lead}想让${ctx.partner}在众人面前承认两人的真实关系。`,
+          stakes: `失败会让共同记忆被判定为伪造，${ctx.lead}也会被逐出${ctx.scene}。`,
+          forcedChoice: `${ctx.lead}必须选择公开两人的秘密，或继续被${ctx.partner}当众否认。`,
           reversal: `${ctx.partner}并未失忆，它故意否认${ctx.lead}，是因为只要承认关系，${ctx.opponent}就能顺着契约锁定${ctx.lead}。`,
+          relationshipShift: `${ctx.lead}从被背叛的愤怒转为理解${ctx.partner}的保护，但两人因隐瞒产生新的信任裂缝。`,
           endingSuspense: `${ctx.partner}暗中塞来一枚陌生徽记，上面却刻着${ctx.lead}尚未经历过的日期。下一集追查这段“未来记忆”。`,
           targetEmotion: "重逢期待 -> 被背叛委屈 -> 心疼与疑问",
         },
@@ -82,7 +102,11 @@
         plan: {
           openingHook: `${ctx.scene}所有精灵突然开始重复${ctx.partner}的口头禅，只有${ctx.lead}笑不出来：它们的影子全指向同一个出口。`,
           conflict: `${ctx.lead}一边阻止精灵们把异常当成整活挑战，一边要在${ctx.opponent}封锁出口前找到传播源。`,
+          protagonistGoal: `${ctx.lead}想在异常扩散前破解${ctx.partner}藏在重复动作里的求救信息。`,
+          stakes: `失败会让训练者把危险当成挑战继续传播，整片区域的判断都会被接管。`,
+          forcedChoice: `${ctx.lead}必须选择当众拆穿${ctx.partner}最怕被人知道的弱点，或放弃唯一的解码线索。`,
           reversal: `看似搞笑的重复行为其实是${ctx.partner}发出的求救编码；真正被控制的不是精灵，而是现场所有训练者的判断。`,
+          relationshipShift: `${ctx.lead}第一次把${ctx.partner}的怪习惯当成有效信号，搭档从吐槽对象变成了主动破局者。`,
           endingSuspense: `编码解完只得到一句话：“不要相信下一集出现的${ctx.lead}。”镜头外随即传来一模一样的声音。`,
           targetEmotion: "荒诞好笑 -> 集体失控 -> 身份悬疑",
         },
@@ -94,7 +118,11 @@
         plan: {
           openingHook: `${ctx.partner}在${ctx.scene}使出最熟悉的能力，命中的却是未来 30 秒后的${ctx.lead}。`,
           conflict: `${ctx.lead}必须在能力再次触发前找出规则漏洞，同时避开${ctx.opponent}故意制造的错误目标。`,
+          protagonistGoal: `${ctx.lead}想在下一次能力触发前证明错误结果可以被改变。`,
+          stakes: `失败会让未来的误伤提前成为现实，并暴露${ctx.partner}的能力缺陷。`,
+          forcedChoice: `${ctx.lead}必须选择封住${ctx.partner}的核心能力，或亲自成为下一次试错目标。`,
           reversal: `${ctx.reversalSeed}；${ctx.partner}每使用一次能力，都会把一个错误结果提前变成现实。`,
+          relationshipShift: `${ctx.partner}从坚持自己不会失手，转为第一次允许${ctx.lead}限制自己的能力。`,
           endingSuspense: `${ctx.lead}封住了${ctx.partner}的能力，${ctx.opponent}却展示了同样的契约印记。下一集要确认两者是否共享同一力量来源。`,
           targetEmotion: "视觉惊奇 -> 规则焦虑 -> 世界观震动",
         },
@@ -106,7 +134,11 @@
         plan: {
           openingHook: `${ctx.lead}只来得及救一个：困在${ctx.scene}的${ctx.partner}，或装着整片区域记忆的核心。`,
           conflict: `${ctx.opponent}逼${ctx.lead}在私人羁绊与区域安全之间选择，任何拖延都会让两边同时崩溃。`,
+          protagonistGoal: `${ctx.lead}想找到第三种办法，同时保住${ctx.partner}和区域记忆。`,
+          stakes: `失败会永久失去搭档，或让整片区域忘记这场危机发生过。`,
+          forcedChoice: `${ctx.lead}最终必须在私人羁绊与区域记忆之间作出不可撤销的选择。`,
           reversal: `${ctx.partner}才是核心记忆的真正载体；救下区域意味着必须亲手抹去它与${ctx.lead}的全部经历。`,
+          relationshipShift: `${ctx.lead}从替${ctx.partner}决定，转为把最终选择权交还给它。`,
           endingSuspense: `${ctx.lead}做出选择后，${ctx.partner}醒来喊出的却是${ctx.opponent}的名字。下一集确认记忆究竟转移给了谁。`,
           targetEmotion: "两难窒息 -> 主动牺牲 -> 心碎悬念",
         },
@@ -118,7 +150,11 @@
         plan: {
           openingHook: `${ctx.scene}的大屏突然播放${ctx.lead}伤害${ctx.partner}的完整影像，周围所有人要求立刻解除契约。`,
           conflict: `${ctx.lead}只有一次公开自证机会，但每拿出一条证据，${ctx.opponent}就能展示更完整的反证。`,
+          protagonistGoal: `${ctx.lead}想在一次公开陈述中保住契约，并证明影像缺少关键因果。`,
+          stakes: `失败会失去${ctx.partner}的信任、区域行动权和继续追查主线的资格。`,
+          forcedChoice: `${ctx.lead}必须选择暴露自己曾经犯下的错误，或让${ctx.partner}独自承担舆论。`,
           reversal: `影像没有造假，真正被调换的是事件发生的先后顺序；${ctx.lead}当时是在阻止更严重的契约污染。`,
+          relationshipShift: `${ctx.lead}从急于自证转为先保护${ctx.partner}，围观者的立场也因此第一次松动。`,
           endingSuspense: `众人刚准备道歉，${ctx.partner}却承认最后一段影像是真的。下一集必须揭开它为何反过来指控${ctx.lead}。`,
           targetEmotion: "愤怒误解 -> 证据反杀 -> 再次怀疑",
         },
@@ -167,5 +203,5 @@
     }).filter((item) => planIsComplete(item.plan));
   }
 
-  return { requiredPlanKeys, planIsComplete, generatePlanOptions, completePlan, normalizePlanOptions };
+  return { requiredPlanKeys, roleNames, planIsComplete, generatePlanOptions, completePlan, normalizePlanOptions };
 });

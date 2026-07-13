@@ -21,6 +21,13 @@
     memeIdeas: [],
     activeMemeIds: [],
     activeCharacterIds: [],
+    creativeMixOptions: [],
+    selectedCreativeMixId: null,
+    activeCreativeMixBatchId: null,
+    beatSheet: [],
+    beatSheetApproved: false,
+    activeBeatSheetBatchId: null,
+    continuationSource: null,
     activeAiOperation: null,
   };
 
@@ -109,20 +116,23 @@
     const hasStoryboard = Boolean(state.storyboard.length);
     const isBusy = Boolean(state.activeAiOperation);
     const hasCompletePlan = episodePlanner.planIsComplete(getInput().episodePlan);
+    const hasApprovedBeatSheet = state.beatSheetApproved && state.beatSheet.length === 8;
+    const isContinuation = Boolean(state.continuationSource);
     const generateButton = $("#generateBtn");
     const storyboardButton = $("#storyboardBtn");
     const continueButton = $("#continueBtn");
+    const beatSheetButton = $("#generateBeatSheetBtn");
     const planReadyState = $("#planReadyState");
     const stage = $(".stage");
 
     if (generateButton) {
-      generateButton.disabled = isBusy || !hasCompletePlan;
-      generateButton.textContent = hasCompletePlan ? "生成本集剧本" : "先完成本集策划";
-      generateButton.title = hasCompletePlan ? "根据已确认的本集策划生成剧本" : "请先快速填充、采用一套方案或完整填写五项策划";
+      generateButton.disabled = isBusy || !hasCompletePlan || !hasApprovedBeatSheet;
+      generateButton.textContent = !hasCompletePlan ? "先完成本集策划" : !hasApprovedBeatSheet ? "先确认剧情节拍表" : isContinuation ? "生成下一集剧本" : "生成本集剧本";
+      generateButton.title = hasCompletePlan && hasApprovedBeatSheet ? "根据已确认的本集策划和节拍表生成剧本" : "请先完成本集策划，并生成、确认一版剧情节拍表";
     }
     if (planReadyState) {
-      planReadyState.textContent = hasCompletePlan ? "本集策划已就绪，可以生成剧本" : "请先完整填写或采用一套本集策划";
-      planReadyState.classList.toggle("is-ready", hasCompletePlan);
+      planReadyState.textContent = !hasCompletePlan ? "请先完整填写或采用一套本集策划" : !hasApprovedBeatSheet ? "策划已完成，请生成并确认剧情节拍表" : "策划和节拍表已就绪，可以生成剧本";
+      planReadyState.classList.toggle("is-ready", hasCompletePlan && hasApprovedBeatSheet);
     }
     if (storyboardButton) {
       storyboardButton.disabled = isBusy || !hasScript;
@@ -132,7 +142,11 @@
       continueButton.disabled = isBusy || !hasScript;
       continueButton.title = hasScript ? "承接当前剧本的结尾钩子续写下一集" : "请先生成一版剧本";
     }
-    ["checkContinuityBtn", "regenerateTopicsBtn", "suggestPlansBtn", "autoPlanBtn", "generateBibleBtn", "generateCharacterBtn", "applyBibleTemplateBtn", "memeLabBtn", "memeInspireBtn", "projectSelect", "newProjectBtn", "importProjectBtn"].forEach((id) => {
+    if (beatSheetButton) {
+      beatSheetButton.disabled = isBusy || !hasCompletePlan;
+      beatSheetButton.title = hasCompletePlan ? "根据本集策划和已选角色/梗生成 8 个因果节拍" : "请先完成本集策划";
+    }
+    ["checkContinuityBtn", "regenerateTopicsBtn", "suggestPlansBtn", "autoPlanBtn", "approveBeatSheetBtn", "suggestCreativeMixBtn", "generateBibleBtn", "generateCharacterBtn", "applyBibleTemplateBtn", "memeLabBtn", "memeInspireBtn", "projectSelect", "newProjectBtn", "importProjectBtn"].forEach((id) => {
       const control = document.getElementById(id);
       if (control) control.disabled = isBusy;
     });
@@ -191,9 +205,19 @@
     state.memeIdeas = [];
     state.activeMemeIds = [];
     state.activeCharacterIds = [];
+    state.creativeMixOptions = [];
+    state.selectedCreativeMixId = null;
+    state.activeCreativeMixBatchId = null;
+    state.beatSheet = [];
+    state.beatSheetApproved = false;
+    state.activeBeatSheetBatchId = null;
+    state.continuationSource = null;
     setInputValue("episodeNumber", nextEpisodeNumber());
     renderPlanSuggestions();
     renderMemeLab();
+    renderCreativeAssetPicker();
+    renderCreativeMixResults();
+    renderBeatSheet();
     renderScript();
     renderStoryboard();
     renderCreativePack();
@@ -244,18 +268,32 @@
       memeSeed: $("#memeSeed") ? $("#memeSeed").value.trim() : "",
       activeMemeIds: [...state.activeMemeIds],
       activeCharacterIds: [...state.activeCharacterIds],
+      creativeMixBrief: $("#creativeMixBrief")?.value.trim() || "",
+      creativeMixRef: {
+        batchId: state.activeCreativeMixBatchId || "",
+        mixId: state.selectedCreativeMixId || "",
+      },
       aiModel: $("#aiModel") ? $("#aiModel").value : "",
       continueInstruction: $("#continueInstruction") ? $("#continueInstruction").value.trim() : "",
       episodePlan: {
         openingHook: $("#planOpeningHook")?.value.trim() || "",
         conflict: $("#planConflict")?.value.trim() || "",
+        protagonistGoal: $("#planProtagonistGoal")?.value.trim() || "",
+        stakes: $("#planStakes")?.value.trim() || "",
+        forcedChoice: $("#planForcedChoice")?.value.trim() || "",
         reversal: $("#planReversal")?.value.trim() || "",
+        relationshipShift: $("#planRelationshipShift")?.value.trim() || "",
         endingSuspense: $("#planEndingSuspense")?.value.trim() || "",
         targetEmotion: $("#planTargetEmotion")?.value.trim() || "",
       },
       episodePlanRef: {
         batchId: state.activePlanBatchId || "",
         planId: state.selectedPlanOptionId || "",
+      },
+      beatSheet: state.beatSheet.map((beat) => ({ ...beat, assetIds: [...(beat.assetIds || [])] })),
+      beatSheetRef: {
+        batchId: state.activeBeatSheetBatchId || "",
+        approved: state.beatSheetApproved,
       },
     };
   }
@@ -268,6 +306,225 @@
     state.activeCharacterIds = (Array.isArray(input.activeCharacterIds) ? input.activeCharacterIds : []).filter((id) => characterIds.has(id));
     renderMemeLibrary();
     renderCharacterCards();
+    renderCreativeAssetPicker();
+  }
+
+  function restoreCreativeWorkflow(input = {}) {
+    const project = currentProject();
+    state.activeCreativeMixBatchId = input.creativeMixRef?.batchId || null;
+    state.selectedCreativeMixId = input.creativeMixRef?.mixId || null;
+    const mixBatch = (project?.creativeMixBatches || []).find((batch) => batch.id === state.activeCreativeMixBatchId);
+    state.creativeMixOptions = (mixBatch?.mixes || []).map((item) => ({ ...item, characterIds: [...(item.characterIds || [])], memeIds: [...(item.memeIds || [])], planPatch: { ...(item.planPatch || {}) } }));
+    state.activeBeatSheetBatchId = input.beatSheetRef?.batchId || null;
+    state.beatSheet = normalizeBeatSheet({ beats: input.beatSheet || [] });
+    state.beatSheetApproved = Boolean(input.beatSheetRef?.approved && state.beatSheet.length === 8);
+    renderCreativeMixResults();
+    renderCreativeMixHistory();
+    renderBeatSheet();
+  }
+
+  function characterRoleLine(card) {
+    const catchphrase = card.catchphrases?.[0] ? `；口头禅“${card.catchphrases[0]}”` : "";
+    return `${card.name}：${card.role}；${card.traits}；反差：${card.contrast}${catchphrase}；动作习惯：${card.mannerism}；底线：${card.boundary}`;
+  }
+
+  function memeSeedLine(meme) {
+    return `梗机制：${meme.phrase}｜${meme.mechanism}｜笑点：${meme.comedy}`;
+  }
+
+  function markBeatSheetStale() {
+    if (!state.beatSheet.length) return;
+    state.beatSheetApproved = false;
+    renderBeatSheet();
+    refreshCreationActions();
+  }
+
+  function syncActiveAssetsToInputs() {
+    const project = currentProject();
+    const knownRoleLines = new Set((project?.characterCards || []).map(characterRoleLine));
+    const manualRoleLines = $("#roles").value.split("\n").filter((line) => line.trim() && !knownRoleLines.has(line.trim()));
+    const selectedRoleLines = (project?.characterCards || []).filter((card) => state.activeCharacterIds.includes(card.id)).map(characterRoleLine);
+    setInputValue("roles", [...manualRoleLines, ...selectedRoleLines].join("\n"));
+
+    const knownMemeLines = new Set((project?.memes || []).map(memeSeedLine));
+    const manualMemeLines = $("#memeSeed").value.split("\n").filter((line) => line.trim() && !knownMemeLines.has(line.trim()));
+    const selectedMemeLines = (project?.memes || []).filter((meme) => state.activeMemeIds.includes(meme.id)).map(memeSeedLine);
+    setInputValue("memeSeed", [...manualMemeLines, ...selectedMemeLines].join("\n"));
+  }
+
+  function renderCreativeAssetPicker() {
+    const project = currentProject();
+    const characterTarget = $("#characterPicker");
+    const memeTarget = $("#memePicker");
+    if (!characterTarget || !memeTarget) return;
+    const cards = project?.characterCards || [];
+    const memes = project?.memes || [];
+    $("#activeCharacterCount").textContent = `${state.activeCharacterIds.length}/${cards.length}`;
+    $("#activeMemeCount").textContent = `${state.activeMemeIds.length}/${memes.length}`;
+    characterTarget.innerHTML = cards.length
+      ? cards.map((card) => `<button type="button" class="asset-picker-button ${state.activeCharacterIds.includes(card.id) ? "is-active" : ""}" data-creative-character="${escapeHtml(card.id)}" title="${escapeHtml(card.role || card.traits)}">${escapeHtml(card.name)}</button>`).join("")
+      : `<p class="asset-picker-empty">角色库为空，请先到资产库创建角色卡。</p>`;
+    memeTarget.innerHTML = memes.length
+      ? memes.map((meme) => `<button type="button" class="asset-picker-button ${state.activeMemeIds.includes(meme.id) ? "is-active" : ""}" data-creative-meme="${escapeHtml(meme.id)}" title="${escapeHtml(meme.mechanism)}">${escapeHtml(meme.phrase)}</button>`).join("")
+      : `<p class="asset-picker-empty">梗库为空，请先收藏或录入可复用梗。</p>`;
+  }
+
+  function setCreativeAssetSelection(characterIds, memeIds, countUsage = false) {
+    const project = currentProject();
+    const validCharacterIds = new Set((project?.characterCards || []).map((item) => item.id));
+    const validMemeIds = new Set((project?.memes || []).map((item) => item.id));
+    state.activeCharacterIds = [...new Set(characterIds || [])].filter((id) => validCharacterIds.has(id)).slice(0, 4);
+    state.activeMemeIds = [...new Set(memeIds || [])].filter((id) => validMemeIds.has(id)).slice(0, 2);
+    if (countUsage) {
+      (project?.memes || []).forEach((meme) => {
+        if (!state.activeMemeIds.includes(meme.id)) return;
+        meme.useCount = Number(meme.useCount || 0) + 1;
+        meme.lastUsedAt = new Date().toISOString();
+      });
+    }
+    syncActiveAssetsToInputs();
+    renderCreativeAssetPicker();
+    renderMemeLibrary();
+    renderCharacterCards();
+    markBeatSheetStale();
+  }
+
+  function toggleCreativeCharacter(id) {
+    const ids = state.activeCharacterIds.includes(id)
+      ? state.activeCharacterIds.filter((item) => item !== id)
+      : [...state.activeCharacterIds, id];
+    setCreativeAssetSelection(ids, state.activeMemeIds);
+    state.selectedCreativeMixId = null;
+    setStatus("已更新本集角色，生成时只引用当前选中角色卡");
+    saveDraft(false);
+  }
+
+  function toggleCreativeMeme(id) {
+    const ids = state.activeMemeIds.includes(id)
+      ? state.activeMemeIds.filter((item) => item !== id)
+      : [...state.activeMemeIds, id];
+    setCreativeAssetSelection(state.activeCharacterIds, ids);
+    state.selectedCreativeMixId = null;
+    setStatus("已更新本集梗，生成时会要求它成为动作、规则或回扣，而不是一句硬塞台词");
+    saveDraft(false);
+  }
+
+  function normalizeCreativeMixOptions(result = {}) {
+    const project = currentProject();
+    const characterIds = new Set((project?.characterCards || []).map((item) => item.id));
+    const memeIds = new Set((project?.memes || []).map((item) => item.id));
+    return (Array.isArray(result?.mixes) ? result.mixes : []).slice(0, 3).map((item, index) => ({
+      id: String(item.id || `creative-mix-${Date.now()}-${index}`),
+      angle: String(item.angle || `搭配 ${index + 1}`).trim(),
+      title: String(item.title || "未命名搭配").trim(),
+      characterIds: [...new Set(Array.isArray(item.characterIds) ? item.characterIds.map(String) : [])].filter((id) => characterIds.has(id)).slice(0, 4),
+      memeIds: [...new Set(Array.isArray(item.memeIds) ? item.memeIds.map(String) : [])].filter((id) => memeIds.has(id)).slice(0, 2),
+      relationshipCollision: String(item.relationshipCollision || "").trim(),
+      memeMechanism: String(item.memeMechanism || "").trim(),
+      plotEngine: String(item.plotEngine || "").trim(),
+      openingImage: String(item.openingImage || "").trim(),
+      planPatch: item.planPatch && typeof item.planPatch === "object" ? { ...item.planPatch } : {},
+    })).filter((item) => item.characterIds.length >= 2 && item.memeIds.length && item.relationshipCollision && item.memeMechanism && item.plotEngine);
+  }
+
+  function renderCreativeMixResults() {
+    const target = $("#creativeMixResults");
+    if (!target) return;
+    target.hidden = !state.creativeMixOptions.length;
+    const project = currentProject();
+    const characterMap = new Map((project?.characterCards || []).map((item) => [item.id, item.name]));
+    const memeMap = new Map((project?.memes || []).map((item) => [item.id, item.phrase]));
+    target.innerHTML = state.creativeMixOptions.map((option, index) => `
+      <article class="creative-mix-option ${option.id === state.selectedCreativeMixId ? "is-selected" : ""}">
+        <header><h3>${escapeHtml(option.angle)} · ${escapeHtml(option.title)}</h3><button class="small-action" type="button" data-creative-mix-option="${index}">${option.id === state.selectedCreativeMixId ? "已采用" : "采用"}</button></header>
+        <div class="tagline">${option.characterIds.map((id) => `<span class="tag">${escapeHtml(characterMap.get(id) || id)}</span>`).join("")}${option.memeIds.map((id) => `<span class="tag">梗：${escapeHtml(memeMap.get(id) || id)}</span>`).join("")}</div>
+        <p><strong>关系碰撞：</strong>${escapeHtml(option.relationshipCollision)}</p>
+        <p><strong>梗的剧情用法：</strong>${escapeHtml(option.memeMechanism)}</p>
+        <p><strong>剧情发动机：</strong>${escapeHtml(option.plotEngine)}</p>
+        <p><strong>开场画面：</strong>${escapeHtml(option.openingImage)}</p>
+      </article>`).join("");
+  }
+
+  function renderCreativeMixHistory() {
+    const batches = currentProject()?.creativeMixBatches || [];
+    const target = $("#creativeMixHistoryList");
+    const count = $("#creativeMixHistoryCount");
+    if (count) count.textContent = String(batches.length);
+    if (!target) return;
+    target.innerHTML = batches.length ? batches.slice(0, 8).map((batch) => {
+      const selected = (batch.mixes || []).find((mix) => mix.id === batch.selectedMixId);
+      return `<div class="plan-history-item"><div><strong>第 ${escapeHtml(batch.episodeNumber || 1)} 集 · ${escapeHtml(batch.theme || "未命名选题")}</strong><span>${escapeHtml(new Date(batch.createdAt).toLocaleString("zh-CN", { hour12: false }))} · ${escapeHtml(selected ? `已采用 ${selected.angle}` : "3 套待筛选")}</span></div><button class="small-action" type="button" data-creative-mix-restore="${escapeHtml(batch.id)}">恢复三案</button></div>`;
+    }).join("") : `<p class="helper">每次 AI 生成的三套角色与梗搭配都会保存在当前项目。</p>`;
+  }
+
+  async function suggestCreativeMixes() {
+    const project = currentProject();
+    if ((project?.characterCards || []).length < 2) throw new Error("角色库至少需要 2 张角色卡，才能设计关系碰撞。");
+    if (!(project?.memes || []).length) throw new Error("梗库还是空的，请先收藏或录入至少一个梗。");
+    const operation = beginAiOperation("角色与梗搭配");
+    try {
+      setStatus("DeepSeek 正在从现有角色卡和梗库中设计 3 套剧情组合...");
+      const input = getInput();
+      const response = await apiRequest("/api/creative-mix", { input: {
+        ...generationContext(input),
+        candidateCharacterCards: (project.characterCards || []).slice(0, 20),
+        candidateMemes: (project.memes || []).slice(0, 30),
+      } });
+      assertActiveAiOperation(operation);
+      const options = normalizeCreativeMixOptions(response.result);
+      if (options.length !== 3) throw new Error("AI 没有返回 3 套可用搭配，请重新生成。");
+      state.creativeMixOptions = options;
+      state.selectedCreativeMixId = null;
+      const batch = {
+        id: newId("creative-mix-batch"), createdAt: new Date().toISOString(), episodeNumber: input.episodeNumber,
+        theme: input.theme, model: response.model || "", source: response.source || "", mixes: options.map((item) => ({ ...item, characterIds: [...item.characterIds], memeIds: [...item.memeIds], planPatch: { ...item.planPatch } })), selectedMixId: null,
+      };
+      project.creativeMixBatches = [batch, ...(project.creativeMixBatches || [])].slice(0, 30);
+      state.activeCreativeMixBatchId = batch.id;
+      await persistProjects();
+      renderCreativeMixResults();
+      renderCreativeMixHistory();
+      saveDraft(false);
+      setStatus(`已生成 3 套角色与梗搭配${usageSuffix(response)}`);
+    } finally {
+      endAiOperation(operation);
+    }
+  }
+
+  function adoptCreativeMix(index) {
+    const option = state.creativeMixOptions[index];
+    if (!option) throw new Error("没有找到这套搭配。");
+    setCreativeAssetSelection(option.characterIds, option.memeIds, true);
+    state.selectedCreativeMixId = option.id;
+    setInputValue("creativeMixBrief", [
+      `关系碰撞：${option.relationshipCollision}`,
+      `梗的剧情机制：${option.memeMechanism}`,
+      `剧情发动机：${option.plotEngine}`,
+      `开场强画面：${option.openingImage}`,
+    ].join("\n"));
+    const currentPlan = getInput().episodePlan;
+    const mergedPlan = { ...currentPlan };
+    ["protagonistGoal", "stakes", "forcedChoice", "relationshipShift"].forEach((key) => {
+      if (!mergedPlan[key] && option.planPatch[key]) mergedPlan[key] = option.planPatch[key];
+    });
+    applyEpisodePlan(mergedPlan);
+    const batch = (currentProject()?.creativeMixBatches || []).find((item) => item.id === state.activeCreativeMixBatchId);
+    if (batch) batch.selectedMixId = option.id;
+    persistProjects();
+    renderCreativeMixResults();
+    renderCreativeMixHistory();
+    saveDraft(false);
+    setStatus(`已采用“${option.angle}”，角色、梗和组合要求已写入本集`);
+  }
+
+  function restoreCreativeMixBatch(id) {
+    const batch = (currentProject()?.creativeMixBatches || []).find((item) => item.id === id);
+    if (!batch) throw new Error("没有找到这批搭配记录。");
+    state.creativeMixOptions = (batch.mixes || []).map((item) => ({ ...item, characterIds: [...(item.characterIds || [])], memeIds: [...(item.memeIds || [])], planPatch: { ...(item.planPatch || {}) } }));
+    state.activeCreativeMixBatchId = batch.id;
+    state.selectedCreativeMixId = batch.selectedMixId || null;
+    renderCreativeMixResults();
+    setStatus("已恢复这批角色与梗搭配，可以重新筛选");
   }
 
   function renderAiModelSwitches() {
@@ -290,11 +547,17 @@
   }
 
   function applyEpisodePlan(plan = {}) {
+    markBeatSheetStale();
     setInputValue("planOpeningHook", plan.openingHook || "");
     setInputValue("planConflict", plan.conflict || "");
+    setInputValue("planProtagonistGoal", plan.protagonistGoal || "");
+    setInputValue("planStakes", plan.stakes || "");
+    setInputValue("planForcedChoice", plan.forcedChoice || "");
     setInputValue("planReversal", plan.reversal || "");
+    setInputValue("planRelationshipShift", plan.relationshipShift || "");
     setInputValue("planEndingSuspense", plan.endingSuspense || "");
     setInputValue("planTargetEmotion", plan.targetEmotion || "");
+    renderBeatSheet();
     refreshCreationActions();
   }
 
@@ -317,7 +580,11 @@
     const labels = {
       openingHook: "开头",
       conflict: "冲突",
+      protagonistGoal: "目标",
+      stakes: "代价",
+      forcedChoice: "选择",
       reversal: "反转",
+      relationshipShift: "关系",
       endingSuspense: "悬念",
       targetEmotion: "情绪",
     };
@@ -441,7 +708,7 @@
     state.activePlanBatchId = null;
     renderPlanSuggestions();
     saveDraft(false);
-    setStatus("本集策划已自动填好，可以直接修改或生成剧本");
+    setStatus("本集策划已自动填好，下一步生成并确认剧情节拍表");
     return plan;
   }
 
@@ -460,6 +727,115 @@
     renderPlanSuggestions();
     saveDraft(false);
     setStatus(`已采用“${option.angle}”方案，可以继续微调`);
+  }
+
+  function normalizeBeatSheet(result = {}) {
+    const source = Array.isArray(result?.beats) ? result.beats : [];
+    return source.slice(0, 8).map((beat, index) => ({
+      id: String(beat.id || `BEAT-${String(index + 1).padStart(2, "0")}`),
+      timeRange: String(beat.timeRange || "").trim(),
+      dramaticTask: String(beat.dramaticTask || "").trim(),
+      characterGoal: String(beat.characterGoal || "").trim(),
+      action: String(beat.action || "").trim(),
+      newInformation: String(beat.newInformation || "").trim(),
+      emotion: String(beat.emotion || "").trim(),
+      causalLink: String(beat.causalLink || "").trim(),
+      assetIds: [...new Set(Array.isArray(beat.assetIds) ? beat.assetIds.map(String) : [])].slice(0, 4),
+    })).filter((beat) => beat.timeRange && beat.dramaticTask && beat.characterGoal && beat.action && beat.causalLink);
+  }
+
+  function renderBeatSheet() {
+    const target = $("#beatSheetList");
+    const status = $("#beatSheetStatus");
+    const approveButton = $("#approveBeatSheetBtn");
+    if (!target || !status || !approveButton) return;
+    target.innerHTML = state.beatSheet.map((beat, index) => `
+      <article class="beat-card">
+        <span class="beat-index">${index + 1}</span>
+        <div>
+          <strong>${escapeHtml(beat.timeRange)} · ${escapeHtml(beat.dramaticTask)}</strong>
+          <p><b>人物行动：</b>${escapeHtml(beat.characterGoal)} → ${escapeHtml(beat.action)}</p>
+          ${beat.newInformation ? `<p><b>新增信息：</b>${escapeHtml(beat.newInformation)}</p>` : ""}
+          <p><b>因果：</b>${escapeHtml(beat.causalLink)}</p>
+        </div>
+      </article>`).join("");
+    approveButton.hidden = state.beatSheet.length !== 8;
+    approveButton.textContent = state.beatSheetApproved ? "已确认这版节拍表" : "确认这版节拍表";
+    status.textContent = state.beatSheetApproved
+      ? "已确认，正式剧本会严格按这 8 个因果节点展开"
+      : state.beatSheet.length
+        ? "这版节拍表已留档；确认后才可生成正式剧本"
+        : episodePlanner.planIsComplete(getInput().episodePlan)
+          ? "策划已完成，可以让 AI 拆成 8 个剧情节拍"
+          : "策划完成后可生成";
+    status.classList.toggle("is-approved", state.beatSheetApproved);
+    renderBeatSheetHistory();
+  }
+
+  function renderBeatSheetHistory() {
+    const batches = currentProject()?.beatSheetBatches || [];
+    const target = $("#beatSheetHistoryList");
+    const count = $("#beatSheetHistoryCount");
+    if (count) count.textContent = String(batches.length);
+    if (!target) return;
+    target.innerHTML = batches.length ? batches.slice(0, 8).map((batch, index) => `
+      <div class="plan-history-item">
+        <div><strong>第 ${escapeHtml(batch.episodeNumber || 1)} 集 · 节拍表 v${batches.length - index}</strong><span>${escapeHtml(new Date(batch.createdAt).toLocaleString("zh-CN", { hour12: false }))} · ${batch.approved ? "已确认" : "未确认"}</span></div>
+        <button class="small-action" type="button" data-beat-sheet-restore="${escapeHtml(batch.id)}">恢复</button>
+      </div>`).join("") : `<p class="helper">生成过的节拍表会保存在当前项目，方便比较和恢复。</p>`;
+  }
+
+  async function generateBeatSheet() {
+    const input = getInput();
+    validateEpisodePlan(input);
+    const operation = beginAiOperation("剧情节拍表生成");
+    try {
+      setStatus("DeepSeek 正在把策划拆成 8 个因果节拍...");
+      const response = await apiRequest("/api/beat-sheet", { input: generationContext(input) });
+      assertActiveAiOperation(operation);
+      const beats = normalizeBeatSheet(response.result);
+      if (beats.length !== 8) throw new Error("AI 没有返回 8 个完整剧情节拍，请重新生成。");
+      state.beatSheet = beats;
+      state.beatSheetApproved = false;
+      const project = currentProject();
+      const batch = {
+        id: newId("beat-sheet-batch"), createdAt: new Date().toISOString(), episodeNumber: input.episodeNumber,
+        theme: input.theme, model: response.model || "", source: response.source || "", approved: false,
+        beats: beats.map((beat) => ({ ...beat, assetIds: [...beat.assetIds] })),
+      };
+      project.beatSheetBatches = [batch, ...(project.beatSheetBatches || [])].slice(0, 30);
+      state.activeBeatSheetBatchId = batch.id;
+      await persistProjects();
+      renderBeatSheet();
+      saveDraft(false);
+      setStatus(`剧情节拍表已生成并留档，请确认因果后再写剧本${usageSuffix(response)}`);
+    } finally {
+      endAiOperation(operation);
+    }
+  }
+
+  function approveBeatSheet() {
+    if (state.beatSheet.length !== 8) throw new Error("请先生成一版完整的 8 节拍表。");
+    state.beatSheetApproved = true;
+    const batch = (currentProject()?.beatSheetBatches || []).find((item) => item.id === state.activeBeatSheetBatchId);
+    if (batch) batch.approved = true;
+    persistProjects();
+    renderBeatSheet();
+    refreshCreationActions();
+    saveDraft(false);
+    setStatus("节拍表已确认，现在可以生成正式剧本");
+  }
+
+  function restoreBeatSheetBatch(id) {
+    const batch = (currentProject()?.beatSheetBatches || []).find((item) => item.id === id);
+    if (!batch) throw new Error("没有找到这版节拍表。");
+    state.beatSheet = normalizeBeatSheet({ beats: batch.beats });
+    state.beatSheetApproved = Boolean(batch.approved);
+    state.activeBeatSheetBatchId = batch.id;
+    renderBeatSheet();
+    refreshCreationActions();
+    saveDraft(false);
+    setStatus(`已恢复第 ${batch.episodeNumber || 1} 集的节拍表`);
   }
 
   function normalizeMemeIdeas(result) {
@@ -540,6 +916,7 @@
     persistProjects();
     renderMemeLab();
     renderMemeLibrary();
+    renderCreativeAssetPicker();
     renderProject();
     setStatus(`已收藏“${idea.phrase}”，以后可在资产库的项目梗库中复用`);
   }
@@ -560,6 +937,7 @@
     ["memeName", "memeMechanism", "memeComedy", "memeTags"].forEach((id) => setInputValue(id, ""));
     persistProjects();
     renderMemeLibrary();
+    renderCreativeAssetPicker();
     renderProject();
     setStatus(`已把“${phrase}”存入项目梗库`);
   }
@@ -589,12 +967,14 @@
   function adoptSavedMeme(id) {
     const meme = (currentProject()?.memes || []).find((item) => item.id === id);
     if (!meme) throw new Error("没有找到这条梗。");
-    const addition = `梗机制：${meme.phrase}｜${meme.mechanism}｜笑点：${meme.comedy}`;
+    const addition = memeSeedLine(meme);
     const current = $("#memeSeed").value.trim();
     if (state.activeMemeIds.includes(id)) {
       state.activeMemeIds = state.activeMemeIds.filter((item) => item !== id);
       setInputValue("memeSeed", current.split("\n").filter((line) => line.trim() !== addition).join("\n"));
       renderMemeLibrary();
+      renderCreativeAssetPicker();
+      markBeatSheetStale();
       saveDraft(false);
       setStatus(`已把“${meme.phrase}”移出本集素材`);
       return;
@@ -605,6 +985,8 @@
     meme.lastUsedAt = new Date().toISOString();
     persistProjects();
     renderMemeLibrary();
+    renderCreativeAssetPicker();
+    markBeatSheetStale();
     saveDraft(false);
     setStatus(`已把“${meme.phrase}”加入本集素材`);
   }
@@ -613,8 +995,11 @@
     const project = currentProject();
     project.memes = (project.memes || []).filter((item) => item.id !== id);
     state.activeMemeIds = state.activeMemeIds.filter((item) => item !== id);
+    syncActiveAssetsToInputs();
+    markBeatSheetStale();
     persistProjects();
     renderMemeLibrary();
+    renderCreativeAssetPicker();
     renderMemeLab();
     renderProject();
     setStatus("已从梗库移除");
@@ -666,6 +1051,7 @@
     else project.characterCards.push(card);
     persistProjects();
     renderCharacterCards();
+    renderCreativeAssetPicker();
     renderProject();
     clearCharacterDraft();
     setStatus(existing ? `已更新角色卡：${card.name}` : `已保存角色卡：${card.name}`);
@@ -709,16 +1095,19 @@
       const remainingRoles = $("#roles").value.split("\n").filter((line) => !line.trim().startsWith(`${card.name}：`));
       setInputValue("roles", remainingRoles.join("\n"));
       renderCharacterCards();
+      renderCreativeAssetPicker();
+      markBeatSheetStale();
       saveDraft(false);
       setStatus(`已把角色“${card.name}”移出本集`);
       return;
     }
-    const catchphrase = card.catchphrases?.[0] ? `；口头禅“${card.catchphrases[0]}”` : "";
-    const addition = `${card.name}：${card.role}；${card.traits}；反差：${card.contrast}${catchphrase}；动作习惯：${card.mannerism}；底线：${card.boundary}`;
+    const addition = characterRoleLine(card);
     const current = $("#roles").value.trim();
     if (!current.includes(`${card.name}：`)) setInputValue("roles", [current, addition].filter(Boolean).join("\n"));
     state.activeCharacterIds.push(id);
     renderCharacterCards();
+    renderCreativeAssetPicker();
+    markBeatSheetStale();
     saveDraft(false);
     setStatus(`已把角色“${card.name}”加入本集`);
   }
@@ -727,8 +1116,11 @@
     const project = currentProject();
     project.characterCards = (project.characterCards || []).filter((item) => item.id !== id);
     state.activeCharacterIds = state.activeCharacterIds.filter((item) => item !== id);
+    syncActiveAssetsToInputs();
+    markBeatSheetStale();
     persistProjects();
     renderCharacterCards();
+    renderCreativeAssetPicker();
     renderProject();
     setStatus("已移除角色卡");
   }
@@ -821,10 +1213,7 @@
 
   function bibleTemplate(templateKey) {
     const input = getInput();
-    const names = input.roles
-      .split(/[\n；;,，]+/)
-      .map((item) => item.split(/[：:]/)[0].trim())
-      .filter(Boolean);
+    const names = episodePlanner.roleNames(input.roles);
     const lead = names[0] || "主角洛克";
     const partner = names[1] || "搭档精灵";
     const scene = input.scene || "当前探索区域";
@@ -1044,6 +1433,8 @@
             ...batch,
             plans: (batch.plans || []).map((plan) => ({ ...plan, plan: { ...(plan.plan || {}) } })),
           })) : [],
+          creativeMixBatches: Array.isArray(imported.creativeMixBatches) ? imported.creativeMixBatches : [],
+          beatSheetBatches: Array.isArray(imported.beatSheetBatches) ? imported.beatSheetBatches : [],
           episodes: Array.isArray(imported.episodes) ? imported.episodes : [],
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
@@ -1116,6 +1507,7 @@
     Object.entries(episode.input || {}).forEach(([key, value]) => setInputValue(key, value));
     applyEpisodePlan(episode.input?.episodePlan);
     restoreActiveSelections(episode.input);
+    restoreCreativeWorkflow(episode.input);
     setInputValue("episodeNumber", episode.episodeNumber);
     state.currentEpisodeId = episode.id;
     state.reviewEpisodeId = episode.id;
@@ -1123,6 +1515,7 @@
     state.storyboard = episode.storyboard || [];
     state.creativePack = episode.creativePack || null;
     state.currentHistoryId = episode.historyId || null;
+    state.continuationSource = null;
     state.activePlanBatchId = episode.input?.episodePlanRef?.batchId || null;
     state.selectedPlanOptionId = episode.input?.episodePlanRef?.planId || null;
     const episodePlanBatch = (project.planBatches || []).find((batch) => batch.id === state.activePlanBatchId);
@@ -1316,6 +1709,12 @@
     const topic = state.topics[index];
     if (!topic) throw new Error("没有找到这个选题，请先重新生成选题库。");
     if (mode === "continue" && !state.script) throw new Error("还没有可续写的剧本，请先生成或恢复上一集。");
+    if (mode === "continue") {
+      state.continuationSource = { script: state.script, storyboard: [...state.storyboard], episodeId: state.currentEpisodeId };
+      setInputValue("episodeNumber", Math.max(Number(getInput().episodeNumber || 0) + 1, nextEpisodeNumber()));
+      state.currentEpisodeId = null;
+      state.reviewEpisodeId = null;
+    }
     applyTopicToInputs(topic);
     applyEpisodePlan({});
     state.planOptions = [];
@@ -1346,7 +1745,7 @@
     saveDraft(false);
     focusEpisodePlanning();
     setStatus(mode === "continue"
-      ? `已选择“${topic.title}”，请先确定下一集策划，再点击“续写下一集”`
+      ? `已选择“${topic.title}”，请先确定下一集策划和节拍表，再生成下一集`
       : `已选择“${topic.title}”，请先确定本集策划，再生成剧本`);
   }
 
@@ -1612,6 +2011,9 @@
     script.innovationPoints = Array.isArray(script.innovationPoints) ? script.innovationPoints : [];
     script.comedyBeats = Array.isArray(script.comedyBeats) ? script.comedyBeats : [];
     script.visualHighlights = Array.isArray(script.visualHighlights) ? script.visualHighlights : [];
+    script.assetIntegration = script.assetIntegration && typeof script.assetIntegration === "object" ? script.assetIntegration : { characters: [], memes: [] };
+    script.assetIntegration.characters = Array.isArray(script.assetIntegration.characters) ? script.assetIntegration.characters : [];
+    script.assetIntegration.memes = Array.isArray(script.assetIntegration.memes) ? script.assetIntegration.memes : [];
     script.hooks = Array.isArray(script.hooks) ? script.hooks : [];
     script.tags = Array.isArray(script.tags) ? script.tags : [];
     return {
@@ -1956,22 +2358,24 @@
   function restoreHistoryItem(index, keepInstruction = false) {
     const item = state.history[index];
     if (!item) throw new Error("没有找到这条生成记录。");
-    Object.entries(item.input || {}).forEach(([key, value]) => {
-      if (key === "continueInstruction" && keepInstruction) return;
-      setInputValue(key, value);
-    });
-    applyEpisodePlan(item.input?.episodePlan);
-    restoreActiveSelections(item.input);
     if (item.projectId && state.projects.some((project) => project.id === item.projectId)) {
       state.currentProjectId = item.projectId;
       const projectEpisode = currentProject()?.episodes?.find((episode) => episode.historyId === item.id);
       state.currentEpisodeId = projectEpisode?.id || null;
       state.reviewEpisodeId = state.currentEpisodeId;
     }
+    Object.entries(item.input || {}).forEach(([key, value]) => {
+      if (key === "continueInstruction" && keepInstruction) return;
+      setInputValue(key, value);
+    });
+    applyEpisodePlan(item.input?.episodePlan);
+    restoreActiveSelections(item.input);
+    restoreCreativeWorkflow(item.input);
     state.script = item.script;
     state.storyboard = item.storyboard || [];
     state.creativePack = item.creativePack || null;
     state.currentHistoryId = item.id || null;
+    state.continuationSource = null;
     state.activePlanBatchId = item.input?.episodePlanRef?.batchId || null;
     state.selectedPlanOptionId = item.input?.episodePlanRef?.planId || null;
     const historyPlanBatch = (currentProject()?.planBatches || []).find((batch) => batch.id === state.activePlanBatchId);
@@ -1996,7 +2400,7 @@
       "continueInstruction",
       `基于已恢复的《${state.script?.title || "上一集"}》继续生成下一集，承接结尾钩子，保留核心角色关系，不要重写上一集。`,
     );
-    await runGeneration("continue");
+    continueEpisode();
   }
 
   function toggleHistoryPin(index) {
@@ -2223,20 +2627,24 @@
   async function runGeneration(mode = "new") {
     const input = getInput();
     validateEpisodePlan(input);
-    if (mode === "continue" && !state.script) {
+    if (!state.beatSheetApproved || state.beatSheet.length !== 8) {
+      throw new Error("请先生成并确认一版完整的剧情节拍表，再生成正式剧本。");
+    }
+    const continuationSource = state.continuationSource;
+    if (mode === "continue" && !continuationSource?.script && !state.script) {
       throw new Error("还没有可续写的剧本，请先生成一集。");
     }
     const operation = beginAiOperation(mode === "continue" ? "剧本续写" : "剧本生成");
     try {
       setStatus(mode === "continue" ? "AI 续写剧本中..." : "AI 生成剧本中...");
-      if (mode === "continue") {
+      if (mode === "continue" && !continuationSource) {
         const nextNumber = Math.max(Number(input.episodeNumber || 0) + 1, nextEpisodeNumber());
         input.episodeNumber = nextNumber;
         setInputValue("episodeNumber", nextNumber);
         state.currentEpisodeId = null;
       }
-      const previousScript = mode === "continue" ? state.script : null;
-      const previousStoryboard = mode === "continue" ? state.storyboard : null;
+      const previousScript = mode === "continue" ? continuationSource?.script || state.script : null;
+      const previousStoryboard = mode === "continue" ? continuationSource?.storyboard || state.storyboard : null;
       const initialResponse = await apiRequest("/api/script", {
         input: {
           ...generationContext(input),
@@ -2262,6 +2670,7 @@
         generated: { ...generated, creativePack: state.creativePack },
       });
       state.currentHistoryId = item.id;
+      state.continuationSource = null;
       upsertProjectEpisode({ mode, input, response, generated: { ...generated, creativePack: state.creativePack }, historyId: item.id });
       persistHistory();
       renderScript();
@@ -2313,11 +2722,33 @@
   }
 
   async function generateAll() {
-    await runGeneration("new");
+    await runGeneration(state.continuationSource ? "continue" : "new");
   }
 
-  async function continueEpisode() {
-    await runGeneration("continue");
+  function continueEpisode() {
+    if (!state.script) throw new Error("请先生成或恢复上一集剧本。");
+    state.continuationSource = {
+      script: state.script,
+      storyboard: [...state.storyboard],
+      episodeId: state.currentEpisodeId,
+    };
+    const nextNumber = Math.max(Number(getInput().episodeNumber || 0) + 1, nextEpisodeNumber());
+    setInputValue("episodeNumber", nextNumber);
+    state.currentEpisodeId = null;
+    state.reviewEpisodeId = null;
+    applyEpisodePlan({});
+    state.planOptions = [];
+    state.selectedPlanOptionId = null;
+    state.activePlanBatchId = null;
+    state.beatSheet = [];
+    state.beatSheetApproved = false;
+    state.activeBeatSheetBatchId = null;
+    renderPlanSuggestions();
+    renderBeatSheet();
+    refreshCreationActions();
+    saveDraft(false);
+    document.querySelector(".episode-plan-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    setStatus(`已准备第 ${nextNumber} 集，请先选择角色与梗、确定策划和节拍表，再生成下一集`);
   }
 
   function parseCsv(text) {
@@ -2401,6 +2832,7 @@
       analysis: state.analysis,
       competitors: state.competitors,
       memeIdeas: state.memeIdeas,
+      continuationSource: state.continuationSource,
       savedAt: new Date().toISOString(),
     };
     try {
@@ -2428,11 +2860,13 @@
       });
       applyEpisodePlan(draft.input?.episodePlan);
       restoreActiveSelections(draft.input);
+      restoreCreativeWorkflow(draft.input);
       $("#competitorCsv").value = draft.competitorCsv || "";
       state.topics = normalizeTopicList(draft.topics);
       state.analysis = draft.analysis || null;
       state.competitors = Array.isArray(draft.competitors) ? draft.competitors : [];
       state.memeIdeas = Array.isArray(draft.memeIdeas) ? draft.memeIdeas : [];
+      state.continuationSource = draft.continuationSource && typeof draft.continuationSource === "object" ? draft.continuationSource : null;
       const episode = currentProjectEpisode();
       if (episode) {
         applyEpisodeVersion(episode, episode.activeVersionId);
@@ -2668,6 +3102,39 @@
         if (deleteButton) deleteCharacterCard(deleteButton.dataset.characterDelete);
       } catch (error) { reportError("角色卡操作", error); }
     });
+    $("#openAssetLibraryBtn").addEventListener("click", () => switchTab("assets"));
+    $("#characterPicker").addEventListener("click", (event) => {
+      const button = event.target.closest("[data-creative-character]");
+      if (button) toggleCreativeCharacter(button.dataset.creativeCharacter);
+    });
+    $("#memePicker").addEventListener("click", (event) => {
+      const button = event.target.closest("[data-creative-meme]");
+      if (button) toggleCreativeMeme(button.dataset.creativeMeme);
+    });
+    $("#suggestCreativeMixBtn").addEventListener("click", async () => {
+      try {
+        await suggestCreativeMixes();
+      } catch (error) {
+        reportError("角色与梗搭配", error);
+      }
+    });
+    $("#creativeMixResults").addEventListener("click", (event) => {
+      const button = event.target.closest("[data-creative-mix-option]");
+      if (!button) return;
+      try {
+        adoptCreativeMix(Number(button.dataset.creativeMixOption));
+      } catch (error) {
+        reportError("采用角色与梗搭配", error);
+      }
+    });
+    $("#creativeMixHistoryList").addEventListener("click", (event) => {
+      const button = event.target.closest("[data-creative-mix-restore]");
+      if (button) restoreCreativeMixBatch(button.dataset.creativeMixRestore);
+    });
+    $("#creativeMixBrief").addEventListener("input", () => {
+      markBeatSheetStale();
+      saveDraft(false);
+    });
     $("#autoPlanBtn").addEventListener("click", () => autoFillEpisodePlan());
     $("#suggestPlansBtn").addEventListener("click", async () => {
       try {
@@ -2694,8 +3161,29 @@
         reportError("恢复策划记录", error);
       }
     });
-    ["planOpeningHook", "planConflict", "planReversal", "planEndingSuspense", "planTargetEmotion"].forEach((id) => {
-      document.getElementById(id)?.addEventListener("input", refreshCreationActions);
+    ["planOpeningHook", "planConflict", "planProtagonistGoal", "planStakes", "planForcedChoice", "planReversal", "planRelationshipShift", "planEndingSuspense", "planTargetEmotion"].forEach((id) => {
+      document.getElementById(id)?.addEventListener("input", () => {
+        markBeatSheetStale();
+        refreshCreationActions();
+      });
+    });
+    $("#generateBeatSheetBtn").addEventListener("click", async () => {
+      try {
+        await generateBeatSheet();
+      } catch (error) {
+        reportError("剧情节拍表生成", error);
+      }
+    });
+    $("#approveBeatSheetBtn").addEventListener("click", () => {
+      try {
+        approveBeatSheet();
+      } catch (error) {
+        reportError("确认节拍表", error);
+      }
+    });
+    $("#beatSheetHistoryList").addEventListener("click", (event) => {
+      const button = event.target.closest("[data-beat-sheet-restore]");
+      if (button) restoreBeatSheetBatch(button.dataset.beatSheetRestore);
     });
     $("#checkContinuityBtn").addEventListener("click", async () => {
       try {
@@ -2718,6 +3206,10 @@
       renderBible();
       renderCharacterCards();
       renderMemeLibrary();
+      renderCreativeAssetPicker();
+      renderCreativeMixResults();
+      renderCreativeMixHistory();
+      renderBeatSheet();
       renderAssets();
       renderConsistency();
       saveDraft(false);
@@ -2796,7 +3288,7 @@
       const topicsButton = event.target.closest("[data-empty-topics]");
       if (!generateButton && !topicsButton) return;
       try {
-        if (generateButton) await generateAll();
+        if (generateButton) focusEpisodePlanning();
         if (topicsButton) switchTab("topics");
       } catch (error) {
         reportError(generateButton ? "生成" : "切换选题库", error);
@@ -2909,6 +3401,12 @@
       renderCreativePack();
       renderProject();
       renderBible();
+      renderCharacterCards();
+      renderMemeLibrary();
+      renderCreativeAssetPicker();
+      renderCreativeMixResults();
+      renderCreativeMixHistory();
+      renderBeatSheet();
       renderAssets();
       renderConsistency();
       renderExample();

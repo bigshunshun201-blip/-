@@ -3,7 +3,7 @@
   if (typeof module === "object" && module.exports) module.exports = api;
   if (root) root.RocoProjectDomain = api;
 })(typeof globalThis !== "undefined" ? globalThis : this, function () {
-  const PROJECT_SCHEMA_VERSION = 2;
+  const PROJECT_SCHEMA_VERSION = 3;
 
   function newId(prefix) {
     return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -18,6 +18,8 @@
       logline: "",
       bible: { ...defaultBible },
       planBatches: [],
+      creativeMixBatches: [],
+      beatSheetBatches: [],
       episodes: [],
       assets: [],
       memes: [],
@@ -126,6 +128,8 @@
       memes: Array.isArray(source.memes) ? source.memes : [],
       characterCards: Array.isArray(source.characterCards) ? source.characterCards : [],
       planBatches: Array.isArray(source.planBatches) ? source.planBatches : [],
+      creativeMixBatches: Array.isArray(source.creativeMixBatches) ? source.creativeMixBatches : [],
+      beatSheetBatches: Array.isArray(source.beatSheetBatches) ? source.beatSheetBatches : [],
     };
 
     if (project.schemaVersion < 2) {
@@ -150,6 +154,12 @@
       project.schemaVersion = 2;
     }
 
+    if (project.schemaVersion < 3) {
+      project.creativeMixBatches = [];
+      project.beatSheetBatches = [];
+      project.schemaVersion = 3;
+    }
+
     project.schemaVersion = PROJECT_SCHEMA_VERSION;
     return normalizeProjectEpisodes(project);
   }
@@ -164,7 +174,11 @@
     const labels = {
       openingHook: "开头钩子",
       conflict: "核心冲突",
+      protagonistGoal: "主角目标",
+      stakes: "失败代价",
+      forcedChoice: "被迫选择",
       reversal: "反转信息",
+      relationshipShift: "关系变化",
       endingSuspense: "结尾悬念",
       targetEmotion: "目标情绪",
     };

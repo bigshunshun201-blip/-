@@ -161,6 +161,39 @@
           </label>
         </section>
 
+        <section class="panel-section compact creative-mix-panel">
+          <div class="section-title">
+            <div>
+              <p class="eyebrow">本集创意搭配</p>
+              <h2>角色 × 梗</h2>
+            </div>
+            <button class="ghost-action compact-action" id="openAssetLibraryBtn" type="button">管理资产</button>
+          </div>
+          <p class="helper">直接在这里选择本集角色和梗。AI 只会引用已选内容，不会把整个资产库硬塞进剧本。</p>
+          <div class="creative-pickers">
+            <div>
+              <span class="picker-label">本集角色 <b id="activeCharacterCount">0</b></span>
+              <div class="asset-picker" id="characterPicker"></div>
+            </div>
+            <div>
+              <span class="picker-label">本集梗 <b id="activeMemeCount">0</b></span>
+              <div class="asset-picker" id="memePicker"></div>
+            </div>
+          </div>
+          <label>组合要求
+            <textarea id="creativeMixBrief" rows="3" placeholder="例如：让嘴硬的主角误用精灵的读心能力，把“已读乱回”变成会改变任务指令的世界规则；笑点必须反过来迫使主角作出选择。"></textarea>
+          </label>
+          <div class="mix-actions">
+            <div data-ai-model-switch aria-label="角色与梗搭配模型"></div>
+            <button class="secondary-action" id="suggestCreativeMixBtn" type="button">DeepSeek 搭配 3 套</button>
+          </div>
+          <div class="creative-mix-results" id="creativeMixResults" aria-live="polite" hidden></div>
+          <details class="plan-history" id="creativeMixHistory">
+            <summary>搭配记录 <span id="creativeMixHistoryCount">0</span></summary>
+            <div class="plan-history-list" id="creativeMixHistoryList"></div>
+          </details>
+        </section>
+
         <section class="panel-section compact episode-plan-panel">
           <div class="section-title"><h2>本集策划</h2></div>
           <p class="helper">不用从空白开始。系统可以根据上面的主题、角色和场景先搭好追更结构，你只需要挑选和修改。</p>
@@ -182,9 +215,32 @@
           </details>
           <label>开头钩子<textarea id="planOpeningHook" rows="2" placeholder="前 3 秒必须看见的异常、危机或反常信息"></textarea></label>
           <label>核心冲突<textarea id="planConflict" rows="2" placeholder="本集主角现在必须解决的对立问题"></textarea></label>
+          <details class="dramatic-causality" open>
+            <summary>人物选择与代价 <span>决定这一集有没有“戏”</span></summary>
+            <label>主角目标<textarea id="planProtagonistGoal" rows="2" placeholder="主角这一集具体想得到、保护或证明什么"></textarea></label>
+            <label>失败代价<textarea id="planStakes" rows="2" placeholder="如果失败，角色会立刻失去什么"></textarea></label>
+            <label>被迫选择<textarea id="planForcedChoice" rows="2" placeholder="主角必须在什么和什么之间二选一"></textarea></label>
+            <label>关系变化<textarea id="planRelationshipShift" rows="2" placeholder="本集结束时，两个人的关系从什么变成什么"></textarea></label>
+          </details>
           <label>反转信息<textarea id="planReversal" rows="2" placeholder="中后段改变观众判断的新信息"></textarea></label>
           <label>结尾悬念<textarea id="planEndingSuspense" rows="2" placeholder="下一集必须行动或回答的问题"></textarea></label>
           <label>目标情绪<input id="planTargetEmotion" placeholder="例如：压迫感 -> 反杀爽感 -> 悬念" /></label>
+          <div class="beat-sheet-builder">
+            <div class="beat-sheet-head">
+              <div>
+                <strong>剧情节拍表</strong>
+                <span>先看 8 个因果节点，再决定是否写成完整剧本。</span>
+              </div>
+              <button class="secondary-action" id="generateBeatSheetBtn" type="button">AI 生成节拍表</button>
+            </div>
+            <div class="beat-sheet-status" id="beatSheetStatus">策划完成后可生成</div>
+            <div class="beat-sheet-list" id="beatSheetList"></div>
+            <button class="ghost-action approve-beats" id="approveBeatSheetBtn" type="button" hidden>确认这版节拍表</button>
+            <details class="plan-history" id="beatSheetHistory">
+              <summary>节拍表记录 <span id="beatSheetHistoryCount">0</span></summary>
+              <div class="plan-history-list" id="beatSheetHistoryList"></div>
+            </details>
+          </div>
           <div class="action-stack episode-actions-stack" aria-label="创作动作">
             <p class="plan-ready-state" id="planReadyState" role="status">请先完整填写或采用一套本集策划</p>
             <div class="ai-model-line"><span>剧本 / 分镜模型</span><div data-ai-model-switch aria-label="剧本和分镜生成模型"></div></div>

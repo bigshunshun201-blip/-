@@ -34,10 +34,10 @@
         <div class="empty-hero">
           <img class="empty-hero-art" src="./assets/moonlit-wind-tower.png" alt="" aria-hidden="true" />
           <p class="eyebrow">月牙镇 · 本集创作入口</p>
-          <h3>先生成剧本，满意后再拆分镜。</h3>
-          <p>当前主题会进入剧本生成；选题库和热梗素材会辅助标题、冲突和台词方向。</p>
+          <h3>先搭角色与梗，再确认这集怎么演。</h3>
+          <p>选定本集角色和梗，确认人物选择与 8 个剧情节拍后，AI 才会写正式剧本。</p>
           <div class="empty-actions">
-            <button class="primary-action compact-action" data-empty-generate="true">AI 生成剧本</button>
+            <button class="primary-action compact-action" data-empty-generate="true">开始本集策划</button>
             <button class="ghost-action compact-action" data-empty-topics="true">查看选题库</button>
           </div>
         </div>
@@ -48,15 +48,25 @@
           <div><span>时长</span><strong>${escapeHtml(input.duration || 60)} 秒</strong></div>
         </div>
         <div class="workflow-strip">
-          <article><span>01</span><strong>生成剧本</strong><p>标题、梗概、人物、结构、台词和结尾钩子。</p></article>
-          <article><span>02</span><strong>拆分镜</strong><p>确认剧本可用后，再基于同一版剧本生成镜头表。</p></article>
-          <article><span>03</span><strong>筛候选</strong><p>生成记录会留档，方便入围、恢复和导出。</p></article>
+          <article><span>01</span><strong>搭角色与梗</strong><p>手动选择，或让 AI 从现有资产设计三套组合。</p></article>
+          <article><span>02</span><strong>确定本集策划</strong><p>明确目标、代价、被迫选择、反转和关系变化。</p></article>
+          <article><span>03</span><strong>确认剧情节拍</strong><p>先审 8 个因果节点，避免直接生成一篇完整故事。</p></article>
+          <article><span>04</span><strong>生成剧本与分镜</strong><p>剧本满意后，再为同一版本生成对应视频段。</p></article>
         </div>
       </section>
     `;
   }
 
   function script(scriptValue) {
+    const integrations = scriptValue.assetIntegration || {};
+    const characterUses = (integrations.characters || []).map((item) => ({
+      name: item.name,
+      description: `${item.storyFunction}；关键选择：${item.choice}`,
+    }));
+    const memeUses = (integrations.memes || []).map((item) => ({
+      name: `${item.name} · ${item.triggerRole}`,
+      description: `铺垫：${item.setup}；回扣：${item.payoff}；推动剧情：${item.plotEffect}`,
+    }));
     return `
       <section class="content-block">
         <h3>故事梗概</h3>
@@ -71,6 +81,8 @@
       ${(scriptValue.innovationPoints || []).length ? renderList("创新机制", scriptValue.innovationPoints) : ""}
       ${(scriptValue.comedyBeats || []).length ? renderList("笑点设计", scriptValue.comedyBeats) : ""}
       ${(scriptValue.visualHighlights || []).length ? renderList("视觉爆点", scriptValue.visualHighlights) : ""}
+      ${characterUses.length ? renderList("角色戏剧任务", characterUses) : ""}
+      ${memeUses.length ? renderList("梗的铺垫与回扣", memeUses) : ""}
       ${renderList("爆点与结尾钩子", scriptValue.hooks || [])}
     `;
   }
