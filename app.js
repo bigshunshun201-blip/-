@@ -43,6 +43,7 @@
   const newId = projectDomain.newId;
   const activeEpisodeVersion = projectDomain.activeEpisodeVersion;
   const applyEpisodeVersion = projectDomain.applyEpisodeVersion;
+  const applyStoryboardVersion = projectDomain.applyStoryboardVersion;
   const normalizeProjectEpisodes = projectDomain.normalizeProjectEpisodes;
   const validateEpisodePlan = projectDomain.validateEpisodePlan;
   const deriveReviewInsights = projectDomain.deriveReviewInsights;
@@ -111,13 +112,13 @@
     }
     if (storyboardButton) {
       storyboardButton.disabled = isBusy || !hasScript;
-      storyboardButton.title = hasScript ? "根据当前剧本生成对应分镜" : "请先生成并确认一版剧本";
+      storyboardButton.title = hasScript ? "仅根据当前剧本版本，生成每段约 10 秒的对应分镜" : "请先生成并确认一版剧本";
     }
     if (continueButton) {
       continueButton.disabled = isBusy || !hasScript;
       continueButton.title = hasScript ? "承接当前剧本的结尾钩子续写下一集" : "请先生成一版剧本";
     }
-    ["checkContinuityBtn", "regenerateTopicsBtn", "suggestPlansBtn", "autoPlanBtn", "projectSelect", "newProjectBtn", "importProjectBtn"].forEach((id) => {
+    ["checkContinuityBtn", "regenerateTopicsBtn", "suggestPlansBtn", "autoPlanBtn", "generateBibleBtn", "applyBibleTemplateBtn", "projectSelect", "newProjectBtn", "importProjectBtn"].forEach((id) => {
       const control = document.getElementById(id);
       if (control) control.disabled = isBusy;
     });
@@ -489,6 +490,69 @@
     Object.entries(fields).forEach(([id, value]) => setInputValue(id, value || ""));
   }
 
+  function bibleTemplate(templateKey) {
+    const input = getInput();
+    const names = input.roles
+      .split(/[\n；;,，]+/)
+      .map((item) => item.split(/[：:]/)[0].trim())
+      .filter(Boolean);
+    const lead = names[0] || "主角洛克";
+    const partner = names[1] || "搭档精灵";
+    const scene = input.scene || "当前探索区域";
+    const shared = {
+      abilities: `${partner}：核心能力只能解决局部问题；连续使用会进入疲劳状态，情绪失控时准确率下降。在${scene}之外使用时效果减弱，不能突然获得未铺垫的新能力。`,
+      worldRules: `1. 每个区域任务都要付出可见代价，奖励不能凭空出现。\n2. 传送点只能连接已经探索并稳定的区域，危机中强行传送会丢失一件关键物品。\n3. 精灵能拒绝指令，关系变化会影响配合，但不能直接突破能力边界。\n4. 区域首领与环境规则绑定，必须先理解场景机制，再解决战斗或任务。`,
+      hookRules: "前 3 秒先展示异常结果，不解释背景；每个 10 秒视频段只完成一个信息或动作变化，段尾保留明确的动作承接点；中段至少两次改变观众判断；结尾只揭开一个新事实，并留下下一集必须执行的问题。",
+    };
+    const templates = {
+      comedy: {
+        characters: `${lead}：行动快于思考，想证明自己能独立完成区域任务；嘴硬、怕丢脸，越慌越装镇定；底线是不拿精灵当工具。\n${partner}：观察细、吐槽准，表面嫌弃但会在关键时刻补救；弱点是过度相信自己的判断；不能替${lead}无代价收拾残局。`,
+        relations: `${lead} ↔ ${partner}：互相嫌弃式搭档，当前信任中等；共同秘密是第一次任务失败并非操作失误；每集通过一次“误会 -> 配合 -> 留下新账”推进关系。`,
+        antagonist: "错序商人：收集冒险者犯错后产生的情绪能量，擅长把正常任务规则错位；目标是让所有人依赖他的捷径，底线是不直接伤害精灵；与主角的私人连接是他掌握第一次任务失败的完整记录。",
+        mainConflict: `${lead}想靠捷径成为可靠的探索者，却不断发现所谓捷径正在破坏${scene}的任务秩序。主线依次升级为个人翻车、搭档失信、区域规则混乱、必须公开第一次失败真相；阶段终点是两人主动拒绝捷径，但发现幕后规则仍在扩散。`,
+      },
+      mystery: {
+        characters: `${lead}：执着寻找一段被删去的探索记录，冷静外表下害怕再次失去伙伴；习惯先观察异常细节；底线是不牺牲无辜精灵换取真相。\n${partner}：能感知环境中的情绪残响，但每次读取都会短暂混淆自己的记忆；不愿承认害怕被替代。`,
+        relations: `${lead} ↔ ${partner}：高度依赖却互相隐瞒；共同秘密是两人都见过同一段不存在于地图的道路；每次使用残响能力，信任和真相必须一增一减。`,
+        antagonist: "回声收藏家：相信痛苦记忆会阻碍精灵成长，因此偷偷封存他人的记忆；手段温和但后果危险；底线是不伪造记忆；他曾救过搭档精灵，因此双方不是纯粹敌对。",
+        mainConflict: `${lead}追查${scene}不断出现的“第二份探索记录”，逐步发现记录、搭档记忆和区域任务来自同一场旧事故。冲突从真假记录升级到关系互疑、能力代价、区域共同记忆被抽走；阶段终点是找回真相，却必须决定是否公开。`,
+      },
+      ensemble: {
+        characters: `${lead}：临时小队发起人，渴望得到所有人认可，擅长冲锋却不擅长分配责任；底线是不抛下掉队成员。\n${partner}：团队节奏控制者，能力稳定但不愿成为谁的附属；最怕自己的判断拖累全队。\n其他成员：每人必须拥有独立目标、能力限制和一次主导解决问题的机会。`,
+        relations: `${lead} ↔ ${partner}：从指挥与执行转为平等搭档；小队成员之间存在资源竞争和共同亏欠；每集至少推进一组关系，不允许所有人同时无条件支持主角。`,
+        antagonist: "逐风裁定者：通过极端任务筛选所谓最强探索队，目标是阻止更大区域灾害；手段是制造互斥选择，底线是遵守自己公布的规则；他与队内一名成员有未公开的师徒关系。",
+        mainConflict: `临时小队要在${scene}完成一系列越来越相互矛盾的区域挑战。主线从争夺队内位置升级为能力克制、秘密曝光、团队必须淘汰一人；阶段终点是全员拒绝裁定规则，自创一条代价更高的新路线。`,
+      },
+    };
+    return { ...shared, ...(templates[templateKey] || templates.comedy) };
+  }
+
+  async function applyBibleDraft(bible, sourceLabel) {
+    const keys = ["characters", "abilities", "relations", "antagonist", "worldRules", "mainConflict", "hookRules"];
+    if (!bible || keys.some((key) => !String(bible[key] || "").trim())) throw new Error("短剧圣经草案不完整，请重新生成。");
+    const project = currentProject();
+    project.bible = Object.fromEntries(keys.map((key) => [key, String(bible[key]).trim()]));
+    project.updatedAt = new Date().toISOString();
+    await persistProjects();
+    renderBible();
+    renderProject();
+    setStatus(`${sourceLabel}已写入并保存到当前项目，可以继续修改`);
+  }
+
+  async function generateBibleDraft() {
+    const operation = beginAiOperation("短剧圣经起草");
+    try {
+      setStatus("DeepSeek 正在根据当前角色、场景和系列方向起草短剧圣经...");
+      const initialResponse = await apiRequest("/api/bible", { input: generationContext(getInput()) });
+      const response = await resolveAiJob(initialResponse, "短剧圣经");
+      assertActiveAiOperation(operation);
+      await applyBibleDraft(response.result?.bible, "DeepSeek 短剧圣经草案");
+      setStatus(`短剧圣经已生成并保存 ${nowTime()} · ${response.model || "model"}${usageSuffix(response)}`);
+    } finally {
+      endAiOperation(operation);
+    }
+  }
+
   function renderReviewForm() {
     const project = currentProject();
     const select = $("#reviewEpisodeSelect");
@@ -547,7 +611,7 @@
         <article class="episode-card">
           <div class="episode-number">EP ${escapeHtml(episode.episodeNumber)}</div>
           <div>
-            <div class="history-meta"><span>${escapeHtml(episode.review?.status || "draft")}</span><span>${episode.storyboard?.length || 0} 镜</span><span>${(episode.versions || []).length} 个版本</span></div>
+            <div class="history-meta"><span>${escapeHtml(episode.review?.status || "draft")}</span><span>${episode.storyboard?.length || 0} 个视频段</span><span>${(episode.versions || []).length} 个剧本版本</span></div>
             <h4>${escapeHtml(episode.script?.title || "待生成剧本")}</h4>
             <p>${escapeHtml(episode.script?.synopsis || "本集还没有完成剧本。")}</p>
             <div class="episode-versions">${(episode.versions || []).map((version, versionIndex) => `<button class="small-action ${version.id === episode.activeVersionId ? "is-active-version" : ""}" data-project-episode-version="${escapeHtml(episode.id)}" data-project-version-id="${escapeHtml(version.id)}">v${versionIndex + 1}</button>`).join("")}</div>
@@ -647,7 +711,12 @@
         normalizeProjectEpisodes(project);
         project.episodes.forEach((episode) => {
           episode.id = newId("episode");
-          (episode.versions || []).forEach((version) => { version.id = newId("version"); });
+          (episode.versions || []).forEach((version) => {
+            version.id = newId("version");
+            (version.storyboardVersions || []).forEach((storyboardVersion) => {
+              storyboardVersion.scriptVersionId = version.id;
+            });
+          });
           episode.activeVersionId = episode.versions?.at(-1)?.id || null;
           applyEpisodeVersion(episode, episode.activeVersionId);
         });
@@ -1207,7 +1276,12 @@
       script,
       storyboard: result.storyboard.map((shot, index) => ({
         shot: shot.shot || index + 1,
+        timeRange: shot.timeRange || "",
         seconds: shot.seconds || "",
+        segmentGoal: shot.segmentGoal || "",
+        continuityIn: shot.continuityIn || "",
+        continuityOut: shot.continuityOut || "",
+        beatBreakdown: Array.isArray(shot.beatBreakdown) ? shot.beatBreakdown : [],
         visual: shot.visual || "",
         characters: shot.characters || "",
         scene: shot.scene || "",
@@ -1251,7 +1325,15 @@
     }
     return storyboard.map((shot, index) => ({
       shot: shot.shot || index + 1,
+      timeRange: shot.timeRange || "",
       seconds: shot.seconds || "",
+      segmentGoal: shot.segmentGoal || "",
+      continuityIn: shot.continuityIn || "",
+      continuityOut: shot.continuityOut || "",
+      beatBreakdown: (Array.isArray(shot.beatBreakdown) ? shot.beatBreakdown : []).map((beat) => ({
+        range: beat?.range || "",
+        content: beat?.content || "",
+      })),
       visual: shot.visual || "",
       characters: shot.characters || "",
       scene: shot.scene || "",
@@ -1292,6 +1374,42 @@
   function renderStoryboard() {
     refreshCreationActions();
     $("#storyboardTable").innerHTML = uiTemplates.storyboard(state.storyboard, Boolean(state.script));
+    renderStoryboardHistory();
+  }
+
+  function renderStoryboardHistory() {
+    const target = $("#storyboardHistory");
+    if (!target) return;
+    const episode = currentProjectEpisode();
+    const scriptVersion = activeEpisodeVersion(episode);
+    const versions = scriptVersion?.storyboardVersions || [];
+    if (!state.script) {
+      target.innerHTML = "";
+      return;
+    }
+    if (!versions.length) {
+      target.innerHTML = `<span>《${escapeHtml(state.script.title || "当前剧本")}》还没有对应分镜版本，首次生成后会自动留档。</span>`;
+      return;
+    }
+    const scriptVersionIndex = (episode.versions || []).findIndex((version) => version.id === episode.activeVersionId) + 1;
+    target.innerHTML = `<span>《${escapeHtml(state.script.title || "当前剧本")}》剧本 v${scriptVersionIndex} 对应分镜：</span>${versions.map((version, index) => {
+      const total = (version.storyboard || []).reduce((sum, segment) => sum + Number(segment.seconds || 0), 0);
+      const createdAt = new Date(version.createdAt).toLocaleString("zh-CN", { hour12: false });
+      return `<button class="small-action ${version.id === scriptVersion.activeStoryboardVersionId ? "is-active-version" : ""}" type="button" data-storyboard-version="${escapeHtml(version.id)}" title="${escapeHtml(createdAt)} · ${escapeHtml(version.model || "model")}">分镜 v${index + 1} · ${(version.storyboard || []).length} 段/${total}秒</button>`;
+    }).join("")}`;
+  }
+
+  function restoreStoryboardVersion(id) {
+    const episode = currentProjectEpisode();
+    const restored = applyStoryboardVersion(episode, id);
+    if (!restored) throw new Error("没有找到这个分镜版本，或它不属于当前剧本版本。");
+    state.storyboard = restored.storyboard || [];
+    currentProject().updatedAt = episode.updatedAt;
+    persistProjects();
+    renderStoryboard();
+    renderExample();
+    saveDraft(false);
+    setStatus(`已恢复当前剧本对应的分镜版本，共 ${state.storyboard.length} 个视频段`);
   }
 
   function updateStoryboardProductionField(index, field, value) {
@@ -1302,6 +1420,8 @@
     const version = activeEpisodeVersion(episode);
     if (episode && version) {
       version.storyboard = state.storyboard;
+      const storyboardVersion = (version.storyboardVersions || []).find((item) => item.id === version.activeStoryboardVersionId);
+      if (storyboardVersion) storyboardVersion.storyboard = state.storyboard;
       applyEpisodeVersion(episode, version.id);
       episode.updatedAt = new Date().toISOString();
       currentProject().updatedAt = new Date().toISOString();
@@ -1672,7 +1792,7 @@
       </section>
       <section class="content-block">
         <h3>对应分镜</h3>
-        <p>共 ${state.storyboard.length} 个镜头，总时长 ${state.storyboard.reduce((sum, shot) => sum + Number(shot.seconds), 0)} 秒。首镜：${escapeHtml(state.storyboard[0].visual)}；尾镜：${escapeHtml(state.storyboard[state.storyboard.length - 1].subtitle)}。</p>
+        <p>共 ${state.storyboard.length} 个连续视频段，总时长 ${state.storyboard.reduce((sum, shot) => sum + Number(shot.seconds), 0)} 秒。首段：${escapeHtml(state.storyboard[0].visual)}；尾段：${escapeHtml(state.storyboard[state.storyboard.length - 1].subtitle)}。</p>
       </section>
       <section class="content-block">
         <h3>选题参考</h3>
@@ -1807,7 +1927,7 @@
       saveDraft(false);
       pulseResult();
       switchTab("storyboard");
-      setStatus(`AI 已生成分镜 ${nowTime()} · ${response.source || "provider"} · ${response.model || "model"}${usageSuffix(response)}`);
+      setStatus(`AI 已生成 ${state.storyboard.length} 个连续视频段 ${nowTime()} · ${response.source || "provider"} · ${response.model || "model"}${usageSuffix(response)}`);
     } finally {
       endAiOperation(operation);
     }
@@ -1998,7 +2118,7 @@
       "## 剧本",
       scriptText,
       "",
-      "## 分镜",
+      "## 10 秒视频段分镜",
       storyboardText,
       "",
       "## 选题库",
@@ -2021,8 +2141,15 @@
   function historyItemMarkdown(item, index) {
     const storyboardText = (item.storyboard || [])
       .map(
-        (shot) =>
-          `${shot.shot}. ${shot.seconds || ""}秒｜${shot.visual || ""}｜${shot.line || ""}｜${shot.subtitle || ""}`,
+        (shot) => [
+          `#### 第 ${shot.shot} 段｜${shot.timeRange || `${shot.seconds || ""}秒`}`,
+          `- 本段任务：${shot.segmentGoal || ""}`,
+          `- 画面动作：${shot.visual || ""}；${shot.action || ""}`,
+          `- 台词字幕：${shot.line || ""}；${shot.subtitle || ""}`,
+          `- 承接入点：${shot.continuityIn || ""}`,
+          `- 承接出点：${shot.continuityOut || ""}`,
+          `- AI 视频提示词：${shot.visualPrompt || ""}`,
+        ].join("\n"),
       )
       .join("\n");
     return [
@@ -2039,7 +2166,7 @@
       "### 结尾钩子",
       (item.script?.hooks || []).map((hook) => `- ${formatItem(hook)}`).join("\n"),
       "",
-      "### 分镜",
+      "### 10 秒视频段分镜",
       storyboardText,
     ].join("\n");
   }
@@ -2080,6 +2207,21 @@
       event.target.value = "";
     });
     $("#saveBibleBtn").addEventListener("click", saveBible);
+    $("#applyBibleTemplateBtn").addEventListener("click", async () => {
+      try {
+        const label = $("#bibleTemplate").selectedOptions[0]?.textContent || "系列模板";
+        await applyBibleDraft(bibleTemplate($("#bibleTemplate").value), `${label}模板`);
+      } catch (error) {
+        reportError("套用短剧圣经模板", error);
+      }
+    });
+    $("#generateBibleBtn").addEventListener("click", async () => {
+      try {
+        await generateBibleDraft();
+      } catch (error) {
+        reportError("短剧圣经生成", error);
+      }
+    });
     $("#autoPlanBtn").addEventListener("click", () => autoFillEpisodePlan());
     $("#suggestPlansBtn").addEventListener("click", async () => {
       try {
@@ -2171,6 +2313,15 @@
       const index = Number(event.target.dataset.shotIndex);
       if (!field || Number.isNaN(index)) return;
       updateStoryboardProductionField(index, field, event.target.value);
+    });
+    $("#storyboardHistory").addEventListener("click", (event) => {
+      const button = event.target.closest("[data-storyboard-version]");
+      if (!button) return;
+      try {
+        restoreStoryboardVersion(button.dataset.storyboardVersion);
+      } catch (error) {
+        reportError("恢复分镜版本", error);
+      }
     });
     $("#continueBtn").addEventListener("click", async () => {
       try {

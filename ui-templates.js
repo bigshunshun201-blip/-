@@ -86,20 +86,25 @@
   }
 
   function storyboard(storyboardRows = [], hasScript = false) {
-    if (!storyboardRows.length && hasScript) {
-      return `<p class="helper">当前剧本还没有生成分镜。确认剧本方向可用后，点击“AI 生成分镜”。</p>`;
+    if (!storyboardRows.length) {
+      return hasScript
+        ? `<p class="helper">当前剧本版本还没有对应分镜。确认剧本方向可用后，点击“基于本版剧本生成 10 秒分镜”。</p>`
+        : `<p class="helper">请先生成或恢复一个剧本版本，再为它生成对应的 10 秒视频段分镜。</p>`;
     }
     const statusOptions = ["已有", "待制作", "待采集"];
+    const beats = (items = []) => items.map((beat) => `<div class="segment-beat"><strong>${escapeHtml(beat.range)}</strong><span>${escapeHtml(beat.content)}</span></div>`).join("");
     return `
       <table class="storyboard-production-table">
-        <thead><tr><th>镜头</th><th>时长</th><th>角色 / 场景</th><th>画面与动作</th><th>台词 / 字幕</th><th>镜头 / 声音</th><th>画面提示词</th><th>关联资产</th><th>制作备注</th><th>素材状态</th></tr></thead>
+        <thead><tr><th>视频段</th><th>本段任务</th><th>角色 / 场景</th><th>段内节拍与动作</th><th>台词 / 字幕</th><th>镜头 / 声音</th><th>首尾连续性</th><th>AI 视频提示词</th><th>关联资产</th><th>制作备注</th><th>素材状态</th></tr></thead>
         <tbody>${storyboardRows.map((shot, index) => `
           <tr>
-            <td>${escapeHtml(shot.shot)}</td><td>${escapeHtml(shot.seconds)} 秒</td>
+            <td><strong>第 ${escapeHtml(shot.shot)} 段</strong><br>${escapeHtml(shot.timeRange)}<br><small>${escapeHtml(shot.seconds)} 秒</small></td>
+            <td>${escapeHtml(shot.segmentGoal)}</td>
             <td><strong>${escapeHtml(shot.characters)}</strong><br>${escapeHtml(shot.scene)}</td>
-            <td>${escapeHtml(shot.visual)}<br><small>${escapeHtml(shot.action)}</small></td>
+            <td>${beats(shot.beatBreakdown)}<small>${escapeHtml(shot.visual)}；${escapeHtml(shot.action)}</small></td>
             <td>${escapeHtml(shot.line)}<br><small>${escapeHtml(shot.subtitle)}</small></td>
             <td>${escapeHtml(shot.scale)} · ${escapeHtml(shot.movement)}<br><small>${escapeHtml(shot.sound)}</small></td>
+            <td><small>承接入点</small><br>${escapeHtml(shot.continuityIn)}<br><small>承接出点</small><br>${escapeHtml(shot.continuityOut)}</td>
             <td>${escapeHtml(shot.visualPrompt)}</td>
             <td><input data-shot-field="assetLinks" data-shot-index="${index}" value="${escapeHtml(shot.assetLinks)}" placeholder="资产库名称 / 待采集素材" /></td>
             <td><input data-shot-field="assetNote" data-shot-index="${index}" value="${escapeHtml(shot.assetNote)}" placeholder="负责人、截止时间或备注" /></td>
@@ -112,7 +117,7 @@
     return [
       item.mode === "continue" ? "续写" : "新生成",
       item.model || "model",
-      `${item.storyboard?.length || 0}镜`,
+      `${item.storyboard?.length || 0}个视频段`,
       `${item.input?.duration || "-"}秒`,
     ].filter(Boolean);
   }

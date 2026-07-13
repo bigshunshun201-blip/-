@@ -12,6 +12,7 @@ const fallbackDailyUsage = new Map();
 const AI_PATH_COST = new Map([
   ["/api/script", 1],
   ["/api/storyboard", 1],
+  ["/api/bible", 1],
   ["/api/plans", 1],
   ["/api/topics", 1],
   ["/api/continuity-check", 1],
@@ -293,19 +294,22 @@ function storyboardPrompt(input) {
   const script = payload.script || payload.previousScript;
   const names = roleNames(payload);
   const canon = bibleContext(payload);
+  const segmentCount = Math.ceil(payload.duration / 10);
+  const finalSegmentSeconds = payload.duration - ((segmentCount - 1) * 10);
   return `你是抖音竖屏 9:16 短剧分镜导演。只根据给定剧本生成分镜，不能改写或另起剧情。只输出严格 JSON，不要 Markdown 或解释。
 
 要求：
 1. 必须延续剧本的标题、冲突、反转、结尾钩子及核心角色；不新增无关主角。
-2. 共 6 个镜头，前 3 秒为强画面钩子，总时长尽量接近 ${payload.duration} 秒。
-3. 每个镜头都可直接拍摄/剪辑，字幕短，不超过两行；镜头节奏紧凑，适合手机观看。
+2. 整集 ${payload.duration} 秒必须拆成正好 ${segmentCount} 个连续视频段。前 ${Math.max(0, segmentCount - 1)} 段各 10 秒，最后一段 ${finalSegmentSeconds} 秒；每段对应一次独立的 AI 视频生成任务。
+3. 每个视频段内部用 beatBreakdown 拆成 2-4 个连续节拍，时间必须覆盖该段全部时长；第 1 段的前 3 秒必须完成强画面钩子。
 4. 场景为《洛克王国：世界》手游开放世界，主要场景：${compact(payload.scene)}。
 5. 必须使用这些角色名：${names.length ? names.join("、") : "以剧本为准"}。
 6. 必须服从短剧圣经：镜头不能让角色使用超出能力边界的能力，角色关系和反派线索必须延续已完成集数。
-7. 每个镜头都必须填写角色、场景、动作、台词/旁白、镜头景别、时长、画面提示词、音效/配乐提示、关联资产和素材状态；素材状态只能是“已有”“待制作”“待采集”。
-8. 必须把剧本中的 visualHighlights 和 comedyBeats 落到具体镜头；至少 3 镜有清晰的动作变化、遮挡转场、道具反应或环境异变，避免只写“角色震惊”“光芒闪烁”。
+7. 每段都必须填写段目标、承接入点、承接出点、角色、场景、动作、台词/旁白、景别、画面提示词、音效/配乐、关联资产和素材状态；素材状态只能是“已有”“待制作”“待采集”。
+8. 必须把剧本中的 visualHighlights 和 comedyBeats 落到具体视频段；至少 3 段有清晰的动作变化、遮挡转场、道具反应或环境异变，避免只写“角色震惊”“光芒闪烁”。
 9. visualPrompt 必须包含前景、中景、背景、主体动作、明暗或色彩反差、9:16 字幕安全区；音效必须与画面动作卡点。
-10. 相邻镜头的角色位置、道具状态和动作结果要连续，最后一镜必须完整呈现剧本结尾悬念，不能擅自增加新反转。
+10. 每段 visualPrompt 要能脱离上下文直接交给视频模型，但 continuityIn 和 continuityOut 必须精确描述首尾人物位置、朝向、表情、道具和环境状态，使相邻视频段能无缝拼接。
+11. 所有视频段合起来必须完整实现当前剧本；最后一段必须呈现剧本结尾悬念，不能擅自增加新反转或混入其他剧本内容。
 
 项目连续性资料：${canon}
 
@@ -314,9 +318,10 @@ function storyboardPrompt(input) {
 返回结构：
 {
   "storyboard": [
-    {"shot":1,"seconds":3,"characters":"出镜角色","scene":"场景","visual":"画面内容","action":"角色动作","line":"台词/旁白","scale":"景别","movement":"镜头运动","sound":"音效/配乐建议","subtitle":"字幕文案","visualPrompt":"可给绘图/素材检索使用的画面提示词","assetLinks":"资产库名称或待采集素材","assetNote":"制作备注","assetStatus":"待制作"}
+    {"shot":1,"timeRange":"00-10秒","seconds":10,"segmentGoal":"这10秒推进的唯一剧情任务","continuityIn":"段首人物、道具和环境状态","continuityOut":"段尾人物、道具和环境状态","beatBreakdown":[{"range":"0-3秒","content":"画面、动作与信息变化"},{"range":"3-10秒","content":"画面、动作与信息变化"}],"characters":"出镜角色","scene":"场景","visual":"整段画面概述","action":"角色动作链","line":"台词/旁白","scale":"景别组合","movement":"镜头运动","sound":"音效/配乐建议","subtitle":"字幕文案","visualPrompt":"可直接给AI视频模型使用的完整9:16提示词","assetLinks":"资产库名称或待采集素材","assetNote":"制作备注","assetStatus":"待制作"}
   ]
-}`;
+}
+限制：storyboard 必须正好 ${segmentCount} 条，按时间顺序排列；每段内容只能来自当前剧本。`;
 }
 
 function continuityPrompt(input) {
@@ -343,6 +348,39 @@ function continuityPrompt(input) {
   "nextEpisodeCarryover":"下一集承接提示"
 }
 限制：checks 必须包含“角色性格”“精灵能力”“人物关系”“悬念承接”四项；score 为 0-100 整数。`;
+}
+
+function biblePrompt(input) {
+  const payload = normalizeInput(input);
+  return `你是连续短剧的系列开发总编。请根据当前创作方向，为《洛克王国：世界》手游粉丝向短剧起草一份可以连续使用 8-12 集的“短剧圣经”。只输出严格 JSON，不要 Markdown 或解释。
+
+目标：创作者即使还没有完整想法，也能直接以这份圣经生成第一集；内容必须具体、可执行，后续剧本和分镜可以据此检查一致性。
+
+要求：
+1. 使用当前输入里的具体角色、精灵和手游场景，不要默认替换成迪莫、小洛克或黑衣人；没有填写时再创造 2-4 个明确角色。
+2. 角色设定必须包含欲望、性格底色、弱点、口头习惯和绝不能做的事。
+3. 每只核心精灵的能力必须写清效果、代价、冷却或场景限制，禁止无代价升级。
+4. 关系要写明当前状态、共同秘密和未来可变化的方向；反派要有合理目标、手段、底线和私人连接。
+5. 世界规则必须服务剧情，至少给出 4 条可反复制造冲突的规则；使用《洛克王国：世界》手游开放世界语境，不套旧页游剧情。
+6. 主线矛盾应包含起点、三次升级和阶段终点，但不能提前写死每集剧情。
+7. 钩子规则必须明确前 3 秒、中段信息变化、10 秒视频段衔接和结尾悬念的执行标准。
+8. 当前圣经若只是泛用占位文本，可以重写；若已有具体人名和规则，要继承而不是推翻。
+
+当前项目与已有圣经：${bibleContext(payload)}
+当前创作输入：${creativeInputSummary(payload)}
+
+返回结构：
+{
+  "bible": {
+    "characters":"按角色分行的具体设定",
+    "abilities":"按精灵分行的能力边界",
+    "relations":"角色关系、秘密与变化方向",
+    "antagonist":"反派目标、手段、底线与私人连接",
+    "worldRules":"至少4条固定世界规则",
+    "mainConflict":"系列主线起点、三次升级和阶段终点",
+    "hookRules":"前3秒、中段、10秒段衔接与结尾钩子规则"
+  }
+}`;
 }
 
 function plansPrompt(input) {
@@ -422,27 +460,42 @@ function normalizeScript(result) {
   return { script };
 }
 
-function normalizeStoryboard(result) {
+function normalizeStoryboard(result, duration) {
   const source = Array.isArray(result?.storyboard) ? result.storyboard : Array.isArray(result) ? result : [];
   if (!source.length) throw new Error("AI 没有返回可用分镜");
+  const targetDuration = Math.max(15, Math.min(Number(duration || source.length * 10), 180));
+  const expectedSegments = Math.ceil(targetDuration / 10);
+  if (source.length < expectedSegments) throw new Error(`AI 只返回了 ${source.length} 个视频段，需要 ${expectedSegments} 个，请重新生成`);
   return {
-    storyboard: source.slice(0, 6).map((shot, index) => ({
-      shot: shot.shot || index + 1,
-      seconds: shot.seconds || "",
-      visual: shot.visual || "",
-      characters: shot.characters || "",
-      scene: shot.scene || "",
-      action: shot.action || "",
-      line: shot.line || "",
-      scale: shot.scale || "",
-      movement: shot.movement || "",
-      sound: shot.sound || "",
-      subtitle: shot.subtitle || "",
-      visualPrompt: shot.visualPrompt || "",
-      assetLinks: shot.assetLinks || "",
-      assetNote: shot.assetNote || "",
-      assetStatus: ["已有", "待制作", "待采集"].includes(shot.assetStatus) ? shot.assetStatus : "待制作",
-    })),
+    storyboard: source.slice(0, expectedSegments).map((shot, index) => {
+      const seconds = index === expectedSegments - 1 ? targetDuration - (index * 10) : 10;
+      const start = index * 10;
+      return {
+        shot: index + 1,
+        timeRange: `${String(start).padStart(2, "0")}-${String(start + seconds).padStart(2, "0")}秒`,
+        seconds,
+        segmentGoal: String(shot.segmentGoal || ""),
+        continuityIn: String(shot.continuityIn || ""),
+        continuityOut: String(shot.continuityOut || ""),
+        beatBreakdown: (Array.isArray(shot.beatBreakdown) ? shot.beatBreakdown : []).slice(0, 4).map((beat) => ({
+          range: String(beat?.range || ""),
+          content: String(beat?.content || ""),
+        })),
+        visual: shot.visual || "",
+        characters: shot.characters || "",
+        scene: shot.scene || "",
+        action: shot.action || "",
+        line: shot.line || "",
+        scale: shot.scale || "",
+        movement: shot.movement || "",
+        sound: shot.sound || "",
+        subtitle: shot.subtitle || "",
+        visualPrompt: shot.visualPrompt || "",
+        assetLinks: shot.assetLinks || "",
+        assetNote: shot.assetNote || "",
+        assetStatus: ["已有", "待制作", "待采集"].includes(shot.assetStatus) ? shot.assetStatus : "待制作",
+      };
+    }),
   };
 }
 
@@ -465,6 +518,15 @@ function normalizeContinuity(result) {
     mustPreserve: Array.isArray(report.mustPreserve) ? report.mustPreserve.map(String).slice(0, 5) : [],
     nextEpisodeCarryover: String(report.nextEpisodeCarryover || ""),
   };
+}
+
+function normalizeBible(result) {
+  const bible = result?.bible && typeof result.bible === "object" ? result.bible : result;
+  const keys = ["characters", "abilities", "relations", "antagonist", "worldRules", "mainConflict", "hookRules"];
+  if (!bible || typeof bible !== "object") throw new Error("AI 没有返回可用短剧圣经");
+  const normalized = Object.fromEntries(keys.map((key) => [key, String(bible[key] || "").trim()]));
+  if (keys.some((key) => !normalized[key])) throw new Error("AI 返回的短剧圣经不完整，请重新生成");
+  return { bible: normalized };
 }
 
 function normalizePlans(result) {
@@ -526,7 +588,7 @@ async function repairJsonWithDeepSeek(env, input, malformed, maxTokens) {
           { role: "user", content: String(malformed || "").slice(0, 24_000) },
         ],
         temperature: 0,
-        max_tokens: Math.max(1200, Math.min(Number(maxTokens || 1800), 2600)),
+        max_tokens: Math.max(1200, Math.min(Number(maxTokens || 1800), 7000)),
         response_format: { type: "json_object" },
         stream: false,
       }),
@@ -670,12 +732,19 @@ async function api(request, env, url) {
 
   if (url.pathname === "/api/storyboard") {
     if (!input.script && !input.previousScript) return error("请先生成或恢复一个剧本，再生成分镜", "SCRIPT_REQUIRED", 400);
-    const result = normalizeStoryboard(await askDeepSeek(env, input, storyboardPrompt(input), 2600));
+    const storyboardDuration = Math.max(15, Math.min(Number(input.duration || 60), 180));
+    const segmentTokens = Math.min(7000, 1600 + (Math.ceil(storyboardDuration / 10) * 380));
+    const result = normalizeStoryboard(await askDeepSeek(env, input, storyboardPrompt(input), segmentTokens), storyboardDuration);
     return json({ ok: true, source: "deepseek", model, usage, result });
   }
 
   if (url.pathname === "/api/plans") {
     const result = normalizePlans(await askDeepSeek(env, input, plansPrompt(input), 2200));
+    return json({ ok: true, source: "deepseek", model, usage, result });
+  }
+
+  if (url.pathname === "/api/bible") {
+    const result = normalizeBible(await askDeepSeek(env, input, biblePrompt(input), 2400));
     return json({ ok: true, source: "deepseek", model, usage, result });
   }
 
@@ -693,7 +762,9 @@ async function api(request, env, url) {
 
   if (url.pathname === "/api/generate") {
     const scriptResult = normalizeScript(await askDeepSeek(env, input, scriptPrompt(input), 2200));
-    const storyboardResult = normalizeStoryboard(await askDeepSeek(env, { ...input, script: scriptResult.script }, storyboardPrompt({ ...input, script: scriptResult.script }), 2600));
+    const storyboardDuration = Math.max(15, Math.min(Number(input.duration || 60), 180));
+    const segmentTokens = Math.min(7000, 1600 + (Math.ceil(storyboardDuration / 10) * 380));
+    const storyboardResult = normalizeStoryboard(await askDeepSeek(env, { ...input, script: scriptResult.script }, storyboardPrompt({ ...input, script: scriptResult.script }), segmentTokens), storyboardDuration);
     return json({ ok: true, source: "deepseek", model, usage, result: { ...scriptResult, ...storyboardResult } });
   }
 
@@ -728,6 +799,7 @@ export const __test = {
   normalizeInput,
   normalizeStoryboard,
   normalizeContinuity,
+  normalizeBible,
   normalizePlans,
   extractJson,
   creativeInputSummary,

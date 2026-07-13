@@ -170,7 +170,7 @@
           <div class="action-stack episode-actions-stack" aria-label="创作动作">
             <p class="plan-ready-state" id="planReadyState" role="status">请先完整填写或采用一套本集策划</p>
             <button class="primary-action" id="generateBtn" disabled>先完成本集策划</button>
-            <button class="secondary-action" id="storyboardBtn" disabled>基于剧本生成分镜</button>
+            <button class="secondary-action" id="storyboardBtn" disabled>基于本版剧本生成 10 秒分镜</button>
             <button class="ghost-action" id="continueBtn" disabled>续写下一集</button>
           </div>
         </section>
@@ -296,6 +296,19 @@
               <button class="small-action" id="saveBibleBtn">保存短剧圣经</button>
             </div>
             <p class="helper bible-intro">这里定义不可随意改写的角色、能力与世界规则。每次剧本和分镜生成都会引用当前项目的圣经与已完成集数摘要。</p>
+            <div class="bible-starter">
+              <div>
+                <strong>没有完整想法也可以开始</strong>
+                <span>选择一个系列骨架免费填充，或让 DeepSeek 根据左侧当前主题、角色和场景起草。</span>
+              </div>
+              <select id="bibleTemplate" aria-label="短剧圣经方向模板">
+                <option value="comedy">轻喜冒险</option>
+                <option value="mystery">羁绊悬疑</option>
+                <option value="ensemble">热血群像</option>
+              </select>
+              <button class="secondary-action" id="applyBibleTemplateBtn" type="button">免费套用模板</button>
+              <button class="ghost-action" id="generateBibleBtn" type="button">DeepSeek 帮我起草</button>
+            </div>
             <div class="bible-grid">
               <label>角色设定<textarea id="bibleCharacters" rows="6" placeholder="角色名：性格底色、欲望、弱点、口头习惯、不能做的事。"></textarea></label>
               <label>精灵能力边界<textarea id="bibleAbilities" rows="6" placeholder="精灵名：能力、代价、冷却/限制、不可突破的边界。"></textarea></label>
@@ -343,10 +356,12 @@
             <div class="result-header">
               <div>
                 <p class="eyebrow">9:16 竖屏镜头表</p>
-                <h2>抖音竖屏分镜脚本</h2>
+                <h2>10 秒视频段分镜脚本</h2>
               </div>
               <button class="small-action" data-copy="storyboardTable">复制分镜</button>
             </div>
+            <p class="helper bible-intro">每段约 10 秒，对应一次独立的 AI 视频生成；按段号顺序拼接后组成当前剧本的完整视频。</p>
+            <div class="storyboard-version-list" id="storyboardHistory"></div>
             <div class="table-wrap" id="storyboardTable"></div>
           </article>
 
@@ -458,13 +473,13 @@
       粉丝向二创工作台示例，不代表官方内容或授权关系。发布前请核对平台规范与 IP 授权边界。
     </footer>
 
-    <script src="./generator.js?v=20260713-story-spark"></script>
-    <script src="./workflow-core.js?v=20260713-story-spark"></script>
-    <script src="./project-domain.js?v=20260713-story-spark"></script>
-    <script src="./episode-planner.js?v=20260713-story-spark"></script>
-    <script src="./ui-templates.js?v=20260713-story-spark"></script>
-    <script src="./api-client.js?v=20260713-story-spark"></script>
-    <script src="./data-store.js?v=20260713-story-spark"></script>
-    <script src="./app.js?v=20260713-story-spark"></script>
+    <script src="./generator.js?v=20260713-segment-bible"></script>
+    <script src="./workflow-core.js?v=20260713-segment-bible"></script>
+    <script src="./project-domain.js?v=20260713-segment-bible"></script>
+    <script src="./episode-planner.js?v=20260713-segment-bible"></script>
+    <script src="./ui-templates.js?v=20260713-segment-bible"></script>
+    <script src="./api-client.js?v=20260713-segment-bible"></script>
+    <script src="./data-store.js?v=20260713-segment-bible"></script>
+    <script src="./app.js?v=20260713-segment-bible"></script>
   </body>
 </html>

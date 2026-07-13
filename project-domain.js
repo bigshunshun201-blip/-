@@ -22,13 +22,43 @@
     };
   }
 
-  function createEpisodeVersion(snapshot = {}) {
+  function createStoryboardVersion(snapshot = {}) {
     return {
-      id: snapshot.id || newId("version"),
+      id: snapshot.id || newId("storyboard-version"),
+      createdAt: snapshot.createdAt || new Date().toISOString(),
+      storyboard: Array.isArray(snapshot.storyboard) ? snapshot.storyboard : [],
+      scriptVersionId: snapshot.scriptVersionId || "",
+      source: snapshot.source || "",
+      model: snapshot.model || "",
+    };
+  }
+
+  function createEpisodeVersion(snapshot = {}) {
+    const id = snapshot.id || newId("version");
+    const legacyStoryboard = Array.isArray(snapshot.storyboard) ? snapshot.storyboard : [];
+    const storyboardVersions = Array.isArray(snapshot.storyboardVersions) && snapshot.storyboardVersions.length
+      ? snapshot.storyboardVersions.map((item) => createStoryboardVersion({ ...item, scriptVersionId: item.scriptVersionId || id }))
+      : legacyStoryboard.length
+        ? [createStoryboardVersion({
+          storyboard: legacyStoryboard,
+          source: snapshot.source,
+          model: snapshot.model,
+          scriptVersionId: id,
+          createdAt: snapshot.storyboardCreatedAt || snapshot.createdAt,
+        })]
+        : [];
+    const activeStoryboardVersionId = storyboardVersions.some((item) => item.id === snapshot.activeStoryboardVersionId)
+      ? snapshot.activeStoryboardVersionId
+      : storyboardVersions.at(-1)?.id || null;
+    const activeStoryboard = storyboardVersions.find((item) => item.id === activeStoryboardVersionId);
+    return {
+      id,
       createdAt: snapshot.createdAt || new Date().toISOString(),
       input: { ...(snapshot.input || {}) },
       script: snapshot.script || null,
-      storyboard: Array.isArray(snapshot.storyboard) ? snapshot.storyboard : [],
+      storyboard: activeStoryboard?.storyboard || legacyStoryboard,
+      storyboardVersions,
+      activeStoryboardVersionId,
       creativePack: snapshot.creativePack || null,
       historyId: snapshot.historyId || null,
       source: snapshot.source || "",
@@ -51,6 +81,8 @@
     episode.input = { ...(version.input || {}) };
     episode.script = version.script || null;
     episode.storyboard = Array.isArray(version.storyboard) ? version.storyboard : [];
+    episode.storyboardVersions = Array.isArray(version.storyboardVersions) ? version.storyboardVersions : [];
+    episode.activeStoryboardVersionId = version.activeStoryboardVersionId || null;
     episode.creativePack = version.creativePack || null;
     episode.historyId = version.historyId || null;
     episode.source = version.source || "";
@@ -136,17 +168,39 @@
   function updateActiveStoryboard(episode, storyboard, response = {}) {
     const version = activeEpisodeVersion(episode);
     if (!episode || !version) return null;
-    version.storyboard = Array.isArray(storyboard) ? storyboard : [];
+    const storyboardVersion = createStoryboardVersion({
+      storyboard,
+      scriptVersionId: version.id,
+      source: response.source,
+      model: response.model,
+    });
+    version.storyboardVersions = Array.isArray(version.storyboardVersions) ? version.storyboardVersions : [];
+    version.storyboardVersions.push(storyboardVersion);
+    version.activeStoryboardVersionId = storyboardVersion.id;
+    version.storyboard = storyboardVersion.storyboard;
     version.source = response.source || version.source || "";
     version.model = response.model || version.model || "";
     applyEpisodeVersion(episode, version.id);
     episode.updatedAt = new Date().toISOString();
-    return version;
+    return storyboardVersion;
+  }
+
+  function applyStoryboardVersion(episode, storyboardVersionId) {
+    const version = activeEpisodeVersion(episode);
+    if (!episode || !version) return null;
+    const storyboardVersion = (version.storyboardVersions || []).find((item) => item.id === storyboardVersionId);
+    if (!storyboardVersion || (storyboardVersion.scriptVersionId && storyboardVersion.scriptVersionId !== version.id)) return null;
+    version.activeStoryboardVersionId = storyboardVersion.id;
+    version.storyboard = storyboardVersion.storyboard;
+    applyEpisodeVersion(episode, version.id);
+    episode.updatedAt = new Date().toISOString();
+    return storyboardVersion;
   }
 
   return {
     newId,
     createProjectRecord,
+    createStoryboardVersion,
     createEpisodeVersion,
     activeEpisodeVersion,
     applyEpisodeVersion,
@@ -156,5 +210,6 @@
     deriveReviewInsights,
     upsertEpisodeVersion,
     updateActiveStoryboard,
+    applyStoryboardVersion,
   };
 });

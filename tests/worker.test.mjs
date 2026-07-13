@@ -30,11 +30,21 @@ test("storyboard normalizer retains production fields", () => {
       assetLinks: "迪莫雨夜立绘",
       assetNote: "待录警报音",
       assetStatus: "待制作",
+    }, {
+      shot: 2,
+      characters: "阿洛",
+      scene: "月牙镇",
+      visual: "阿洛接住徽章",
+      action: "抬头",
+      assetStatus: "已有",
     }],
-  });
+  }, 15);
   assert.equal(result.storyboard[0].assetStatus, "待制作");
   assert.equal(result.storyboard[0].assetLinks, "迪莫雨夜立绘");
   assert.equal(result.storyboard[0].characters, "阿洛、迪莫");
+  assert.equal(result.storyboard[0].seconds, 10);
+  assert.equal(result.storyboard[1].seconds, 5);
+  assert.equal(result.storyboard[1].timeRange, "10-15秒");
 });
 
 test("continuity normalizer always returns the four required checks", () => {
@@ -45,6 +55,12 @@ test("continuity normalizer always returns the four required checks", () => {
   });
   assert.equal(result.score, 86);
   assert.deepEqual(result.checks.map((check) => check.area), ["角色性格", "精灵能力", "人物关系", "悬念承接"]);
+});
+
+test("bible normalizer requires all continuity fields", () => {
+  const bible = Object.fromEntries(["characters", "abilities", "relations", "antagonist", "worldRules", "mainConflict", "hookRules"].map((key) => [key, `${key}内容`]));
+  assert.deepEqual(__test.normalizeBible({ bible }).bible, bible);
+  assert.throws(() => __test.normalizeBible({ bible: { characters: "只有角色" } }), /不完整/);
 });
 
 test("AI plan normalizer requires three complete episode plans", () => {
@@ -73,7 +89,7 @@ test("AI plan normalizer requires three complete episode plans", () => {
 
 test("UI contains the production workflow controls", async () => {
   const html = await readFile(new URL("../index.html", import.meta.url), "utf8");
-  for (const id of ["planOpeningHook", "autoPlanBtn", "suggestPlansBtn", "planSuggestions", "planHistoryList", "planReadyState", "checkContinuityBtn", "assetLibrary", "reviewCommentThemes", "exportProjectBtn"]) {
+  for (const id of ["planOpeningHook", "autoPlanBtn", "suggestPlansBtn", "planSuggestions", "planHistoryList", "planReadyState", "generateBibleBtn", "applyBibleTemplateBtn", "storyboardHistory", "checkContinuityBtn", "assetLibrary", "reviewCommentThemes", "exportProjectBtn"]) {
     assert.match(html, new RegExp(`id="${id}"`));
   }
   assert.match(html, /so-landing\.douyin\.com\/landings\/hotlist/);
@@ -180,6 +196,7 @@ test("daily budget weights Pro requests and blocks requests over the limit", asy
   const env = { DAILY_AI_UNIT_LIMIT: "10" };
   assert.equal(__test.requestUnits("/api/script", "deepseek-v4-flash"), 1);
   assert.equal(__test.requestUnits("/api/plans", "deepseek-v4-flash"), 1);
+  assert.equal(__test.requestUnits("/api/bible", "deepseek-v4-flash"), 1);
   assert.equal(__test.requestUnits("/api/generate", "deepseek-v4-pro"), 6);
   const first = await __test.reserveDailyBudget(env, "/api/generate", "deepseek-v4-pro");
   assert.equal(first.usedUnits, 6);
@@ -266,6 +283,23 @@ test("project domain appends versions without overwriting an episode", () => {
   assert.equal(second.episode.script.title, "第一版");
 });
 
+test("storyboard versions stay attached to one script version and can be restored", () => {
+  const project = projectDomain.createProjectRecord("分镜留痕");
+  const { episode, version } = projectDomain.upsertEpisodeVersion(project, {
+    mode: "new",
+    input: { episodeNumber: 1 },
+    versionSnapshot: { script: { title: "当前剧本" } },
+  });
+  const first = projectDomain.updateActiveStoryboard(episode, [{ shot: 1, segmentGoal: "第一版" }], { model: "flash" });
+  const second = projectDomain.updateActiveStoryboard(episode, [{ shot: 1, segmentGoal: "第二版" }], { model: "pro" });
+  assert.equal(projectDomain.activeEpisodeVersion(episode).storyboardVersions.length, 2);
+  assert.equal(first.scriptVersionId, version.id);
+  assert.equal(second.scriptVersionId, version.id);
+  projectDomain.applyStoryboardVersion(episode, first.id);
+  assert.equal(episode.storyboard[0].segmentGoal, "第一版");
+  assert.equal(episode.activeStoryboardVersionId, first.id);
+});
+
 test("project domain validates episode plans and preserves review thresholds", () => {
   assert.throws(
     () => projectDomain.validateEpisodePlan({ episodePlan: { openingHook: "异常" } }),
@@ -290,9 +324,11 @@ test("UI templates escape model content and keep production controls", () => {
   assert.match(scriptHtml, /笑点设计/);
   assert.match(scriptHtml, /视觉爆点/);
 
-  const storyboardHtml = uiTemplates.storyboard([{ shot: 1, seconds: 3, assetStatus: "待制作" }], true);
+  const storyboardHtml = uiTemplates.storyboard([{ shot: 1, timeRange: "00-10秒", seconds: 10, segmentGoal: "抛出异常", beatBreakdown: [{ range: "0-3秒", content: "徽章裂开" }], assetStatus: "待制作" }], true);
   assert.match(storyboardHtml, /data-shot-field="assetLinks"/);
   assert.match(storyboardHtml, /option value="待制作" selected/);
+  assert.match(storyboardHtml, /第 1 段/);
+  assert.match(storyboardHtml, /徽章裂开/);
 });
 
 test("page loads domain and template modules before app.js", async () => {
