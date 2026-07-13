@@ -8,6 +8,14 @@ const MAX_INPUT_BYTES = 120_000;
 const RATE_WINDOW_MS = 60_000;
 const MAX_AI_REQUESTS_PER_WINDOW = 12;
 const rateBuckets = new Map();
+const fallbackDailyUsage = new Map();
+const AI_PATH_COST = new Map([
+  ["/api/script", 1],
+  ["/api/storyboard", 1],
+  ["/api/topics", 1],
+  ["/api/continuity-check", 1],
+  ["/api/generate", 2],
+]);
 
 function json(body, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: JSON_HEADERS });
@@ -40,6 +48,68 @@ function consumeRateLimit(request, path) {
     }
   }
   return 0;
+}
+
+function usageDay(now = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(now).reduce((result, part) => ({ ...result, [part.type]: part.value }), {});
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
+function usageLimit(env) {
+  return Math.max(10, Math.min(Number(env.DAILY_AI_UNIT_LIMIT || 120), 10_000));
+}
+
+function requestUnits(path, model) {
+  const requestCost = AI_PATH_COST.get(path) || 1;
+  const modelCost = model === "deepseek-v4-pro" ? 3 : 1;
+  return requestCost * modelCost;
+}
+
+async function dailyUsageStatus(env) {
+  const day = usageDay();
+  const limit = usageLimit(env);
+  if (env.USAGE_DB) {
+    const row = await env.USAGE_DB.prepare(
+      "SELECT used_units AS usedUnits, request_count AS requestCount FROM ai_daily_usage WHERE usage_day = ?",
+    ).bind(day).first();
+    return { day, usedUnits: Number(row?.usedUnits || 0), requestCount: Number(row?.requestCount || 0), limit };
+  }
+  const current = fallbackDailyUsage.get(day) || { usedUnits: 0, requestCount: 0 };
+  return { day, ...current, limit, fallback: true };
+}
+
+async function reserveDailyBudget(env, path, model) {
+  const day = usageDay();
+  const limit = usageLimit(env);
+  const units = requestUnits(path, model);
+  if (env.USAGE_DB) {
+    const row = await env.USAGE_DB.prepare(`
+      INSERT INTO ai_daily_usage (usage_day, used_units, request_count, updated_at)
+      VALUES (?, ?, 1, ?)
+      ON CONFLICT(usage_day) DO UPDATE SET
+        used_units = used_units + excluded.used_units,
+        request_count = request_count + 1,
+        updated_at = excluded.updated_at
+      WHERE used_units + excluded.used_units <= ?
+      RETURNING used_units AS usedUnits, request_count AS requestCount
+    `).bind(day, units, new Date().toISOString(), limit).first();
+    if (!row) throw codedError("今日 AI 调用额度已用完，请明天再试或由管理员调整预算。", "DAILY_BUDGET_EXCEEDED");
+    return { day, units, usedUnits: Number(row.usedUnits), requestCount: Number(row.requestCount), limit, remaining: limit - Number(row.usedUnits) };
+  }
+
+  const current = fallbackDailyUsage.get(day) || { usedUnits: 0, requestCount: 0 };
+  if (current.usedUnits + units > limit) {
+    throw codedError("今日 AI 调用额度已用完，请明天再试或由管理员调整预算。", "DAILY_BUDGET_EXCEEDED");
+  }
+  const next = { usedUnits: current.usedUnits + units, requestCount: current.requestCount + 1 };
+  fallbackDailyUsage.clear();
+  fallbackDailyUsage.set(day, next);
+  return { day, units, ...next, limit, remaining: limit - next.usedUnits, fallback: true };
 }
 
 function normalizeInput(input = {}) {
@@ -358,24 +428,35 @@ async function askDeepSeek(env, input, prompt, maxTokens) {
     missing.code = "NO_DEEPSEEK_KEY";
     throw missing;
   }
-  const response = await fetch(`${env.DEEPSEEK_BASE_URL || "https://api.deepseek.com"}/chat/completions`, {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${env.DEEPSEEK_API_KEY}`,
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      model: modelFor(input, env),
-      messages: [
-        { role: "system", content: "你是严格执行用户输入的中文短剧创作助手。必须使用用户给定角色名，只输出 JSON。" },
-        { role: "user", content: prompt },
-      ],
-      temperature: 0.88,
-      max_tokens: maxTokens,
-      response_format: { type: "json_object" },
-      stream: false,
-    }),
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 75_000);
+  let response;
+  try {
+    response = await fetch(`${env.DEEPSEEK_BASE_URL || "https://api.deepseek.com"}/chat/completions`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${env.DEEPSEEK_API_KEY}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model: modelFor(input, env),
+        messages: [
+          { role: "system", content: "你是严格执行用户输入的中文短剧创作助手。必须使用用户给定角色名，只输出 JSON。" },
+          { role: "user", content: prompt },
+        ],
+        temperature: 0.88,
+        max_tokens: maxTokens,
+        response_format: { type: "json_object" },
+        stream: false,
+      }),
+      signal: controller.signal,
+    });
+  } catch (cause) {
+    if (cause?.name === "AbortError") throw codedError("DeepSeek 响应超时，请缩短输入后重试。", "UPSTREAM_TIMEOUT");
+    throw cause;
+  } finally {
+    clearTimeout(timeoutId);
+  }
   const raw = await response.text();
   if (!response.ok) {
     const upstream = new Error(`DeepSeek 请求失败（${response.status}）`);
@@ -410,6 +491,12 @@ async function api(request, env, url) {
 
   if (request.method === "GET" && url.pathname === "/api/status") {
     const configured = Boolean(env.DEEPSEEK_API_KEY);
+    let usage = null;
+    try {
+      usage = await dailyUsageStatus(env);
+    } catch (_) {
+      usage = { limit: usageLimit(env), unavailable: true };
+    }
     return json({
       ok: true,
       aiConnected: configured,
@@ -417,10 +504,12 @@ async function api(request, env, url) {
       model: env.DEEPSEEK_MODEL || "deepseek-v4-flash",
       availableModels: ["deepseek-v4-flash", "deepseek-v4-pro"],
       message: configured ? "AI connected" : "AI not connected",
+      usage,
     });
   }
 
   if (request.method !== "POST") return error("Not found", "NOT_FOUND", 404);
+  if (!AI_PATH_COST.has(url.pathname)) return error("Not found", "NOT_FOUND", 404);
   const retryAfter = consumeRateLimit(request, url.pathname);
   if (retryAfter) {
     return new Response(JSON.stringify({ ok: false, error: "请求过于频繁，请稍后再试。", code: "RATE_LIMITED", retryAfter }), {
@@ -430,36 +519,44 @@ async function api(request, env, url) {
   }
   const input = await readInput(request);
   const model = modelFor(input, env);
+  if (!env.DEEPSEEK_API_KEY) return error("未配置 DeepSeek API Key", "NO_DEEPSEEK_KEY", 500);
+  let usage;
+  try {
+    usage = await reserveDailyBudget(env, url.pathname, model);
+  } catch (cause) {
+    if (cause?.code === "DAILY_BUDGET_EXCEEDED") throw cause;
+    throw codedError("AI 用量保护暂时不可用，为避免产生失控费用，本次请求未执行。", "USAGE_GUARD_UNAVAILABLE");
+  }
   const requestId = crypto.randomUUID();
-  console.log(JSON.stringify({ event: "ai_request", requestId, path: url.pathname, model, at: new Date().toISOString() }));
+  console.log(JSON.stringify({ event: "ai_request", requestId, path: url.pathname, model, units: usage.units, usedUnits: usage.usedUnits, at: new Date().toISOString() }));
 
   if (url.pathname === "/api/script") {
     const result = normalizeScript(await askDeepSeek(env, input, scriptPrompt(input), 1500));
-    return json({ ok: true, source: "deepseek", model, result });
+    return json({ ok: true, source: "deepseek", model, usage, result });
   }
 
   if (url.pathname === "/api/storyboard") {
     if (!input.script && !input.previousScript) return error("请先生成或恢复一个剧本，再生成分镜", "SCRIPT_REQUIRED", 400);
     const result = normalizeStoryboard(await askDeepSeek(env, input, storyboardPrompt(input), 1500));
-    return json({ ok: true, source: "deepseek", model, result });
+    return json({ ok: true, source: "deepseek", model, usage, result });
   }
 
   if (url.pathname === "/api/topics") {
     const count = Math.max(1, Math.min(Number(input.count || 8), 12));
     const result = normalizeTopics(await askDeepSeek(env, input, topicsPrompt(input), 1700), count);
-    return json({ ok: true, source: "deepseek", model, result });
+    return json({ ok: true, source: "deepseek", model, usage, result });
   }
 
   if (url.pathname === "/api/continuity-check") {
     if (!input.script && !input.previousScript) return error("请先提供需要检查的剧本", "SCRIPT_REQUIRED", 400);
     const result = normalizeContinuity(await askDeepSeek(env, input, continuityPrompt(input), 1500));
-    return json({ ok: true, source: "deepseek", model, result });
+    return json({ ok: true, source: "deepseek", model, usage, result });
   }
 
   if (url.pathname === "/api/generate") {
     const scriptResult = normalizeScript(await askDeepSeek(env, input, scriptPrompt(input), 1500));
     const storyboardResult = normalizeStoryboard(await askDeepSeek(env, { ...input, script: scriptResult.script }, storyboardPrompt({ ...input, script: scriptResult.script }), 1500));
-    return json({ ok: true, source: "deepseek", model, result: { ...scriptResult, ...storyboardResult } });
+    return json({ ok: true, source: "deepseek", model, usage, result: { ...scriptResult, ...storyboardResult } });
   }
 
   return error("Not found", "NOT_FOUND", 404);
@@ -473,10 +570,29 @@ export default {
       return env.ASSETS.fetch(request);
     } catch (cause) {
       const code = cause?.code || "SERVER_ERROR";
-      const status = code === "NO_DEEPSEEK_KEY" ? 500 : code === "REQUEST_TOO_LARGE" ? 413 : code === "INVALID_REQUEST" ? 400 : 502;
+      const status = code === "NO_DEEPSEEK_KEY"
+        ? 500
+        : code === "REQUEST_TOO_LARGE"
+          ? 413
+          : code === "INVALID_REQUEST"
+            ? 400
+            : code === "DAILY_BUDGET_EXCEEDED" || code === "USAGE_GUARD_UNAVAILABLE"
+              ? 429
+              : code === "UPSTREAM_TIMEOUT"
+                ? 504
+                : 502;
       return error(cause?.message || "生成服务暂时不可用", code, status);
     }
   },
 };
 
-export const __test = { normalizeInput, normalizeStoryboard, normalizeContinuity, creativeInputSummary };
+export const __test = {
+  normalizeInput,
+  normalizeStoryboard,
+  normalizeContinuity,
+  creativeInputSummary,
+  requestUnits,
+  usageDay,
+  reserveDailyBudget,
+  dailyUsageStatus,
+};

@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { __test } from "../cloudflare/worker.mjs";
+
+const require = createRequire(import.meta.url);
+const workflow = require("../workflow-core.js");
+const apiClientModule = require("../api-client.js");
+const dataStoreModule = require("../data-store.js");
 
 test("storyboard normalizer retains production fields", () => {
   const result = __test.normalizeStoryboard({
@@ -43,4 +49,121 @@ test("UI contains the production workflow controls", async () => {
   for (const id of ["planOpeningHook", "checkContinuityBtn", "assetLibrary", "reviewCommentThemes", "exportProjectBtn"]) {
     assert.match(html, new RegExp(`id="${id}"`));
   }
+});
+
+test("continuity uses episodes before the target instead of the selected episode id", () => {
+  const episodes = [1, 2, 3, 4].map((episodeNumber) => ({
+    id: `episode-${episodeNumber}`,
+    episodeNumber,
+    script: { title: `第${episodeNumber}集`, synopsis: `剧情${episodeNumber}`, hooks: [`悬念${episodeNumber}`] },
+    versions: [{ id: `v-${episodeNumber}`, consistency: { mustPreserve: [`事实${episodeNumber}`] } }],
+    activeVersionId: `v-${episodeNumber}`,
+  }));
+  const context = workflow.continuityForTarget(episodes, 4, 3);
+  assert.deepEqual(context.map((item) => item.episodeNumber), [1, 2, 3]);
+  assert.deepEqual(context.at(-1).mustPreserve, ["事实3"]);
+});
+
+test("project-backed history is compacted and hydrated without duplicating scripts", () => {
+  const history = [{
+    id: "history-1",
+    projectId: "project-1",
+    projectName: "测试项目",
+    episodeNumber: 1,
+    input: { theme: "契约失效", duration: 60, episodeNumber: 1 },
+    script: { title: "消失的契约" },
+    storyboard: [{ shot: 1 }],
+    creativePack: { titleVariants: [] },
+  }];
+  const compact = workflow.compactHistory(history);
+  assert.equal(compact[0].script, undefined);
+  assert.equal(compact[0].archivedInProject, true);
+
+  const projects = [{
+    id: "project-1",
+    name: "测试项目",
+    episodes: [{
+      episodeNumber: 1,
+      versions: [{ historyId: "history-1", input: history[0].input, script: history[0].script, storyboard: history[0].storyboard }],
+    }],
+  }];
+  const hydrated = workflow.hydrateHistory(compact, projects);
+  assert.equal(hydrated[0].script.title, "消失的契约");
+  assert.equal(hydrated[0].storyboard.length, 1);
+});
+
+test("frontend includes request timeout and stale-result protection", async () => {
+  const source = await readFile(new URL("../app.js", import.meta.url), "utf8");
+  assert.match(source, /apiTimeoutMs = 90_000/);
+  assert.match(source, /assertActiveAiOperation\(operation\)/);
+  assert.match(source, /resetCurrentCreation\(\)/);
+  assert.doesNotMatch(source, /window\.prompt\("新项目名称"/);
+});
+
+test("daily budget weights Pro requests and blocks requests over the limit", async () => {
+  const env = { DAILY_AI_UNIT_LIMIT: "10" };
+  assert.equal(__test.requestUnits("/api/script", "deepseek-v4-flash"), 1);
+  assert.equal(__test.requestUnits("/api/generate", "deepseek-v4-pro"), 6);
+  const first = await __test.reserveDailyBudget(env, "/api/generate", "deepseek-v4-pro");
+  assert.equal(first.usedUnits, 6);
+  await assert.rejects(
+    __test.reserveDailyBudget(env, "/api/generate", "deepseek-v4-pro"),
+    (error) => error.code === "DAILY_BUDGET_EXCEEDED",
+  );
+  assert.equal(__test.usageDay(new Date("2026-07-13T16:30:00.000Z")), "2026-07-14");
+});
+
+test("API client stores an access code and retries only after a 401 challenge", async () => {
+  const stored = new Map();
+  const calls = [];
+  const client = apiClientModule.create({
+    timeoutMs: 1000,
+    storage: { getItem: (key) => stored.get(key), setItem: (key, value) => stored.set(key, value) },
+    promptForAccess: () => "private-code",
+    fetchImpl: async (_path, options) => {
+      calls.push(options);
+      return calls.length === 1
+        ? new Response(JSON.stringify({ ok: false, code: "ACCESS_CODE_REQUIRED", error: "请输入访问码" }), { status: 401 })
+        : new Response(JSON.stringify({ ok: true, value: 1 }), { status: 200 });
+    },
+  });
+  const response = await client.request("/api/status");
+  assert.equal(response.value, 1);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1].headers["X-Roco-Access-Code"], "private-code");
+});
+
+test("API client aborts requests after the configured timeout", async () => {
+  const client = apiClientModule.create({
+    timeoutMs: 5,
+    storage: { getItem: () => null },
+    fetchImpl: async (_path, options) => new Promise((_resolve, reject) => {
+      options.signal.addEventListener("abort", () => {
+        const error = new Error("aborted");
+        error.name = "AbortError";
+        reject(error);
+      });
+    }),
+  });
+  await assert.rejects(client.request("/api/status"), (error) => error.code === "REQUEST_TIMEOUT");
+});
+
+test("local DeepSeek development delegates API routes to the production worker", async () => {
+  const source = await readFile(new URL("../server.js", import.meta.url), "utf8");
+  assert.match(source, /handleSharedDeepSeekApi/);
+  assert.match(source, /import\("\.\/cloudflare\/worker\.mjs"\)/);
+  assert.match(source, /url\.pathname\.startsWith\("\/api\/"\)/);
+});
+
+test("data store migrates legacy JSON and preserves a localStorage fallback", async () => {
+  const values = new Map([["projects", JSON.stringify([{ id: "legacy-project" }])]]);
+  const fallbackStorage = {
+    getItem: (key) => values.get(key) || null,
+    setItem: (key, value) => values.set(key, value),
+    removeItem: (key) => values.delete(key),
+  };
+  const store = dataStoreModule.create({ indexedDb: null, fallbackStorage });
+  assert.deepEqual(await store.get("projects"), [{ id: "legacy-project" }]);
+  assert.equal(await store.set("draft", { currentProjectId: "legacy-project" }), "localStorage");
+  assert.deepEqual(JSON.parse(values.get("draft")), { currentProjectId: "legacy-project" });
 });

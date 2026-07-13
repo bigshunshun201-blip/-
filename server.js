@@ -31,6 +31,34 @@ const config = {
   },
 };
 
+let cloudflareWorkerPromise;
+
+async function handleSharedDeepSeekApi(req, res, url) {
+  cloudflareWorkerPromise ||= import("./cloudflare/worker.mjs");
+  const worker = await cloudflareWorkerPromise;
+  const localAccessCode = appAccessCode || "local-development";
+  const headers = new Headers();
+  Object.entries(req.headers || {}).forEach(([name, value]) => {
+    if (value !== undefined) headers.set(name, Array.isArray(value) ? value.join(",") : String(value));
+  });
+  if (!appAccessCode) headers.set("x-roco-access-code", localAccessCode);
+  const body = req.method === "POST" ? await readBody(req) : undefined;
+  const request = new Request(`http://local.roco${url.pathname}${url.search}`, {
+    method: req.method,
+    headers,
+    body,
+  });
+  const response = await worker.default.fetch(request, {
+    APP_ACCESS_CODE: localAccessCode,
+    DEEPSEEK_API_KEY: config.deepseek.apiKey,
+    DEEPSEEK_BASE_URL: config.deepseek.baseUrl,
+    DEEPSEEK_MODEL: config.deepseek.model,
+    DAILY_AI_UNIT_LIMIT: process.env.DAILY_AI_UNIT_LIMIT || "120",
+  });
+  const raw = await response.text();
+  send(res, response.status, raw, response.headers.get("content-type") || "application/json; charset=utf-8");
+}
+
 const mime = {
   ".html": "text/html; charset=utf-8",
   ".css": "text/css; charset=utf-8",
@@ -845,6 +873,10 @@ function serveStatic(req, res) {
 const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, `http://${req.headers.host}`);
+    if (provider === "deepseek" && url.pathname.startsWith("/api/")) {
+      await handleSharedDeepSeekApi(req, res, url);
+      return;
+    }
     if (req.method === "GET" && url.pathname === "/api/status") {
       if (!hasApiAccess(req.headers)) {
         send(res, 401, { ok: false, error: "请输入访问码", code: "ACCESS_CODE_REQUIRED" });

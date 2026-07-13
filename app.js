@@ -15,6 +15,7 @@
     currentEpisodeId: null,
     reviewEpisodeId: null,
     topicBatch: 0,
+    activeAiOperation: null,
   };
 
   const draftKey = "roco-shortdrama-studio-draft";
@@ -22,6 +23,9 @@
   const projectsKey = "roco-shortdrama-studio-projects";
   const accessCodeKey = "roco-shortdrama-access-code";
   const maxHistoryItems = 60;
+  const apiTimeoutMs = 90_000;
+  const apiClient = window.RocoApiClient.create({ accessCodeKey, timeoutMs: apiTimeoutMs });
+  const archiveStore = window.RocoDataStore.create();
 
   const defaultBible = {
     characters: "主角：有明确欲望、弱点与不可突破的底线。\n搭档精灵：有独立意志，不是随时替主角解决问题的工具。",
@@ -53,6 +57,11 @@
     setStatus(`${context}失败：${message}`, true);
   }
 
+  function usageSuffix(response) {
+    const remaining = Number(response?.usage?.remaining);
+    return Number.isFinite(remaining) ? ` · 今日剩余 ${remaining} 单位` : "";
+  }
+
   function pulseResult() {
     const stage = $(".stage");
     if (!stage) return;
@@ -64,23 +73,80 @@
   function refreshCreationActions() {
     const hasScript = Boolean(state.script);
     const hasStoryboard = Boolean(state.storyboard.length);
+    const isBusy = Boolean(state.activeAiOperation);
+    const generateButton = $("#generateBtn");
     const storyboardButton = $("#storyboardBtn");
     const continueButton = $("#continueBtn");
     const stage = $(".stage");
 
+    if (generateButton) generateButton.disabled = isBusy;
     if (storyboardButton) {
-      storyboardButton.disabled = !hasScript;
+      storyboardButton.disabled = isBusy || !hasScript;
       storyboardButton.title = hasScript ? "根据当前剧本生成对应分镜" : "请先生成并确认一版剧本";
     }
     if (continueButton) {
-      continueButton.disabled = !hasScript;
+      continueButton.disabled = isBusy || !hasScript;
       continueButton.title = hasScript ? "承接当前剧本的结尾钩子续写下一集" : "请先生成一版剧本";
     }
+    ["checkContinuityBtn", "regenerateTopicsBtn", "projectSelect", "newProjectBtn", "importProjectBtn"].forEach((id) => {
+      const control = document.getElementById(id);
+      if (control) control.disabled = isBusy;
+    });
+    $$('[data-topic-generate], [data-topic-continue], [data-topic-replace]').forEach((button) => {
+      button.disabled = isBusy;
+    });
+    document.body?.setAttribute("aria-busy", String(isBusy));
     if (stage) {
       stage.classList.toggle("has-script", hasScript);
       stage.classList.toggle("has-storyboard", hasStoryboard);
     }
     refreshToolbarState();
+  }
+
+  function beginAiOperation(label) {
+    if (state.activeAiOperation) {
+      const error = new Error(`${state.activeAiOperation.label}仍在处理中，请等待完成后再操作。`);
+      error.code = "AI_OPERATION_BUSY";
+      throw error;
+    }
+    const operation = {
+      id: newId("ai"),
+      label,
+      projectId: state.currentProjectId,
+      startedAt: Date.now(),
+    };
+    state.activeAiOperation = operation;
+    refreshCreationActions();
+    return operation;
+  }
+
+  function assertActiveAiOperation(operation) {
+    if (state.activeAiOperation?.id !== operation.id || state.currentProjectId !== operation.projectId) {
+      const error = new Error("生成期间项目状态已变化，本次返回结果已丢弃。请在当前项目重新生成。");
+      error.code = "STALE_AI_RESULT";
+      throw error;
+    }
+  }
+
+  function endAiOperation(operation) {
+    if (state.activeAiOperation?.id === operation.id) state.activeAiOperation = null;
+    refreshCreationActions();
+  }
+
+  function resetCurrentCreation() {
+    state.currentEpisodeId = null;
+    state.reviewEpisodeId = null;
+    state.currentHistoryId = null;
+    state.script = null;
+    state.storyboard = [];
+    state.creativePack = null;
+    state.selectedTopic = null;
+    setInputValue("episodeNumber", nextEpisodeNumber());
+    renderScript();
+    renderStoryboard();
+    renderCreativePack();
+    renderConsistency();
+    renderExample();
   }
 
   function refreshToolbarState(activeTab) {
@@ -209,17 +275,19 @@
     return state.projects.find((project) => project.id === state.currentProjectId) || state.projects[0] || null;
   }
 
-  function persistProjects() {
+  async function persistProjects() {
     try {
-      window.localStorage.setItem(projectsKey, JSON.stringify(state.projects));
+      await archiveStore.set(projectsKey, state.projects);
+      return true;
     } catch (error) {
       setStatus("项目档案保存失败：浏览器本地存储空间可能已满", true);
+      return false;
     }
   }
 
-  function loadProjects() {
+  async function loadProjects() {
     try {
-      const stored = JSON.parse(window.localStorage.getItem(projectsKey) || "[]");
+      const stored = await archiveStore.get(projectsKey);
       state.projects = Array.isArray(stored) ? stored : [];
     } catch (_) {
       state.projects = [];
@@ -234,7 +302,7 @@
     state.currentProjectId = state.projects.some((project) => project.id === state.currentProjectId)
       ? state.currentProjectId
       : state.projects[0].id;
-    persistProjects();
+    await persistProjects();
   }
 
   function nextEpisodeNumber(project = currentProject()) {
@@ -247,19 +315,8 @@
     return project?.episodes?.find((episode) => episode.id === state.currentEpisodeId) || null;
   }
 
-  function projectContinuity(project = currentProject()) {
-    return (project?.episodes || [])
-      .filter((episode) => episode.script && episode.id !== state.currentEpisodeId)
-      .sort((a, b) => Number(b.episodeNumber) - Number(a.episodeNumber))
-      .slice(0, 3)
-      .reverse()
-      .map((episode) => ({
-        episodeNumber: episode.episodeNumber,
-        title: episode.script.title,
-        synopsis: episode.script.synopsis,
-        hooks: (episode.script.hooks || []).slice(0, 2),
-        status: episode.review?.status || "draft",
-      }));
+  function projectContinuity(project = currentProject(), targetEpisodeNumber = nextEpisodeNumber(project)) {
+    return window.RocoWorkflowCore.continuityForTarget(project?.episodes || [], targetEpisodeNumber, 3);
   }
 
   function generationContext(input) {
@@ -272,7 +329,7 @@
       projectName: project?.name || "未命名短剧项目",
       projectLogline: project?.logline || "",
       projectBible: project?.bible || defaultBible,
-      projectContinuity: projectContinuity(project),
+      projectContinuity: projectContinuity(project, input.episodeNumber),
       projectAssets: (project?.assets || []).slice(-24),
       latestReview,
     };
@@ -406,19 +463,18 @@
   }
 
   function createProject() {
-    const name = window.prompt("新项目名称", `短剧项目 ${state.projects.length + 1}`);
-    if (name === null) return;
-    const project = createProjectRecord(name.trim() || `短剧项目 ${state.projects.length + 1}`);
+    const project = createProjectRecord(`短剧项目 ${state.projects.length + 1}`);
     state.projects.unshift(project);
     state.currentProjectId = project.id;
-    state.currentEpisodeId = null;
-    state.reviewEpisodeId = null;
-    setInputValue("episodeNumber", 1);
+    resetCurrentCreation();
     persistProjects();
     renderProject();
     renderBible();
     saveDraft(false);
-    setStatus(`已新建项目：${project.name}`);
+    switchTab("project");
+    $("#projectName")?.focus();
+    $("#projectName")?.select();
+    setStatus(`已新建项目：${project.name}，可直接修改名称和主线`);
   }
 
   function exportCurrentProject() {
@@ -464,9 +520,7 @@
         });
         state.projects.unshift(project);
         state.currentProjectId = project.id;
-        state.currentEpisodeId = null;
-        state.reviewEpisodeId = null;
-        setInputValue("episodeNumber", nextEpisodeNumber(project));
+        resetCurrentCreation();
         persistProjects();
         renderProject(); renderBible(); renderAssets(); renderConsistency(); saveDraft(false);
         setStatus(`项目已导入：${project.name}`);
@@ -678,21 +732,27 @@
 
   async function runContinuityCheck() {
     if (!state.script) throw new Error("请先生成或恢复一个剧本，再检查一致性。");
-    setStatus("AI 正在检查连载一致性...");
-    const input = generationContext({ ...getInput(), script: state.script });
-    const response = await apiRequest("/api/continuity-check", { input });
-    const episode = currentProjectEpisode();
-    if (episode) {
-      const version = activeEpisodeVersion(episode);
-      if (version) version.consistency = response.result;
-      applyEpisodeVersion(episode, version?.id);
-      episode.updatedAt = new Date().toISOString();
-      persistProjects();
+    const operation = beginAiOperation("一致性检查");
+    try {
+      setStatus("AI 正在检查连载一致性...");
+      const input = generationContext({ ...getInput(), script: state.script });
+      const response = await apiRequest("/api/continuity-check", { input });
+      assertActiveAiOperation(operation);
+      const episode = currentProjectEpisode();
+      if (episode) {
+        const version = activeEpisodeVersion(episode);
+        if (version) version.consistency = response.result;
+        applyEpisodeVersion(episode, version?.id);
+        episode.updatedAt = new Date().toISOString();
+        persistProjects();
+      }
+      renderConsistency();
+      renderProject();
+      switchTab("consistency");
+      setStatus(`一致性检查完成 ${nowTime()} · ${response.model || "deepseek"}${usageSuffix(response)}`);
+    } finally {
+      endAiOperation(operation);
     }
-    renderConsistency();
-    renderProject();
-    switchTab("consistency");
-    setStatus(`一致性检查完成 ${nowTime()} · ${response.model || "deepseek"}`);
   }
 
   function setInputValue(id, value) {
@@ -905,6 +965,7 @@
   }
 
   async function regenerateTopics() {
+    const operation = beginAiOperation("选题生成");
     const input = getInput();
     setStatus("AI 正在换一批选题...");
     try {
@@ -918,12 +979,13 @@
           existingTopics: state.topics,
         },
       });
+      assertActiveAiOperation(operation);
       const topics = normalizeTopicList(response.result?.topics);
       if (!topics.length) throw new Error("AI 没有返回可用选题");
       state.topics = topics;
       refreshTopicDerivedViews();
       switchTab("topics");
-      setStatus(`AI 已换一批选题 ${nowTime()} · ${response.model || "model"}`);
+      setStatus(`AI 已换一批选题 ${nowTime()} · ${response.model || "model"}${usageSuffix(response)}`);
     } catch (error) {
       const topics = fallbackTopics(8);
       if (!topics.length) throw error;
@@ -931,12 +993,15 @@
       refreshTopicDerivedViews();
       switchTab("topics");
       setStatus(`AI 换题失败，已用本地备选换一批：${error.message}`, true);
+    } finally {
+      endAiOperation(operation);
     }
   }
 
   async function replaceTopic(index) {
     const oldTopic = state.topics[index];
     if (!oldTopic) throw new Error("没有找到要替换的选题。");
+    const operation = beginAiOperation("选题替换");
     setStatus("AI 正在替换这条选题...");
     try {
       const response = await apiRequest("/api/topics", {
@@ -950,52 +1015,25 @@
           existingTopics: state.topics,
         },
       });
+      assertActiveAiOperation(operation);
       const topics = normalizeTopicList(response.result?.topics);
       if (!topics.length) throw new Error("AI 没有返回可用替换选题");
       state.topics.splice(index, 1, topics[0]);
       refreshTopicDerivedViews();
-      setStatus(`已替换 1 条选题 ${nowTime()} · ${response.model || "model"}`);
+      setStatus(`已替换 1 条选题 ${nowTime()} · ${response.model || "model"}${usageSuffix(response)}`);
     } catch (error) {
       const topics = fallbackTopics(1);
       if (!topics.length) throw error;
       state.topics.splice(index, 1, topics[0]);
       refreshTopicDerivedViews();
       setStatus(`AI 替换失败，已用本地备选替换：${error.message}`, true);
+    } finally {
+      endAiOperation(operation);
     }
-  }
-
-  function accessHeaders(payload) {
-    const headers = payload ? { "Content-Type": "application/json" } : {};
-    const code = window.localStorage.getItem(accessCodeKey);
-    if (code) headers["X-Roco-Access-Code"] = code;
-    return headers;
-  }
-
-  async function fetchApi(path, payload) {
-    const response = await fetch(path, {
-      method: payload ? "POST" : "GET",
-      headers: accessHeaders(payload),
-      body: payload ? JSON.stringify(payload) : undefined,
-    });
-    const data = await response.json();
-    if (!response.ok || data.ok === false) {
-      const error = new Error(data.error || `请求失败：${response.status}`);
-      error.code = data.code;
-      throw error;
-    }
-    return data;
   }
 
   async function apiRequest(path, payload) {
-    try {
-      return await fetchApi(path, payload);
-    } catch (error) {
-      if (error.code !== "ACCESS_CODE_REQUIRED") throw error;
-      const code = window.prompt("请输入访问码。这个工具会调用你的付费 AI API，请不要把访问码发给不需要使用的人。");
-      if (!code) throw error;
-      window.localStorage.setItem(accessCodeKey, code.trim());
-      return fetchApi(path, payload);
-    }
+    return apiClient.request(path, payload);
   }
 
   function sleep(ms) {
@@ -1384,10 +1422,10 @@
       .join("");
   }
 
-  function loadHistory() {
+  async function loadHistory() {
     try {
-      const raw = window.localStorage.getItem(historyKey);
-      state.history = raw ? JSON.parse(raw) : [];
+      const stored = await archiveStore.get(historyKey);
+      state.history = window.RocoWorkflowCore.hydrateHistory(stored, state.projects);
     } catch (error) {
       state.history = [];
     }
@@ -1415,15 +1453,16 @@
       });
       project.updatedAt = new Date().toISOString();
       normalizeProjectEpisodes(project);
-      persistHistory();
-      persistProjects();
+      await persistHistory();
+      await persistProjects();
     }
     renderHistory();
   }
 
-  function persistHistory() {
+  async function persistHistory() {
     try {
-      window.localStorage.setItem(historyKey, JSON.stringify(state.history.slice(0, maxHistoryItems)));
+      const compact = window.RocoWorkflowCore.compactHistory(state.history.slice(0, maxHistoryItems));
+      await archiveStore.set(historyKey, compact);
     } catch (error) {
       setStatus("生成记录保存失败：浏览器本地存储空间可能已满", true);
     }
@@ -1447,8 +1486,6 @@
       pinned: false,
     };
     state.history = [item, ...state.history].slice(0, maxHistoryItems);
-    persistHistory();
-    renderHistory();
     return item;
   }
 
@@ -1483,6 +1520,9 @@
     state.storyboard = item.storyboard || [];
     state.creativePack = item.creativePack || null;
     state.currentHistoryId = item.id || null;
+    renderProject();
+    renderBible();
+    renderAssets();
     renderScript();
     renderStoryboard();
     renderCreativePack();
@@ -1729,74 +1769,90 @@
     if (mode === "continue" && !state.script) {
       throw new Error("还没有可续写的剧本，请先生成一集。");
     }
-    setStatus(mode === "continue" ? "AI 续写剧本中..." : "AI 生成剧本中...");
-    if (mode === "continue") {
-      const nextNumber = Math.max(Number(input.episodeNumber || 0) + 1, nextEpisodeNumber());
-      input.episodeNumber = nextNumber;
-      setInputValue("episodeNumber", nextNumber);
-      state.currentEpisodeId = null;
-    }
-    const initialResponse = await apiRequest("/api/script", {
-      input: {
-        ...generationContext(input),
+    const operation = beginAiOperation(mode === "continue" ? "剧本续写" : "剧本生成");
+    try {
+      setStatus(mode === "continue" ? "AI 续写剧本中..." : "AI 生成剧本中...");
+      if (mode === "continue") {
+        const nextNumber = Math.max(Number(input.episodeNumber || 0) + 1, nextEpisodeNumber());
+        input.episodeNumber = nextNumber;
+        setInputValue("episodeNumber", nextNumber);
+        state.currentEpisodeId = null;
+      }
+      const previousScript = mode === "continue" ? state.script : null;
+      const previousStoryboard = mode === "continue" ? state.storyboard : null;
+      const initialResponse = await apiRequest("/api/script", {
+        input: {
+          ...generationContext(input),
+          mode,
+          competitorInsights: state.analysis ? state.analysis.summary : "",
+          previousScript,
+          previousStoryboard,
+        },
+      });
+      const response = await resolveAiJob(initialResponse, mode === "continue" ? "续写剧本" : "剧本");
+      assertActiveAiOperation(operation);
+      const generated = normalizeScriptResult(response.result);
+      state.script = generated.script;
+      state.storyboard = [];
+      state.creativePack = window.RocoStudio.generateCreativePack(state.script, input, state.topics);
+      const item = addHistoryItem({
         mode,
-        competitorInsights: state.analysis ? state.analysis.summary : "",
-        previousScript: mode === "continue" ? state.script : null,
-        previousStoryboard: mode === "continue" ? state.storyboard : null,
-      },
-    });
-    const response = await resolveAiJob(initialResponse, mode === "continue" ? "续写剧本" : "剧本");
-    const generated = normalizeScriptResult(response.result);
-    state.script = generated.script;
-    state.storyboard = [];
-    state.creativePack = window.RocoStudio.generateCreativePack(state.script, input, state.topics);
-    const item = addHistoryItem({
-      mode,
-      input,
-      response,
-      projectId: state.currentProjectId,
-      projectName: currentProject()?.name,
-      episodeNumber: input.episodeNumber,
-      generated: { ...generated, creativePack: state.creativePack },
-    });
-    state.currentHistoryId = item.id;
-    upsertProjectEpisode({ mode, input, response, generated: { ...generated, creativePack: state.creativePack }, historyId: item.id });
-    renderScript();
-    renderStoryboard();
-    renderCreativePack();
-    renderHistory();
-    renderConsistency();
-    renderExample();
-    saveDraft(false);
-    pulseResult();
-    switchTab("script");
-    setStatus(
-      `${mode === "continue" ? "AI 已续写剧本" : "AI 已生成剧本"} ${nowTime()} · ${response.source || "provider"} · ${response.model || "model"}。满意后可点击“AI 生成分镜”。`,
-    );
+        input,
+        response,
+        projectId: state.currentProjectId,
+        projectName: currentProject()?.name,
+        episodeNumber: input.episodeNumber,
+        generated: { ...generated, creativePack: state.creativePack },
+      });
+      state.currentHistoryId = item.id;
+      upsertProjectEpisode({ mode, input, response, generated: { ...generated, creativePack: state.creativePack }, historyId: item.id });
+      persistHistory();
+      renderScript();
+      renderStoryboard();
+      renderCreativePack();
+      renderHistory();
+      renderConsistency();
+      renderExample();
+      saveDraft(false);
+      pulseResult();
+      switchTab("script");
+      setStatus(
+        `${mode === "continue" ? "AI 已续写剧本" : "AI 已生成剧本"} ${nowTime()} · ${response.source || "provider"} · ${response.model || "model"}${usageSuffix(response)}。满意后可点击“AI 生成分镜”。`,
+      );
+    } finally {
+      endAiOperation(operation);
+    }
   }
 
   async function generateStoryboardForCurrentScript() {
     if (!state.script) {
       throw new Error("请先生成或恢复一个剧本，再生成分镜。");
     }
-    const input = getInput();
-    setStatus("AI 正在基于当前剧本生成分镜...");
-    const initialResponse = await apiRequest("/api/storyboard", {
-      input: {
-        ...generationContext(input),
-        script: state.script,
-      },
-    });
-    const response = await resolveAiJob(initialResponse, "分镜");
-    state.storyboard = normalizeStoryboardResult(response.result);
-    updateCurrentHistoryStoryboard(response);
-    renderStoryboard();
-    renderConsistency();
-    renderExample();
-    saveDraft(false);
-    pulseResult();
-    switchTab("storyboard");
-    setStatus(`AI 已生成分镜 ${nowTime()} · ${response.source || "provider"} · ${response.model || "model"}`);
+    const operation = beginAiOperation("分镜生成");
+    try {
+      const input = getInput();
+      const script = state.script;
+      setStatus("AI 正在基于当前剧本生成分镜...");
+      const initialResponse = await apiRequest("/api/storyboard", {
+        input: {
+          ...generationContext(input),
+          script,
+        },
+      });
+      const response = await resolveAiJob(initialResponse, "分镜");
+      assertActiveAiOperation(operation);
+      state.storyboard = normalizeStoryboardResult(response.result);
+      updateCurrentHistoryStoryboard(response);
+      renderStoryboard();
+      renderConsistency();
+      renderExample();
+      saveDraft(false);
+      pulseResult();
+      switchTab("storyboard");
+      setStatus(`AI 已生成分镜 ${nowTime()} · ${response.source || "provider"} · ${response.model || "model"}${usageSuffix(response)}`);
+    } finally {
+      endAiOperation(operation);
+    }
   }
 
   async function generateAll() {
@@ -1863,7 +1919,10 @@
     try {
       const status = await apiRequest("/api/status");
       if (status.aiConnected) {
-        setStatus(`AI 已连接 · ${status.provider || "provider"} · ${status.model}`);
+        const remaining = status.usage && !status.usage.unavailable
+          ? Math.max(0, Number(status.usage.limit || 0) - Number(status.usage.usedUnits || 0))
+          : null;
+        setStatus(`AI 已连接 · ${status.provider || "provider"} · ${status.model}${Number.isFinite(remaining) ? ` · 今日剩余 ${remaining} 单位` : ""}`);
       } else {
         setStatus("AI 未连接：请检查 Cloudflare Worker 的 DeepSeek 密钥配置。", true);
       }
@@ -1872,13 +1931,10 @@
     }
   }
 
-  function saveDraft(showStatus = true) {
+  async function saveDraft(showStatus = true) {
     const payload = {
       input: getInput(),
       competitorCsv: $("#competitorCsv").value,
-      script: state.script,
-      storyboard: state.storyboard,
-      creativePack: state.creativePack,
       currentHistoryId: state.currentHistoryId,
       currentProjectId: state.currentProjectId,
       currentEpisodeId: state.currentEpisodeId,
@@ -1888,18 +1944,17 @@
       savedAt: new Date().toISOString(),
     };
     try {
-      window.localStorage.setItem(draftKey, JSON.stringify(payload));
+      await archiveStore.set(draftKey, payload);
       if (showStatus) setStatus("草稿已保存");
     } catch (error) {
       if (showStatus) setStatus("当前浏览器未开放本地保存", true);
     }
   }
 
-  function restoreDraft() {
+  async function restoreDraft() {
     try {
-      const raw = window.localStorage.getItem(draftKey);
-      if (!raw) return;
-      const draft = JSON.parse(raw);
+      const draft = await archiveStore.get(draftKey);
+      if (!draft) return;
       if (draft.currentProjectId && state.projects.some((project) => project.id === draft.currentProjectId)) {
         state.currentProjectId = draft.currentProjectId;
       }
@@ -1914,17 +1969,22 @@
       state.topics = normalizeTopicList(draft.topics);
       state.analysis = draft.analysis || null;
       state.competitors = Array.isArray(draft.competitors) ? draft.competitors : [];
-      state.script = draft.script || null;
-      state.storyboard = Array.isArray(draft.storyboard) ? draft.storyboard : [];
-      state.creativePack = draft.creativePack || null;
+      const episode = currentProjectEpisode();
+      if (episode) {
+        applyEpisodeVersion(episode, episode.activeVersionId);
+        state.script = episode.script || null;
+        state.storyboard = Array.isArray(episode.storyboard) ? episode.storyboard : [];
+        state.creativePack = episode.creativePack || null;
+      } else {
+        // Older drafts embedded content directly; keep this one-time migration fallback.
+        state.script = draft.script || null;
+        state.storyboard = Array.isArray(draft.storyboard) ? draft.storyboard : [];
+        state.creativePack = draft.creativePack || null;
+      }
       state.currentHistoryId = draft.currentHistoryId || null;
       setStatus("已恢复草稿");
     } catch (error) {
-      try {
-        window.localStorage.removeItem(draftKey);
-      } catch (_) {
-        // Ignore storage cleanup failures in restricted browser contexts.
-      }
+      // A malformed legacy draft is ignored; valid project archives remain intact.
     }
   }
 
@@ -2071,9 +2131,7 @@
     });
     $("#projectSelect").addEventListener("change", (event) => {
       state.currentProjectId = event.target.value;
-      state.currentEpisodeId = null;
-      state.reviewEpisodeId = null;
-      setInputValue("episodeNumber", nextEpisodeNumber());
+      resetCurrentCreation();
       renderProject();
       renderBible();
       renderAssets();
@@ -2227,16 +2285,16 @@
     });
   }
 
-  function init() {
-    if (!window.RocoStudio) {
+  async function init() {
+    if (!window.RocoStudio || !window.RocoWorkflowCore || !window.RocoApiClient || !window.RocoDataStore) {
       setStatus("生成器未加载，请用本地服务打开或刷新缓存", true);
       return;
     }
     try {
       bindEvents();
-      loadProjects();
-      restoreDraft();
-      loadHistory();
+      await loadProjects();
+      await restoreDraft();
+      await loadHistory();
       if (state.topics.length) {
         refreshTopicDerivedViews();
       } else {

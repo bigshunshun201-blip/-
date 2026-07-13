@@ -1,6 +1,6 @@
 import { cp, copyFile, mkdir, rm } from "node:fs/promises";
 
-const files = ["index.html", "styles.css", "app.js", "generator.js"];
+const files = ["index.html", "styles.css", "app.js", "generator.js", "workflow-core.js", "api-client.js", "data-store.js"];
 
 await rm("public", { recursive: true, force: true });
 await mkdir("public", { recursive: true });

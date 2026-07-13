@@ -1,6 +1,6 @@
 # 洛克王国短剧创作工作台
 
-这是一个本地运行的短剧创作与分析工具。正式生成剧本和分镜时会调用你配置的 AI 模型；没有连接模型时，页面会明确提示，不会把离线模板伪装成真实生成。
+这是一个可本地运行并部署到 Cloudflare Workers 的连续短剧生产工具。它包含内容项目、短剧圣经、单集策划、剧本版本、对应分镜、一致性检查、发布复盘和内容资产库。
 
 ## 推荐：使用 DeepSeek
 
@@ -51,7 +51,13 @@ npx.cmd wrangler deploy
 
 `APP_ACCESS_CODE` 是你自己设置的私有访问码。部署完成后打开 Wrangler 输出的 `workers.dev` 地址，首次使用时页面会要求输入该访问码。
 
-后续本地改动后，执行 `git push` 推送代码，再运行：
+首次创建用量数据库后执行迁移：
+
+```powershell
+npx.cmd wrangler d1 migrations apply roco-shortdrama-usage --remote
+```
+
+后续本地改动推送到 `main` 后，GitHub Actions 会自动构建并部署。也可以手动运行：
 
 ```powershell
 npm.cmd run deploy:cloudflare
@@ -133,7 +139,7 @@ node server.js
 
 ## 生成记录用法
 
-每次点击 `AI 生成剧本与分镜` 或 `AI 续写下一集`，工具都会自动把完整结果保存到 `生成记录` 页签，最多保留 60 条。记录保存在当前浏览器的本地存储里，刷新页面不会丢。
+每次点击 `AI 生成剧本` 或 `AI 续写下一集`，工具都会自动把结果保存到 `作品库`，最多显示 60 条。项目版本是剧本和分镜的唯一完整档案；作品库只保存索引，避免同一内容重复占用空间。项目档案使用浏览器 IndexedDB 保存，旧版 `localStorage` 数据会首次打开时自动迁移。
 
 - `查看/恢复`：把某条历史结果恢复到当前剧本和分镜区。
 - `基于它续写`：先恢复这条记录，再把它作为上一集生成下一集。
@@ -143,8 +149,12 @@ node server.js
 
 ## 文件说明
 
-- `server.js`：本地 AI 后端，支持 DeepSeek、Ollama、OpenAI-compatible、OpenAI。
-- `app.js`：页面交互、AI 请求、渲染、复制和导出。
+- `server.js`：本地 AI 后端；DeepSeek 直接复用线上 Worker 路由，其他本地模型仍保持兼容。
+- `cloudflare/worker.mjs`：线上 AI API、访问控制、生成提示、超时和每日预算保护。
+- `workflow-core.js`：项目连续性选集和作品库去重规则。
+- `api-client.js`：访问码重试、请求超时和 API 错误解析。
+- `data-store.js`：IndexedDB 项目档案和旧数据兼容迁移。
+- `app.js`：页面状态、AI 请求、渲染、复制和导出。
 - `generator.js`：选题库、轻量数据参考和离线辅助逻辑。
 - `index.html`：页面结构。
 - `styles.css`：界面样式。
