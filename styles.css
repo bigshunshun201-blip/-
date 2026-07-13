@@ -275,6 +275,14 @@ th, td { border-bottom: 1px solid var(--line); padding: 11px 12px; text-align: l
 th { position: sticky; z-index: 1; top: 0; color: var(--signal); background: #18211d; font-size: 12px; font-weight: 850; white-space: nowrap; }
 tbody tr:last-child td { border-bottom: 0; }
 tbody tr:hover td { background: rgba(200, 221, 124, 0.035); }
+.storyboard-production-table { min-width: 1640px; }
+.storyboard-production-table td { min-width: 130px; }
+.storyboard-production-table td:nth-child(1), .storyboard-production-table td:nth-child(2), .storyboard-production-table td:last-child { min-width: 84px; white-space: nowrap; }
+.storyboard-production-table small { color: var(--ink-faint); line-height: 1.5; }
+.storyboard-production-table input, .storyboard-production-table select { min-width: 150px; padding: 8px 9px; font-size: 12px; }
+.episode-versions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.episode-versions .small-action { min-height: 28px; padding: 4px 8px; font-size: 11px; }
+.episode-versions .is-active-version { border-color: rgba(200, 221, 124, 0.52); color: var(--signal); background: rgba(200, 221, 124, 0.08); }
 
 .insight-grid, .topic-grid, .reference-grid, .schema-grid, .optimization-board, .creative-layout, .review-grid { display: grid; gap: 12px; }
 .insight-grid, .review-grid, .optimization-board { grid-template-columns: repeat(3, minmax(0, 1fr)); }

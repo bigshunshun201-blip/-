@@ -160,6 +160,51 @@
     };
   }
 
+  function createEpisodeVersion(snapshot = {}) {
+    return {
+      id: snapshot.id || newId("version"),
+      createdAt: snapshot.createdAt || new Date().toISOString(),
+      input: { ...(snapshot.input || {}) },
+      script: snapshot.script || null,
+      storyboard: Array.isArray(snapshot.storyboard) ? snapshot.storyboard : [],
+      creativePack: snapshot.creativePack || null,
+      historyId: snapshot.historyId || null,
+      source: snapshot.source || "",
+      model: snapshot.model || "",
+      consistency: snapshot.consistency || null,
+    };
+  }
+
+  function activeEpisodeVersion(episode) {
+    return (episode?.versions || []).find((version) => version.id === episode.activeVersionId) || episode?.versions?.at(-1) || null;
+  }
+
+  function applyEpisodeVersion(episode, versionId = episode.activeVersionId) {
+    const version = (episode.versions || []).find((item) => item.id === versionId) || activeEpisodeVersion(episode);
+    if (!version) return episode;
+    episode.activeVersionId = version.id;
+    episode.input = { ...(version.input || {}) };
+    episode.script = version.script || null;
+    episode.storyboard = Array.isArray(version.storyboard) ? version.storyboard : [];
+    episode.creativePack = version.creativePack || null;
+    episode.historyId = version.historyId || null;
+    episode.source = version.source || "";
+    episode.model = version.model || "";
+    episode.consistency = version.consistency || null;
+    return episode;
+  }
+
+  function normalizeProjectEpisodes(project) {
+    project.episodes = (project.episodes || []).map((episode) => {
+      const versions = Array.isArray(episode.versions) && episode.versions.length
+        ? episode.versions.map(createEpisodeVersion)
+        : [createEpisodeVersion(episode)];
+      const normalized = { ...episode, versions, activeVersionId: episode.activeVersionId || versions.at(-1).id };
+      return applyEpisodeVersion(normalized);
+    });
+    return project;
+  }
+
   function currentProject() {
     return state.projects.find((project) => project.id === state.currentProjectId) || state.projects[0] || null;
   }
@@ -185,7 +230,7 @@
       bible: { ...defaultBible, ...(project.bible || {}) },
       episodes: Array.isArray(project.episodes) ? project.episodes : [],
       assets: Array.isArray(project.assets) ? project.assets : [],
-    }));
+    })).map(normalizeProjectEpisodes);
     state.currentProjectId = state.projects.some((project) => project.id === state.currentProjectId)
       ? state.currentProjectId
       : state.projects[0].id;
@@ -317,9 +362,10 @@
         <article class="episode-card">
           <div class="episode-number">EP ${escapeHtml(episode.episodeNumber)}</div>
           <div>
-            <div class="history-meta"><span>${escapeHtml(episode.review?.status || "draft")}</span><span>${episode.storyboard?.length || 0} 镜</span></div>
+            <div class="history-meta"><span>${escapeHtml(episode.review?.status || "draft")}</span><span>${episode.storyboard?.length || 0} 镜</span><span>${(episode.versions || []).length} 个版本</span></div>
             <h4>${escapeHtml(episode.script?.title || "待生成剧本")}</h4>
             <p>${escapeHtml(episode.script?.synopsis || "本集还没有完成剧本。")}</p>
+            <div class="episode-versions">${(episode.versions || []).map((version, versionIndex) => `<button class="small-action ${version.id === episode.activeVersionId ? "is-active-version" : ""}" data-project-episode-version="${escapeHtml(episode.id)}" data-project-version-id="${escapeHtml(version.id)}">v${versionIndex + 1}</button>`).join("")}</div>
           </div>
           <div class="episode-actions">
             <button class="small-action" data-project-episode-restore="${escapeHtml(episode.id)}">打开本集</button>
@@ -375,6 +421,62 @@
     setStatus(`已新建项目：${project.name}`);
   }
 
+  function exportCurrentProject() {
+    const project = currentProject();
+    if (!project) return;
+    const payload = {
+      exportVersion: 1,
+      exportedAt: new Date().toISOString(),
+      project,
+    };
+    const safeName = project.name.replace(/[\\/:*?"<>|]/g, "-").slice(0, 48) || "roco-project";
+    download(`${safeName}-project.json`, JSON.stringify(payload, null, 2), "application/json;charset=utf-8");
+    setStatus("项目已导出，可用于备份或迁移设备");
+  }
+
+  function importProjectFile(file) {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const parsed = JSON.parse(String(reader.result || "{}"));
+        const imported = parsed.project || parsed;
+        if (!imported || typeof imported !== "object" || !String(imported.name || "").trim()) {
+          throw new Error("不是有效的项目备份文件。");
+        }
+        const project = {
+          ...createProjectRecord(`${String(imported.name).trim()}（导入）`),
+          ...imported,
+          id: newId("project"),
+          name: `${String(imported.name).trim()}（导入）`,
+          bible: { ...defaultBible, ...(imported.bible || {}) },
+          assets: Array.isArray(imported.assets) ? imported.assets.map((asset) => ({ ...asset, id: newId("asset") })) : [],
+          episodes: Array.isArray(imported.episodes) ? imported.episodes : [],
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        normalizeProjectEpisodes(project);
+        project.episodes.forEach((episode) => {
+          episode.id = newId("episode");
+          (episode.versions || []).forEach((version) => { version.id = newId("version"); });
+          episode.activeVersionId = episode.versions?.at(-1)?.id || null;
+          applyEpisodeVersion(episode, episode.activeVersionId);
+        });
+        state.projects.unshift(project);
+        state.currentProjectId = project.id;
+        state.currentEpisodeId = null;
+        state.reviewEpisodeId = null;
+        setInputValue("episodeNumber", nextEpisodeNumber(project));
+        persistProjects();
+        renderProject(); renderBible(); renderAssets(); renderConsistency(); saveDraft(false);
+        setStatus(`项目已导入：${project.name}`);
+      } catch (error) {
+        reportError("项目导入", error);
+      }
+    };
+    reader.readAsText(file, "utf-8");
+  }
+
   function upsertProjectEpisode({ mode, input, response, generated, historyId }) {
     const project = currentProject();
     if (!project) return null;
@@ -387,18 +489,22 @@
       episode = { id: newId("episode"), episodeNumber, review: { status: "draft" } };
       project.episodes.push(episode);
     }
-    Object.assign(episode, {
-      episodeNumber,
-      input: { ...input },
+    const version = createEpisodeVersion({
+      input,
       script: generated.script,
-      storyboard: generated.storyboard || episode.storyboard || [],
-      creativePack: generated.creativePack || episode.creativePack || null,
-      historyId: historyId || episode.historyId || null,
-      source: response.source || episode.source || "",
-      model: response.model || episode.model || "",
+      storyboard: generated.storyboard || [],
+      creativePack: generated.creativePack || null,
+      historyId,
+      source: response.source || "",
+      model: response.model || "",
       consistency: null,
-      updatedAt: new Date().toISOString(),
     });
+    episode.versions = Array.isArray(episode.versions) ? episode.versions : [];
+    episode.versions.push(version);
+    episode.episodeNumber = episodeNumber;
+    episode.activeVersionId = version.id;
+    applyEpisodeVersion(episode, version.id);
+    episode.updatedAt = new Date().toISOString();
     project.updatedAt = new Date().toISOString();
     state.currentEpisodeId = episode.id;
     state.reviewEpisodeId = episode.id;
@@ -411,19 +517,24 @@
     const episode = currentProjectEpisode();
     const project = currentProject();
     if (!episode || !project) return;
-    episode.storyboard = state.storyboard;
-    episode.source = response.source || episode.source || "";
-    episode.model = response.model || episode.model || "";
+    const version = activeEpisodeVersion(episode);
+    if (version) {
+      version.storyboard = state.storyboard;
+      version.source = response.source || version.source || "";
+      version.model = response.model || version.model || "";
+      applyEpisodeVersion(episode, version.id);
+    }
     episode.updatedAt = new Date().toISOString();
     project.updatedAt = new Date().toISOString();
     persistProjects();
     renderProject();
   }
 
-  function restoreProjectEpisode(id) {
+  function restoreProjectEpisode(id, versionId) {
     const project = currentProject();
     const episode = project?.episodes?.find((item) => item.id === id);
     if (!episode) throw new Error("没有找到该项目集数。");
+    applyEpisodeVersion(episode, versionId || episode.activeVersionId);
     Object.entries(episode.input || {}).forEach(([key, value]) => setInputValue(key, value));
     applyEpisodePlan(episode.input?.episodePlan);
     setInputValue("episodeNumber", episode.episodeNumber);
@@ -435,7 +546,8 @@
     state.currentHistoryId = episode.historyId || null;
     renderScript(); renderStoryboard(); renderCreativePack(); renderProject(); renderAssets(); renderConsistency(); renderExample(); saveDraft(false);
     switchTab("script");
-    setStatus(`已打开第 ${episode.episodeNumber} 集：${episode.script?.title || "待生成"}`);
+    const versionIndex = (episode.versions || []).findIndex((version) => version.id === episode.activeVersionId) + 1;
+    setStatus(`已打开第 ${episode.episodeNumber} 集 v${versionIndex}：${episode.script?.title || "待生成"}`);
   }
 
   function saveReview() {
@@ -571,7 +683,9 @@
     const response = await apiRequest("/api/continuity-check", { input });
     const episode = currentProjectEpisode();
     if (episode) {
-      episode.consistency = response.result;
+      const version = activeEpisodeVersion(episode);
+      if (version) version.consistency = response.result;
+      applyEpisodeVersion(episode, version?.id);
       episode.updatedAt = new Date().toISOString();
       persistProjects();
     }
@@ -940,6 +1054,8 @@
         sound: shot.sound || "",
         subtitle: shot.subtitle || "",
         visualPrompt: shot.visualPrompt || "",
+        assetLinks: shot.assetLinks || "",
+        assetNote: shot.assetNote || "",
         assetStatus: shot.assetStatus || "待准备",
       })),
       creativePack: result.creativePack || null,
@@ -979,6 +1095,8 @@
       sound: shot.sound || "",
       subtitle: shot.subtitle || "",
       visualPrompt: shot.visualPrompt || "",
+      assetLinks: shot.assetLinks || "",
+      assetNote: shot.assetNote || "",
       assetStatus: shot.assetStatus || "待准备",
     }));
   }
@@ -1117,21 +1235,40 @@
       $("#storyboardTable").innerHTML = `<p class="helper">当前剧本还没有生成分镜。确认剧本方向可用后，点击“AI 生成分镜”。</p>`;
       return;
     }
-    renderTable($("#storyboardTable"), state.storyboard, [
-      { key: "shot", label: "镜头" },
-      { key: "seconds", label: "时长" },
-      { key: "characters", label: "角色" },
-      { key: "scene", label: "场景" },
-      { key: "visual", label: "画面内容" },
-      { key: "action", label: "角色动作" },
-      { key: "line", label: "台词/旁白" },
-      { key: "scale", label: "景别" },
-      { key: "movement", label: "运镜" },
-      { key: "sound", label: "音效/BGM" },
-      { key: "subtitle", label: "字幕" },
-      { key: "visualPrompt", label: "画面提示词" },
-      { key: "assetStatus", label: "素材状态" },
-    ]);
+    const statusOptions = ["已有", "待制作", "待采集"];
+    $("#storyboardTable").innerHTML = `
+      <table class="storyboard-production-table">
+        <thead><tr><th>镜头</th><th>时长</th><th>角色 / 场景</th><th>画面与动作</th><th>台词 / 字幕</th><th>镜头 / 声音</th><th>画面提示词</th><th>关联资产</th><th>制作备注</th><th>素材状态</th></tr></thead>
+        <tbody>${state.storyboard.map((shot, index) => `
+          <tr>
+            <td>${escapeHtml(shot.shot)}</td><td>${escapeHtml(shot.seconds)} 秒</td>
+            <td><strong>${escapeHtml(shot.characters)}</strong><br>${escapeHtml(shot.scene)}</td>
+            <td>${escapeHtml(shot.visual)}<br><small>${escapeHtml(shot.action)}</small></td>
+            <td>${escapeHtml(shot.line)}<br><small>${escapeHtml(shot.subtitle)}</small></td>
+            <td>${escapeHtml(shot.scale)} · ${escapeHtml(shot.movement)}<br><small>${escapeHtml(shot.sound)}</small></td>
+            <td>${escapeHtml(shot.visualPrompt)}</td>
+            <td><input data-shot-field="assetLinks" data-shot-index="${index}" value="${escapeHtml(shot.assetLinks)}" placeholder="资产库名称 / 待采集素材" /></td>
+            <td><input data-shot-field="assetNote" data-shot-index="${index}" value="${escapeHtml(shot.assetNote)}" placeholder="负责人、截止时间或备注" /></td>
+            <td><select data-shot-field="assetStatus" data-shot-index="${index}">${statusOptions.map((status) => `<option value="${status}" ${shot.assetStatus === status ? "selected" : ""}>${status}</option>`).join("")}</select></td>
+          </tr>`).join("")}</tbody>
+      </table>`;
+  }
+
+  function updateStoryboardProductionField(index, field, value) {
+    const shot = state.storyboard[index];
+    if (!shot || !["assetLinks", "assetNote", "assetStatus"].includes(field)) return;
+    shot[field] = value;
+    const episode = currentProjectEpisode();
+    const version = activeEpisodeVersion(episode);
+    if (episode && version) {
+      version.storyboard = state.storyboard;
+      applyEpisodeVersion(episode, version.id);
+      episode.updatedAt = new Date().toISOString();
+      currentProject().updatedAt = new Date().toISOString();
+      persistProjects();
+    }
+    saveDraft(false);
+    setStatus("分镜制作状态已保存");
   }
 
   function topReferenceRows() {
@@ -1277,6 +1414,7 @@
         };
       });
       project.updatedAt = new Date().toISOString();
+      normalizeProjectEpisodes(project);
       persistHistory();
       persistProjects();
     }
@@ -1910,6 +2048,12 @@
   function bindEvents() {
     $("#newProjectBtn").addEventListener("click", createProject);
     $("#saveProjectBtn").addEventListener("click", saveProjectMeta);
+    $("#exportProjectBtn").addEventListener("click", exportCurrentProject);
+    $("#importProjectBtn").addEventListener("click", () => $("#importProjectFile").click());
+    $("#importProjectFile").addEventListener("change", (event) => {
+      importProjectFile(event.target.files?.[0]);
+      event.target.value = "";
+    });
     $("#saveBibleBtn").addEventListener("click", saveBible);
     $("#checkContinuityBtn").addEventListener("click", async () => {
       try {
@@ -1969,6 +2113,12 @@
         }
         reportError("分镜生成", error);
       }
+    });
+    $("#storyboardTable").addEventListener("change", (event) => {
+      const field = event.target.dataset.shotField;
+      const index = Number(event.target.dataset.shotIndex);
+      if (!field || Number.isNaN(index)) return;
+      updateStoryboardProductionField(index, field, event.target.value);
     });
     $("#continueBtn").addEventListener("click", async () => {
       try {
@@ -2041,8 +2191,10 @@
     $("#projectEpisodeList").addEventListener("click", (event) => {
       const restoreButton = event.target.closest("[data-project-episode-restore]");
       const reviewButton = event.target.closest("[data-project-episode-review]");
+      const versionButton = event.target.closest("[data-project-episode-version]");
       try {
         if (restoreButton) restoreProjectEpisode(restoreButton.dataset.projectEpisodeRestore);
+        if (versionButton) restoreProjectEpisode(versionButton.dataset.projectEpisodeVersion, versionButton.dataset.projectVersionId);
         if (reviewButton) {
           state.reviewEpisodeId = reviewButton.dataset.projectEpisodeReview;
           renderReviewForm();

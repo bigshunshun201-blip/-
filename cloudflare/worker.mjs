@@ -4,6 +4,10 @@ const JSON_HEADERS = {
 };
 
 const ALLOWED_MODELS = new Set(["deepseek-v4-flash", "deepseek-v4-pro"]);
+const MAX_INPUT_BYTES = 120_000;
+const RATE_WINDOW_MS = 60_000;
+const MAX_AI_REQUESTS_PER_WINDOW = 12;
+const rateBuckets = new Map();
 
 function json(body, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: JSON_HEADERS });
@@ -11,6 +15,31 @@ function json(body, status = 200) {
 
 function error(message, code = "SERVER_ERROR", status = 500) {
   return json({ ok: false, error: message, code }, status);
+}
+
+function codedError(message, code) {
+  const cause = new Error(message);
+  cause.code = code;
+  return cause;
+}
+
+function consumeRateLimit(request, path) {
+  const now = Date.now();
+  const client = request.headers.get("cf-connecting-ip") || request.headers.get("x-forwarded-for") || "private-client";
+  const key = `${client}:${path}`;
+  const current = rateBuckets.get(key);
+  const bucket = !current || now - current.startedAt >= RATE_WINDOW_MS ? { startedAt: now, count: 0 } : current;
+  if (bucket.count >= MAX_AI_REQUESTS_PER_WINDOW) {
+    return Math.max(1, Math.ceil((RATE_WINDOW_MS - (now - bucket.startedAt)) / 1000));
+  }
+  bucket.count += 1;
+  rateBuckets.set(key, bucket);
+  if (rateBuckets.size > 500) {
+    for (const [storedKey, value] of rateBuckets) {
+      if (now - value.startedAt >= RATE_WINDOW_MS) rateBuckets.delete(storedKey);
+    }
+  }
+  return 0;
 }
 
 function normalizeInput(input = {}) {
@@ -58,6 +87,20 @@ function compact(value, fallback = "未指定") {
 function stringify(value, maxLength = 14000) {
   const text = JSON.stringify(value ?? {}, null, 2);
   return text.length > maxLength ? `${text.slice(0, maxLength)}\n[内容过长，已截断]` : text;
+}
+
+function creativeInputSummary(payload) {
+  const {
+    projectBible,
+    projectContinuity,
+    projectAssets,
+    latestReview,
+    previousScript,
+    previousStoryboard,
+    script,
+    ...creativeInput
+  } = payload;
+  return stringify(creativeInput, 4800);
 }
 
 function extractJson(raw) {
@@ -133,7 +176,7 @@ function scriptPrompt(input) {
 
 本集策划（高优先级）：${stringify(payload.episodePlan || {}, 2600)}
 
-用户输入：${stringify(payload, 7000)}${continuation}
+本集创作输入：${creativeInputSummary(payload)}${continuation}
 
 返回结构：
 {
@@ -172,7 +215,7 @@ function storyboardPrompt(input) {
 4. 场景为《洛克王国：世界》手游开放世界，主要场景：${compact(payload.scene)}。
 5. 必须使用这些角色名：${names.length ? names.join("、") : "以剧本为准"}。
 6. 必须服从短剧圣经：镜头不能让角色使用超出能力边界的能力，角色关系和反派线索必须延续已完成集数。
-7. 每个镜头都必须填写角色、场景、动作、台词/旁白、镜头景别、时长、画面提示词、音效/配乐提示和素材状态；素材状态只能是“已有”“待制作”“待采集”。
+7. 每个镜头都必须填写角色、场景、动作、台词/旁白、镜头景别、时长、画面提示词、音效/配乐提示、关联资产和素材状态；素材状态只能是“已有”“待制作”“待采集”。
 
 项目连续性资料：${canon}
 
@@ -181,7 +224,7 @@ function storyboardPrompt(input) {
 返回结构：
 {
   "storyboard": [
-    {"shot":1,"seconds":3,"characters":"出镜角色","scene":"场景","visual":"画面内容","action":"角色动作","line":"台词/旁白","scale":"景别","movement":"镜头运动","sound":"音效/配乐建议","subtitle":"字幕文案","visualPrompt":"可给绘图/素材检索使用的画面提示词","assetStatus":"待制作"}
+    {"shot":1,"seconds":3,"characters":"出镜角色","scene":"场景","visual":"画面内容","action":"角色动作","line":"台词/旁白","scale":"景别","movement":"镜头运动","sound":"音效/配乐建议","subtitle":"字幕文案","visualPrompt":"可给绘图/素材检索使用的画面提示词","assetLinks":"资产库名称或待采集素材","assetNote":"制作备注","assetStatus":"待制作"}
   ]
 }`;
 }
@@ -260,6 +303,8 @@ function normalizeStoryboard(result) {
       sound: shot.sound || "",
       subtitle: shot.subtitle || "",
       visualPrompt: shot.visualPrompt || "",
+      assetLinks: shot.assetLinks || "",
+      assetNote: shot.assetNote || "",
       assetStatus: ["已有", "待制作", "待采集"].includes(shot.assetStatus) ? shot.assetStatus : "待制作",
     })),
   };
@@ -347,7 +392,16 @@ function authorized(request, env) {
 }
 
 async function readInput(request) {
-  const payload = await request.json().catch(() => ({}));
+  const declaredSize = Number(request.headers.get("content-length") || 0);
+  if (declaredSize > MAX_INPUT_BYTES) throw codedError("输入内容过大，请缩短项目资产或历史摘要后重试。", "REQUEST_TOO_LARGE");
+  const raw = await request.text();
+  if (raw.length > MAX_INPUT_BYTES) throw codedError("输入内容过大，请缩短项目资产或历史摘要后重试。", "REQUEST_TOO_LARGE");
+  let payload = {};
+  try {
+    payload = raw ? JSON.parse(raw) : {};
+  } catch (_) {
+    throw codedError("请求内容不是有效 JSON。", "INVALID_REQUEST");
+  }
   return payload.input || payload;
 }
 
@@ -367,8 +421,17 @@ async function api(request, env, url) {
   }
 
   if (request.method !== "POST") return error("Not found", "NOT_FOUND", 404);
+  const retryAfter = consumeRateLimit(request, url.pathname);
+  if (retryAfter) {
+    return new Response(JSON.stringify({ ok: false, error: "请求过于频繁，请稍后再试。", code: "RATE_LIMITED", retryAfter }), {
+      status: 429,
+      headers: { ...JSON_HEADERS, "retry-after": String(retryAfter) },
+    });
+  }
   const input = await readInput(request);
   const model = modelFor(input, env);
+  const requestId = crypto.randomUUID();
+  console.log(JSON.stringify({ event: "ai_request", requestId, path: url.pathname, model, at: new Date().toISOString() }));
 
   if (url.pathname === "/api/script") {
     const result = normalizeScript(await askDeepSeek(env, input, scriptPrompt(input), 1500));
@@ -410,8 +473,10 @@ export default {
       return env.ASSETS.fetch(request);
     } catch (cause) {
       const code = cause?.code || "SERVER_ERROR";
-      const status = code === "NO_DEEPSEEK_KEY" ? 500 : 502;
+      const status = code === "NO_DEEPSEEK_KEY" ? 500 : code === "REQUEST_TOO_LARGE" ? 413 : code === "INVALID_REQUEST" ? 400 : 502;
       return error(cause?.message || "生成服务暂时不可用", code, status);
     }
   },
 };
+
+export const __test = { normalizeInput, normalizeStoryboard, normalizeContinuity, creativeInputSummary };

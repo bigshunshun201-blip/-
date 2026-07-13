@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>洛克王国短剧创作工作台</title>
-    <link rel="stylesheet" href="./styles.css?v=20260713-production-system" />
+    <link rel="stylesheet" href="./styles.css?v=20260713-asset-safe-system" />
   </head>
   <body>
     <a class="skip-link" href="#workspace">跳到创作工作区</a>
@@ -213,6 +213,9 @@
               <div class="header-actions">
                 <button class="small-action" id="newProjectBtn">新建项目</button>
                 <button class="small-action" id="saveProjectBtn">保存项目信息</button>
+                <button class="small-action" id="exportProjectBtn">导出项目</button>
+                <button class="small-action" id="importProjectBtn">导入项目</button>
+                <input id="importProjectFile" type="file" accept="application/json" hidden />
               </div>
             </div>
             <div class="project-layout">
@@ -435,7 +438,7 @@
       粉丝向二创工作台示例，不代表官方内容或授权关系。发布前请核对平台规范与 IP 授权边界。
     </footer>
 
-    <script src="./generator.js?v=20260713-production-system"></script>
-    <script src="./app.js?v=20260713-production-system"></script>
+    <script src="./generator.js?v=20260713-asset-safe-system"></script>
+    <script src="./app.js?v=20260713-asset-safe-system"></script>
   </body>
 </html>

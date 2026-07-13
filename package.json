@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "build": "node scripts/build-public.mjs",
+    "test": "node --test",
     "start": "node server.js",
     "deploy:cloudflare": "npm run build && npx.cmd wrangler deploy",
     "dev:cloudflare": "npm run build && npx.cmd wrangler dev"
