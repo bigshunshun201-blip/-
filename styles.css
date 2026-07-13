@@ -323,6 +323,25 @@ tbody tr:hover td { background: rgba(200, 221, 124, 0.035); }
 .history-hooks { margin-top: 14px; }
 .episode-plan-panel { display: grid; gap: 12px; }
 .episode-plan-panel .helper { margin-top: -4px; }
+.plan-starter { display: grid; gap: 12px; padding: 14px; border: 1px solid rgba(200, 221, 124, 0.28); border-left: 3px solid var(--signal); border-radius: var(--radius-sm); background: rgba(200, 221, 124, 0.045); }
+.plan-starter > div:first-child { display: grid; gap: 4px; }
+.plan-starter strong { color: var(--ink); font-size: 13px; }
+.plan-starter span { color: var(--ink-faint); font-size: 11px; font-weight: 700; }
+.plan-starter-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.plan-starter-actions button { min-height: 36px; padding: 7px 9px; }
+.plan-suggestions { display: grid; gap: 9px; }
+.plan-option { display: grid; gap: 9px; padding: 13px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: rgba(255, 255, 255, 0.018); transition: border-color 160ms ease, background-color 160ms ease; }
+.plan-option:hover { border-color: rgba(200, 221, 124, 0.4); background: rgba(200, 221, 124, 0.03); }
+.plan-option.is-selected { border-color: rgba(200, 221, 124, 0.62); background: rgba(200, 221, 124, 0.07); }
+.plan-option-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.plan-option-head div { min-width: 0; }
+.plan-option-kicker { display: block; margin-bottom: 3px; color: var(--signal); font-size: 10px; font-weight: 900; }
+.plan-option h3 { margin: 0; color: var(--ink); font-size: 13px; line-height: 1.4; }
+.plan-option p { margin: 0; color: var(--ink-soft); font-size: 11px; line-height: 1.55; }
+.plan-option .small-action { flex: 0 0 auto; min-height: 32px; padding: 6px 9px; }
+.plan-option-preview { display: grid; gap: 5px; margin: 0; padding: 0; list-style: none; }
+.plan-option-preview li { color: var(--ink-soft); font-size: 11px; line-height: 1.5; }
+.plan-option-preview strong { color: var(--ink); font-size: 11px; }
 
 .project-layout { display: grid; grid-template-columns: minmax(280px, 0.8fr) minmax(0, 1.2fr); gap: 24px; }
 .project-config { display: grid; align-content: start; gap: 13px; padding-right: 24px; border-right: 1px solid var(--line); }

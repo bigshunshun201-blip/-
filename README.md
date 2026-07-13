@@ -153,6 +153,7 @@ node server.js
 - `cloudflare/worker.mjs`：线上 AI API、访问控制、生成提示、超时和每日预算保护。
 - `workflow-core.js`：项目连续性选集和作品库去重规则。
 - `project-domain.js`：内容项目、集数版本、本集策划校验和发布复盘规则。
+- `episode-planner.js`：不消耗 AI 积分的本集策划起步器与补全规则。
 - `ui-templates.js`：剧本、分镜、作品库和通用表格模板。
 - `api-client.js`：访问码重试、请求超时和 API 错误解析。
 - `data-store.js`：IndexedDB 项目档案和旧数据兼容迁移。

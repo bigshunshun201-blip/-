@@ -86,7 +86,7 @@
     const missing = Object.entries(labels)
       .filter(([key]) => !String(plan[key] || "").trim())
       .map(([, label]) => label);
-    if (missing.length) throw new Error(`请先完成本集策划：${missing.join("、")}`);
+    if (missing.length) throw new Error(`请先完成本集策划：${missing.join("、")}。没有思路时可点击“一键填好”。`);
   }
 
   function deriveReviewInsights(review = {}) {

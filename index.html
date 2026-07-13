@@ -147,7 +147,18 @@
 
         <section class="panel-section compact episode-plan-panel">
           <div class="section-title"><h2>本集策划</h2></div>
-          <p class="helper">先锁定追更结构，再生成剧本。五项会连同短剧圣经进入本集档案。</p>
+          <p class="helper">不用从空白开始。系统可以根据上面的主题、角色和场景先搭好追更结构，你只需要挑选和修改。</p>
+          <div class="plan-starter">
+            <div>
+              <strong>脑袋空空时，从这里起步</strong>
+              <span>本地生成，不消耗 AI 积分</span>
+            </div>
+            <div class="plan-starter-actions">
+              <button class="secondary-action" id="autoPlanBtn" type="button">一键填好</button>
+              <button class="ghost-action" id="suggestPlansBtn" type="button">比较 3 套</button>
+            </div>
+          </div>
+          <div class="plan-suggestions" id="planSuggestions" aria-live="polite" hidden></div>
           <label>开头钩子<textarea id="planOpeningHook" rows="2" placeholder="前 3 秒必须看见的异常、危机或反常信息"></textarea></label>
           <label>核心冲突<textarea id="planConflict" rows="2" placeholder="本集主角现在必须解决的对立问题"></textarea></label>
           <label>反转信息<textarea id="planReversal" rows="2" placeholder="中后段改变观众判断的新信息"></textarea></label>
@@ -438,12 +449,13 @@
       粉丝向二创工作台示例，不代表官方内容或授权关系。发布前请核对平台规范与 IP 授权边界。
     </footer>
 
-    <script src="./generator.js?v=20260713-app-modules"></script>
-    <script src="./workflow-core.js?v=20260713-app-modules"></script>
-    <script src="./project-domain.js?v=20260713-app-modules"></script>
-    <script src="./ui-templates.js?v=20260713-app-modules"></script>
-    <script src="./api-client.js?v=20260713-app-modules"></script>
-    <script src="./data-store.js?v=20260713-app-modules"></script>
-    <script src="./app.js?v=20260713-app-modules"></script>
+    <script src="./generator.js?v=20260713-plan-starter"></script>
+    <script src="./workflow-core.js?v=20260713-plan-starter"></script>
+    <script src="./project-domain.js?v=20260713-plan-starter"></script>
+    <script src="./episode-planner.js?v=20260713-plan-starter"></script>
+    <script src="./ui-templates.js?v=20260713-plan-starter"></script>
+    <script src="./api-client.js?v=20260713-plan-starter"></script>
+    <script src="./data-store.js?v=20260713-plan-starter"></script>
+    <script src="./app.js?v=20260713-plan-starter"></script>
   </body>
 </html>

@@ -9,6 +9,7 @@ const workflow = require("../workflow-core.js");
 const apiClientModule = require("../api-client.js");
 const dataStoreModule = require("../data-store.js");
 const projectDomain = require("../project-domain.js");
+const episodePlanner = require("../episode-planner.js");
 const uiTemplates = require("../ui-templates.js");
 
 test("storyboard normalizer retains production fields", () => {
@@ -48,9 +49,33 @@ test("continuity normalizer always returns the four required checks", () => {
 
 test("UI contains the production workflow controls", async () => {
   const html = await readFile(new URL("../index.html", import.meta.url), "utf8");
-  for (const id of ["planOpeningHook", "checkContinuityBtn", "assetLibrary", "reviewCommentThemes", "exportProjectBtn"]) {
+  for (const id of ["planOpeningHook", "autoPlanBtn", "suggestPlansBtn", "planSuggestions", "checkContinuityBtn", "assetLibrary", "reviewCommentThemes", "exportProjectBtn"]) {
     assert.match(html, new RegExp(`id="${id}"`));
   }
+});
+
+test("episode planner produces three complete and distinct starting plans", () => {
+  const options = episodePlanner.generatePlanOptions({
+    theme: "迪莫拒绝回家",
+    roles: "阿洛：老玩家；迪莫：搭档；影像人：对手",
+    scene: "月牙镇",
+    memeSeed: "这合理吗",
+  }, { seed: 7, count: 3 });
+  assert.equal(options.length, 3);
+  assert.equal(new Set(options.map((option) => option.angle)).size, 3);
+  for (const option of options) {
+    assert.equal(episodePlanner.planIsComplete(option.plan), true);
+    assert.match(option.plan.openingHook, /月牙镇|阿洛|迪莫/);
+  }
+});
+
+test("episode planner fills only missing fields when a creator has started writing", () => {
+  const plan = episodePlanner.completePlan({
+    theme: "契约异常",
+    episodePlan: { openingHook: "我自己写的开头" },
+  }, { seed: 3 });
+  assert.equal(plan.openingHook, "我自己写的开头");
+  assert.equal(episodePlanner.planIsComplete(plan), true);
 });
 
 test("continuity uses episodes before the target instead of the selected episode id", () => {
@@ -217,7 +242,8 @@ test("UI templates escape model content and keep production controls", () => {
 test("page loads domain and template modules before app.js", async () => {
   const html = await readFile(new URL("../index.html", import.meta.url), "utf8");
   const domainIndex = html.indexOf("project-domain.js");
+  const plannerIndex = html.indexOf("episode-planner.js");
   const templatesIndex = html.indexOf("ui-templates.js");
   const appIndex = html.indexOf("app.js");
-  assert.ok(domainIndex > 0 && templatesIndex > domainIndex && appIndex > templatesIndex);
+  assert.ok(domainIndex > 0 && plannerIndex > domainIndex && templatesIndex > plannerIndex && appIndex > templatesIndex);
 });

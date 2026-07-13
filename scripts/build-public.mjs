@@ -7,6 +7,7 @@ const files = [
   "generator.js",
   "workflow-core.js",
   "project-domain.js",
+  "episode-planner.js",
   "ui-templates.js",
   "api-client.js",
   "data-store.js",

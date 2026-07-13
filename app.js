@@ -15,6 +15,8 @@
     currentEpisodeId: null,
     reviewEpisodeId: null,
     topicBatch: 0,
+    planOptions: [],
+    selectedPlanOptionId: null,
     activeAiOperation: null,
   };
 
@@ -43,6 +45,7 @@
   const normalizeProjectEpisodes = projectDomain.normalizeProjectEpisodes;
   const validateEpisodePlan = projectDomain.validateEpisodePlan;
   const deriveReviewInsights = projectDomain.deriveReviewInsights;
+  const episodePlanner = window.RocoEpisodePlanner;
   const uiTemplates = window.RocoUiTemplates;
   const escapeHtml = uiTemplates.escapeHtml;
   const formatItem = uiTemplates.formatItem;
@@ -156,7 +159,10 @@
     state.storyboard = [];
     state.creativePack = null;
     state.selectedTopic = null;
+    state.planOptions = [];
+    state.selectedPlanOptionId = null;
     setInputValue("episodeNumber", nextEpisodeNumber());
+    renderPlanSuggestions();
     renderScript();
     renderStoryboard();
     renderCreativePack();
@@ -222,6 +228,81 @@
     setInputValue("planReversal", plan.reversal || "");
     setInputValue("planEndingSuspense", plan.endingSuspense || "");
     setInputValue("planTargetEmotion", plan.targetEmotion || "");
+  }
+
+  function plannerContext(topic = state.selectedTopic) {
+    const previousHook = state.script?.hooks?.at(-1);
+    return {
+      topic,
+      previousHook: previousHook ? formatItem(previousHook) : "",
+    };
+  }
+
+  function renderPlanSuggestions() {
+    const target = $("#planSuggestions");
+    if (!target) return;
+    target.hidden = !state.planOptions.length;
+    if (!state.planOptions.length) {
+      target.innerHTML = "";
+      return;
+    }
+    const labels = {
+      openingHook: "开头",
+      conflict: "冲突",
+      reversal: "反转",
+      endingSuspense: "悬念",
+      targetEmotion: "情绪",
+    };
+    target.innerHTML = state.planOptions.map((option, index) => `
+      <article class="plan-option ${option.id === state.selectedPlanOptionId ? "is-selected" : ""}">
+        <div class="plan-option-head">
+          <div>
+            <span class="plan-option-kicker">${escapeHtml(option.angle)}</span>
+            <h3>${escapeHtml(option.title)}</h3>
+          </div>
+          <button class="small-action" type="button" data-plan-option="${index}">${option.id === state.selectedPlanOptionId ? "已采用" : "采用"}</button>
+        </div>
+        <p>${escapeHtml(option.why)}</p>
+        <ul class="plan-option-preview">
+          ${Object.entries(labels).map(([key, label]) => `<li><strong>${label}：</strong>${escapeHtml(option.plan[key])}</li>`).join("")}
+        </ul>
+      </article>
+    `).join("");
+  }
+
+  function suggestEpisodePlans() {
+    state.planOptions = episodePlanner.generatePlanOptions(getInput(), {
+      ...plannerContext(),
+      count: 3,
+      seed: Date.now(),
+    });
+    state.selectedPlanOptionId = null;
+    renderPlanSuggestions();
+    setStatus("已给出 3 套本集策划，不消耗 AI 积分");
+  }
+
+  function autoFillEpisodePlan(options = {}) {
+    const input = getInput();
+    if (options.fresh) input.episodePlan = {};
+    const plan = episodePlanner.completePlan(input, {
+      ...plannerContext(options.topic),
+      seed: options.seed || Date.now(),
+    });
+    applyEpisodePlan(plan);
+    state.selectedPlanOptionId = null;
+    saveDraft(false);
+    setStatus("本集策划已自动填好，可以直接修改或生成剧本");
+    return plan;
+  }
+
+  function adoptPlanOption(index) {
+    const option = state.planOptions[index];
+    if (!option) throw new Error("没有找到这套策划，请重新生成灵感。");
+    applyEpisodePlan(option.plan);
+    state.selectedPlanOptionId = option.id;
+    renderPlanSuggestions();
+    saveDraft(false);
+    setStatus(`已采用“${option.angle}”方案，可以继续微调`);
   }
 
   function currentProject() {
@@ -689,6 +770,9 @@
     setInputValue("direction", topicPrompt(topic));
     setInputValue("audience", topic.audience);
     setInputValue("duration", topic.duration);
+    autoFillEpisodePlan({ fresh: true, topic });
+    state.planOptions = [];
+    renderPlanSuggestions();
     switchTab("script");
     saveDraft(false);
   }
@@ -1839,6 +1923,17 @@
       event.target.value = "";
     });
     $("#saveBibleBtn").addEventListener("click", saveBible);
+    $("#autoPlanBtn").addEventListener("click", () => autoFillEpisodePlan());
+    $("#suggestPlansBtn").addEventListener("click", suggestEpisodePlans);
+    $("#planSuggestions").addEventListener("click", (event) => {
+      const button = event.target.closest("[data-plan-option]");
+      if (!button) return;
+      try {
+        adoptPlanOption(Number(button.dataset.planOption));
+      } catch (error) {
+        reportError("采用本集策划", error);
+      }
+    });
     $("#checkContinuityBtn").addEventListener("click", async () => {
       try {
         await runContinuityCheck();
@@ -2010,7 +2105,7 @@
   }
 
   async function init() {
-    if (!window.RocoStudio || !window.RocoWorkflowCore || !window.RocoProjectDomain || !window.RocoUiTemplates || !window.RocoApiClient || !window.RocoDataStore) {
+    if (!window.RocoStudio || !window.RocoWorkflowCore || !window.RocoProjectDomain || !window.RocoEpisodePlanner || !window.RocoUiTemplates || !window.RocoApiClient || !window.RocoDataStore) {
       setStatus("生成器未加载，请用本地服务打开或刷新缓存", true);
       return;
     }
