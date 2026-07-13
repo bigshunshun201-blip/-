@@ -98,7 +98,7 @@
         <thead><tr><th>视频段</th><th>本段任务</th><th>角色 / 场景</th><th>段内节拍与动作</th><th>台词 / 字幕</th><th>镜头 / 声音</th><th>首尾连续性</th><th>AI 视频提示词</th><th>关联资产</th><th>制作备注</th><th>素材状态</th></tr></thead>
         <tbody>${storyboardRows.map((shot, index) => `
           <tr>
-            <td><strong>第 ${escapeHtml(shot.shot)} 段</strong><br>${escapeHtml(shot.timeRange)}<br><small>${escapeHtml(shot.seconds)} 秒</small></td>
+            <td><strong>第 ${escapeHtml(shot.shot)} 段</strong><br>${escapeHtml(shot.timeRange)}<br><small>${escapeHtml(shot.seconds)} 秒</small><br><button class="segment-copy-button" type="button" data-copy-storyboard-segment="${index}">复制本段</button></td>
             <td>${escapeHtml(shot.segmentGoal)}</td>
             <td><strong>${escapeHtml(shot.characters)}</strong><br>${escapeHtml(shot.scene)}</td>
             <td>${beats(shot.beatBreakdown)}<small>${escapeHtml(shot.visual)}；${escapeHtml(shot.action)}</small></td>

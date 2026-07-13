@@ -13,6 +13,7 @@ const AI_PATH_COST = new Map([
   ["/api/script", 1],
   ["/api/storyboard", 1],
   ["/api/bible", 1],
+  ["/api/meme-lab", 1],
   ["/api/plans", 1],
   ["/api/topics", 1],
   ["/api/continuity-check", 1],
@@ -127,6 +128,8 @@ function normalizeInput(input = {}) {
     episodeNumber: Math.max(1, Math.min(Number(input.episodeNumber || 1), 999)),
     style: String(input.style || "").trim(),
     memeSeed: String(input.memeSeed || "").trim(),
+    memeLabMode: String(input.memeLabMode || "extract").trim(),
+    memeRawMaterial: String(input.memeRawMaterial || "").trim(),
     aiModel: String(input.aiModel || "").trim(),
     competitorInsights: String(input.competitorInsights || "").trim(),
     continueInstruction: String(input.continueInstruction || "").trim(),
@@ -383,6 +386,43 @@ function biblePrompt(input) {
 }`;
 }
 
+function memeLabPrompt(input) {
+  const payload = normalizeInput(input);
+  const extractMode = payload.memeLabMode !== "inspire";
+  return `你是短视频喜剧梗策划。请为《洛克王国：世界》手游短剧生成 6 个可以真正落到剧情和画面的梗机制。只输出严格 JSON，不要 Markdown 或解释。
+
+任务模式：${extractMode ? "真实素材提炼" : "原创平台化梗结构"}
+${extractMode
+    ? `用户粘贴的真实素材如下：\n${compact(payload.memeRawMaterial || payload.memeSeed)}\n只能分析和改造这些素材，不得声称它们目前正在流行，也不得编造热度、出处或原句。`
+    : "用户没有提供真实热榜素材。请生成符合当代短视频节奏的原创梗结构，并明确标记为“原创结构”；不得冒充实时热梗或虚构来源。"}
+
+要求：
+1. 每个梗必须改变角色动作、道具用途、任务规则、场景机关或人物误会，不能只给一句网络化台词。
+2. 笑点必须包含铺垫和回扣，尽量做到静音也能看懂；能在 10 秒视频段内完成一次可见变化。
+3. 结合当前主题、角色、场景、短剧圣经和目标受众；不得默认换成迪莫、小洛克或黑衣人。
+4. 六个梗的机制必须不同，至少覆盖视觉反差、规则误导、关系错位、道具回扣四类。
+5. 标注适用位置和使用风险，避免生硬蹭热点、冒犯现实人物、整段照搬台词或破坏世界观。
+
+项目资料：${bibleContext(payload)}
+本集输入：${creativeInputSummary(payload)}
+
+返回结构：
+{
+  "ideas": [
+    {
+      "phrase":"素材关键词或原创梗名",
+      "meaning":"该素材在当前语境中的情绪或误会点",
+      "mechanism":"如何变成角色动作、道具或世界规则并推动剧情",
+      "comedy":"铺垫 -> 误导 -> 回扣的具体笑点",
+      "fit":"适合放在开头/升级/反转/结尾中的哪个位置",
+      "risk":"需要规避的生硬、过时或侵权风险",
+      "sourceType":"${extractMode ? "用户素材" : "原创结构"}"
+    }
+  ]
+}
+限制：ideas 必须正好 6 条，每条都要具体到当前角色和场景。`;
+}
+
 function plansPrompt(input) {
   const payload = normalizeInput(input);
   const names = roleNames(payload);
@@ -527,6 +567,21 @@ function normalizeBible(result) {
   const normalized = Object.fromEntries(keys.map((key) => [key, String(bible[key] || "").trim()]));
   if (keys.some((key) => !normalized[key])) throw new Error("AI 返回的短剧圣经不完整，请重新生成");
   return { bible: normalized };
+}
+
+function normalizeMemeIdeas(result) {
+  const source = Array.isArray(result?.ideas) ? result.ideas : [];
+  const ideas = source.slice(0, 6).map((idea) => ({
+    phrase: String(idea?.phrase || "").trim(),
+    meaning: String(idea?.meaning || "").trim(),
+    mechanism: String(idea?.mechanism || "").trim(),
+    comedy: String(idea?.comedy || "").trim(),
+    fit: String(idea?.fit || "").trim(),
+    risk: String(idea?.risk || "").trim(),
+    sourceType: String(idea?.sourceType || "原创结构").trim(),
+  })).filter((idea) => idea.phrase && idea.mechanism && idea.comedy);
+  if (ideas.length !== 6) throw new Error("AI 没有返回 6 个完整梗机制，请重新生成");
+  return { ideas };
 }
 
 function normalizePlans(result) {
@@ -748,6 +803,14 @@ async function api(request, env, url) {
     return json({ ok: true, source: "deepseek", model, usage, result });
   }
 
+  if (url.pathname === "/api/meme-lab") {
+    if (input.memeLabMode !== "inspire" && !String(input.memeRawMaterial || input.memeSeed || "").trim()) {
+      return error("请先提供热榜标题、分享文案或评论素材", "MEME_MATERIAL_REQUIRED", 400);
+    }
+    const result = normalizeMemeIdeas(await askDeepSeek(env, input, memeLabPrompt(input), 2100));
+    return json({ ok: true, source: "deepseek", model, usage, result });
+  }
+
   if (url.pathname === "/api/topics") {
     const count = Math.max(1, Math.min(Number(input.count || 8), 12));
     const result = normalizeTopics(await askDeepSeek(env, input, topicsPrompt(input), 1700), count);
@@ -800,6 +863,7 @@ export const __test = {
   normalizeStoryboard,
   normalizeContinuity,
   normalizeBible,
+  normalizeMemeIdeas,
   normalizePlans,
   extractJson,
   creativeInputSummary,

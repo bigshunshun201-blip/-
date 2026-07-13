@@ -63,6 +63,20 @@ test("bible normalizer requires all continuity fields", () => {
   assert.throws(() => __test.normalizeBible({ bible: { characters: "只有角色" } }), /不完整/);
 });
 
+test("meme lab normalizer requires six usable mechanisms", () => {
+  const ideas = Array.from({ length: 6 }, (_, index) => ({
+    phrase: `梗${index + 1}`,
+    meaning: "情绪误会",
+    mechanism: `道具机制${index + 1}`,
+    comedy: `铺垫 -> 误导 -> 回扣${index + 1}`,
+    fit: "升级段",
+    risk: "避免照搬",
+    sourceType: "用户素材",
+  }));
+  assert.equal(__test.normalizeMemeIdeas({ ideas }).ideas.length, 6);
+  assert.throws(() => __test.normalizeMemeIdeas({ ideas: ideas.slice(0, 5) }), /6 个完整梗机制/);
+});
+
 test("AI plan normalizer requires three complete episode plans", () => {
   const result = __test.normalizePlans({
     plans: ["危机", "关系", "规则"].map((angle, index) => ({
@@ -89,10 +103,11 @@ test("AI plan normalizer requires three complete episode plans", () => {
 
 test("UI contains the production workflow controls", async () => {
   const html = await readFile(new URL("../index.html", import.meta.url), "utf8");
-  for (const id of ["planOpeningHook", "autoPlanBtn", "suggestPlansBtn", "planSuggestions", "planHistoryList", "planReadyState", "generateBibleBtn", "applyBibleTemplateBtn", "storyboardHistory", "checkContinuityBtn", "assetLibrary", "reviewCommentThemes", "exportProjectBtn"]) {
+  for (const id of ["planOpeningHook", "autoPlanBtn", "suggestPlansBtn", "planSuggestions", "planHistoryList", "planReadyState", "memeLabBtn", "memeInspireBtn", "memeLabResults", "generateBibleBtn", "applyBibleTemplateBtn", "storyboardHistory", "checkContinuityBtn", "assetLibrary", "reviewCommentThemes", "exportProjectBtn"]) {
     assert.match(html, new RegExp(`id="${id}"`));
   }
-  assert.match(html, /so-landing\.douyin\.com\/landings\/hotlist/);
+  assert.match(html, /open\.douyin\.com\/platform\/resource\/docs\/openapi\/data-open-service\/tops-data\/hot-video-list/);
+  assert.match(html, /data-ai-model-switch/);
 });
 
 test("JSON extraction repairs common missing commas from model output", () => {
@@ -197,6 +212,7 @@ test("daily budget weights Pro requests and blocks requests over the limit", asy
   assert.equal(__test.requestUnits("/api/script", "deepseek-v4-flash"), 1);
   assert.equal(__test.requestUnits("/api/plans", "deepseek-v4-flash"), 1);
   assert.equal(__test.requestUnits("/api/bible", "deepseek-v4-flash"), 1);
+  assert.equal(__test.requestUnits("/api/meme-lab", "deepseek-v4-flash"), 1);
   assert.equal(__test.requestUnits("/api/generate", "deepseek-v4-pro"), 6);
   const first = await __test.reserveDailyBudget(env, "/api/generate", "deepseek-v4-pro");
   assert.equal(first.usedUnits, 6);
@@ -329,6 +345,7 @@ test("UI templates escape model content and keep production controls", () => {
   assert.match(storyboardHtml, /option value="待制作" selected/);
   assert.match(storyboardHtml, /第 1 段/);
   assert.match(storyboardHtml, /徽章裂开/);
+  assert.match(storyboardHtml, /data-copy-storyboard-segment="0"/);
 });
 
 test("page loads domain and template modules before app.js", async () => {

@@ -18,6 +18,7 @@
     planOptions: [],
     selectedPlanOptionId: null,
     activePlanBatchId: null,
+    memeIdeas: [],
     activeAiOperation: null,
   };
 
@@ -118,11 +119,11 @@
       continueButton.disabled = isBusy || !hasScript;
       continueButton.title = hasScript ? "承接当前剧本的结尾钩子续写下一集" : "请先生成一版剧本";
     }
-    ["checkContinuityBtn", "regenerateTopicsBtn", "suggestPlansBtn", "autoPlanBtn", "generateBibleBtn", "applyBibleTemplateBtn", "projectSelect", "newProjectBtn", "importProjectBtn"].forEach((id) => {
+    ["checkContinuityBtn", "regenerateTopicsBtn", "suggestPlansBtn", "autoPlanBtn", "generateBibleBtn", "applyBibleTemplateBtn", "memeLabBtn", "memeInspireBtn", "projectSelect", "newProjectBtn", "importProjectBtn"].forEach((id) => {
       const control = document.getElementById(id);
       if (control) control.disabled = isBusy;
     });
-    $$('[data-topic-generate], [data-topic-continue], [data-topic-replace], [data-plan-option], [data-plan-batch-restore]').forEach((button) => {
+    $$('[data-topic-generate], [data-topic-continue], [data-topic-replace], [data-plan-option], [data-plan-batch-restore], [data-ai-model-value]').forEach((button) => {
       button.disabled = isBusy;
     });
     document.body?.setAttribute("aria-busy", String(isBusy));
@@ -174,8 +175,10 @@
     state.planOptions = [];
     state.selectedPlanOptionId = null;
     state.activePlanBatchId = null;
+    state.memeIdeas = [];
     setInputValue("episodeNumber", nextEpisodeNumber());
     renderPlanSuggestions();
+    renderMemeLab();
     renderScript();
     renderStoryboard();
     renderCreativePack();
@@ -237,6 +240,25 @@
         planId: state.selectedPlanOptionId || "",
       },
     };
+  }
+
+  function renderAiModelSwitches() {
+    const model = $("#aiModel")?.value || "deepseek-v4-flash";
+    $$('[data-ai-model-switch]').forEach((target) => {
+      target.classList.add("ai-model-switch");
+      target.innerHTML = [
+        ["deepseek-v4-flash", "Flash"],
+        ["deepseek-v4-pro", "Pro"],
+      ].map(([value, label]) => `<button type="button" data-ai-model-value="${value}" class="${value === model ? "is-active" : ""}" aria-pressed="${value === model}">${label}</button>`).join("");
+    });
+  }
+
+  function setAiModel(model) {
+    if (!["deepseek-v4-flash", "deepseek-v4-pro"].includes(model)) return;
+    setInputValue("aiModel", model);
+    renderAiModelSwitches();
+    saveDraft(false);
+    setStatus(`AI 模型已切换为 ${model.endsWith("pro") ? "Pro（质量优先）" : "Flash（速度优先）"}`);
   }
 
   function applyEpisodePlan(plan = {}) {
@@ -410,6 +432,68 @@
     renderPlanSuggestions();
     saveDraft(false);
     setStatus(`已采用“${option.angle}”方案，可以继续微调`);
+  }
+
+  function normalizeMemeIdeas(result) {
+    const source = Array.isArray(result?.ideas) ? result.ideas : [];
+    return source.slice(0, 6).map((idea, index) => ({
+      id: idea.id || `meme-idea-${Date.now()}-${index}`,
+      phrase: String(idea.phrase || `梗结构 ${index + 1}`).trim(),
+      meaning: String(idea.meaning || "").trim(),
+      mechanism: String(idea.mechanism || "").trim(),
+      comedy: String(idea.comedy || "").trim(),
+      fit: String(idea.fit || "").trim(),
+      risk: String(idea.risk || "").trim(),
+      sourceType: String(idea.sourceType || "原创结构").trim(),
+    })).filter((idea) => idea.mechanism && idea.comedy);
+  }
+
+  function renderMemeLab() {
+    const target = $("#memeLabResults");
+    if (!target) return;
+    target.innerHTML = state.memeIdeas.map((idea, index) => `
+      <article class="meme-idea">
+        <div>
+          <strong>${escapeHtml(idea.phrase)} · ${escapeHtml(idea.sourceType)}</strong>
+          ${idea.meaning ? `<p>${escapeHtml(idea.meaning)}</p>` : ""}
+          <p><b>剧情机制：</b>${escapeHtml(idea.mechanism)}</p>
+          <p><b>笑点：</b>${escapeHtml(idea.comedy)}</p>
+          <small>${escapeHtml(idea.fit)}${idea.risk ? ` · 注意：${escapeHtml(idea.risk)}` : ""}</small>
+        </div>
+        <button class="small-action" type="button" data-meme-idea-add="${index}">加入创作</button>
+      </article>
+    `).join("");
+  }
+
+  async function runMemeLab(mode) {
+    const rawMaterial = $("#memeSeed").value.trim();
+    if (mode === "extract" && !rawMaterial) throw new Error("请先粘贴热榜标题、分享文案或评论高频词；没有素材时可点击“生成梗结构”。");
+    const operation = beginAiOperation(mode === "extract" ? "热梗素材提炼" : "梗结构生成");
+    try {
+      setStatus(mode === "extract" ? "AI 正在把真实素材转成可拍剧情机制..." : "AI 正在生成不冒充实时热点的平台化梗结构...");
+      const initialResponse = await apiRequest("/api/meme-lab", {
+        input: generationContext({ ...getInput(), memeLabMode: mode, memeRawMaterial: rawMaterial }),
+      });
+      const response = await resolveAiJob(initialResponse, "热梗素材");
+      assertActiveAiOperation(operation);
+      state.memeIdeas = normalizeMemeIdeas(response.result);
+      if (!state.memeIdeas.length) throw new Error("AI 没有返回可用的剧情梗，请重新生成。");
+      renderMemeLab();
+      saveDraft(false);
+      setStatus(`已得到 ${state.memeIdeas.length} 个可拍梗机制 ${nowTime()} · ${response.model || "model"}${usageSuffix(response)}`);
+    } finally {
+      endAiOperation(operation);
+    }
+  }
+
+  function adoptMemeIdea(index) {
+    const idea = state.memeIdeas[index];
+    if (!idea) throw new Error("没有找到这个梗结构。");
+    const addition = `梗机制：${idea.phrase}｜${idea.mechanism}｜笑点：${idea.comedy}`;
+    const current = $("#memeSeed").value.trim();
+    if (!current.includes(addition)) setInputValue("memeSeed", [current, addition].filter(Boolean).join("\n"));
+    saveDraft(false);
+    setStatus(`已把“${idea.phrase}”加入本集创作素材`);
   }
 
   function currentProject() {
@@ -933,6 +1017,7 @@
       el.appendChild(option);
     }
     el.value = value;
+    if (id === "aiModel") renderAiModelSwitches();
   }
 
   function topicPrompt(topic) {
@@ -1410,6 +1495,35 @@
     renderExample();
     saveDraft(false);
     setStatus(`已恢复当前剧本对应的分镜版本，共 ${state.storyboard.length} 个视频段`);
+  }
+
+  function storyboardSegmentText(segment) {
+    return [
+      `第 ${segment.shot} 段｜${segment.timeRange || `${segment.seconds || 10}秒`}`,
+      `所属剧本：${state.script?.title || "未命名剧本"}`,
+      `本段任务：${segment.segmentGoal || ""}`,
+      `角色：${segment.characters || ""}`,
+      `场景：${segment.scene || ""}`,
+      `段内节拍：${(segment.beatBreakdown || []).map((beat) => `${beat.range} ${beat.content}`).join("；")}`,
+      `画面与动作：${segment.visual || ""}；${segment.action || ""}`,
+      `台词/旁白：${segment.line || ""}`,
+      `字幕：${segment.subtitle || ""}`,
+      `景别与运动：${segment.scale || ""}；${segment.movement || ""}`,
+      `声音：${segment.sound || ""}`,
+      `承接入点：${segment.continuityIn || ""}`,
+      `承接出点：${segment.continuityOut || ""}`,
+      `AI 视频提示词：${segment.visualPrompt || ""}`,
+      `关联资产：${segment.assetLinks || ""}`,
+      `制作备注：${segment.assetNote || ""}`,
+      `素材状态：${segment.assetStatus || "待制作"}`,
+    ].join("\n");
+  }
+
+  async function copyStoryboardSegment(index) {
+    const segment = state.storyboard[index];
+    if (!segment) throw new Error("没有找到这个视频段。");
+    await navigator.clipboard.writeText(storyboardSegmentText(segment));
+    setStatus(`已复制第 ${segment.shot} 段，可直接粘贴到 AI 视频生成工具`);
   }
 
   function updateStoryboardProductionField(index, field, value) {
@@ -2021,6 +2135,7 @@
       topics: state.topics,
       analysis: state.analysis,
       competitors: state.competitors,
+      memeIdeas: state.memeIdeas,
       savedAt: new Date().toISOString(),
     };
     try {
@@ -2051,6 +2166,7 @@
       state.topics = normalizeTopicList(draft.topics);
       state.analysis = draft.analysis || null;
       state.competitors = Array.isArray(draft.competitors) ? draft.competitors : [];
+      state.memeIdeas = Array.isArray(draft.memeIdeas) ? draft.memeIdeas : [];
       const episode = currentProjectEpisode();
       if (episode) {
         applyEpisodeVersion(episode, episode.activeVersionId);
@@ -2067,6 +2183,7 @@
       const activeBatch = (currentProject()?.planBatches || []).find((batch) => batch.id === state.activePlanBatchId);
       state.planOptions = activeBatch?.plans?.map((option) => ({ ...option, plan: { ...option.plan } })) || [];
       renderPlanSuggestions();
+      renderMemeLab();
       setStatus("已恢复草稿");
     } catch (error) {
       // A malformed legacy draft is ignored; valid project archives remain intact.
@@ -2198,6 +2315,10 @@
   }
 
   function bindEvents() {
+    document.addEventListener("click", (event) => {
+      const modelButton = event.target.closest("[data-ai-model-value]");
+      if (modelButton) setAiModel(modelButton.dataset.aiModelValue);
+    });
     $("#newProjectBtn").addEventListener("click", createProject);
     $("#saveProjectBtn").addEventListener("click", saveProjectMeta);
     $("#exportProjectBtn").addEventListener("click", exportCurrentProject);
@@ -2207,6 +2328,29 @@
       event.target.value = "";
     });
     $("#saveBibleBtn").addEventListener("click", saveBible);
+    $("#memeLabBtn").addEventListener("click", async () => {
+      try {
+        await runMemeLab("extract");
+      } catch (error) {
+        reportError("热梗素材提炼", error);
+      }
+    });
+    $("#memeInspireBtn").addEventListener("click", async () => {
+      try {
+        await runMemeLab("inspire");
+      } catch (error) {
+        reportError("梗结构生成", error);
+      }
+    });
+    $("#memeLabResults").addEventListener("click", (event) => {
+      const button = event.target.closest("[data-meme-idea-add]");
+      if (!button) return;
+      try {
+        adoptMemeIdea(Number(button.dataset.memeIdeaAdd));
+      } catch (error) {
+        reportError("加入热梗素材", error);
+      }
+    });
     $("#applyBibleTemplateBtn").addEventListener("click", async () => {
       try {
         const label = $("#bibleTemplate").selectedOptions[0]?.textContent || "系列模板";
@@ -2313,6 +2457,15 @@
       const index = Number(event.target.dataset.shotIndex);
       if (!field || Number.isNaN(index)) return;
       updateStoryboardProductionField(index, field, event.target.value);
+    });
+    $("#storyboardTable").addEventListener("click", async (event) => {
+      const button = event.target.closest("[data-copy-storyboard-segment]");
+      if (!button) return;
+      try {
+        await copyStoryboardSegment(Number(button.dataset.copyStoryboardSegment));
+      } catch (error) {
+        reportError("复制视频段", error);
+      }
     });
     $("#storyboardHistory").addEventListener("click", (event) => {
       const button = event.target.closest("[data-storyboard-version]");
@@ -2439,6 +2592,8 @@
       bindEvents();
       await loadProjects();
       await restoreDraft();
+      renderAiModelSwitches();
+      renderMemeLab();
       await loadHistory();
       if (state.topics.length) {
         refreshTopicDerivedViews();

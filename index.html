@@ -123,21 +123,28 @@
             </select>
             <input id="customStyle" class="inline-custom" placeholder="也可以自己输入风格，例如：抽象、发疯文学、冷幽默、嘴替吐槽" />
           </label>
-          <label>
+          <div class="field-group">
             <span class="label-row">
-              <span>短视频热梗素材</span>
-              <a href="https://so-landing.douyin.com/landings/hotlist?board_type=0" target="_blank" rel="noreferrer">打开抖音实时热榜</a>
+              <label for="memeSeed">热榜与评论素材池</label>
+              <a href="https://open.douyin.com/platform/resource/docs/openapi/data-open-service/tops-data/hot-video-list/hot-video-list/" target="_blank" rel="noreferrer">官方榜单接入说明</a>
             </span>
-            <textarea id="memeSeed" rows="3" placeholder="粘贴 3-8 个当周热梗、情绪句式或评论区高频词，每行一个。"></textarea>
-            <small class="field-hint">系统会把热梗转成动作、道具、规则和笑点，不会只塞进台词。</small>
-          </label>
-          <label>
-            DeepSeek 模型
-            <select id="aiModel">
+            <textarea id="memeSeed" rows="4" placeholder="粘贴热榜标题、视频分享文案或评论区高频词，每行一个；不必整理格式。"></textarea>
+            <small class="field-hint">抖音官方自动榜单需要应用权限。这里先把你看到的真实素材提炼成动作、道具、规则和回扣笑点。</small>
+            <div class="meme-lab-actions">
+              <div data-ai-model-switch aria-label="热梗提炼模型"></div>
+              <button class="secondary-action" id="memeLabBtn" type="button">AI 提炼这些素材</button>
+              <button class="ghost-action" id="memeInspireBtn" type="button">没素材，生成梗结构</button>
+            </div>
+            <div class="meme-lab-results" id="memeLabResults" aria-live="polite"></div>
+          </div>
+          <div class="field-group">
+            <span>默认 AI 模型</span>
+            <div data-ai-model-switch aria-label="默认 AI 模型"></div>
+            <select id="aiModel" hidden>
               <option value="deepseek-v4-flash">Flash：更快，适合批量出稿</option>
               <option value="deepseek-v4-pro">Pro：质量更高，适合定稿</option>
             </select>
-          </label>
+          </div>
           <label>
             续写要求
             <textarea id="continueInstruction" rows="3" placeholder="例如：接着上一集，揭晓暗影博士为什么让喵喵失忆；情绪更催泪，结尾留下第三集钩子。"></textarea>
@@ -152,6 +159,7 @@
               <strong>先确定本集结构，再生成剧本</strong>
               <span>快速填充免费；DeepSeek 会结合短剧圣经和前集实时创作（Flash 1 单位 / Pro 3 单位）</span>
             </div>
+            <div class="ai-model-line"><span>生成模型</span><div data-ai-model-switch aria-label="策划生成模型"></div></div>
             <div class="plan-starter-actions">
               <button class="secondary-action" id="autoPlanBtn" type="button">快速填充（免费）</button>
               <button class="ghost-action" id="suggestPlansBtn" type="button">DeepSeek 生成 3 套</button>
@@ -169,6 +177,7 @@
           <label>目标情绪<input id="planTargetEmotion" placeholder="例如：压迫感 -> 反杀爽感 -> 悬念" /></label>
           <div class="action-stack episode-actions-stack" aria-label="创作动作">
             <p class="plan-ready-state" id="planReadyState" role="status">请先完整填写或采用一套本集策划</p>
+            <div class="ai-model-line"><span>剧本 / 分镜模型</span><div data-ai-model-switch aria-label="剧本和分镜生成模型"></div></div>
             <button class="primary-action" id="generateBtn" disabled>先完成本集策划</button>
             <button class="secondary-action" id="storyboardBtn" disabled>基于本版剧本生成 10 秒分镜</button>
             <button class="ghost-action" id="continueBtn" disabled>续写下一集</button>
@@ -306,6 +315,7 @@
                 <option value="mystery">羁绊悬疑</option>
                 <option value="ensemble">热血群像</option>
               </select>
+              <div data-ai-model-switch aria-label="短剧圣经生成模型"></div>
               <button class="secondary-action" id="applyBibleTemplateBtn" type="button">免费套用模板</button>
               <button class="ghost-action" id="generateBibleBtn" type="button">DeepSeek 帮我起草</button>
             </div>
@@ -323,7 +333,7 @@
           <article class="tab-panel" id="tab-consistency">
             <div class="result-header">
               <div><p class="eyebrow">连载质检</p><h2>连载一致性检查</h2></div>
-              <button class="small-action" id="checkContinuityBtn">检查当前集</button>
+              <div class="header-actions"><div data-ai-model-switch aria-label="一致性检查模型"></div><button class="small-action" id="checkContinuityBtn">检查当前集</button></div>
             </div>
             <p class="helper bible-intro">一键对照短剧圣经、已完成集数与当前剧本：角色性格、精灵能力、人物关系和上一集悬念是否被正确承接。</p>
             <div class="consistency-output" id="consistencyOutput"></div>
@@ -386,6 +396,7 @@
                 <h2>洛克王国短剧选题库</h2>
               </div>
               <div class="header-actions">
+                <div data-ai-model-switch aria-label="选题生成模型"></div>
                 <button class="small-action" id="regenerateTopicsBtn">AI 换一批选题</button>
                 <button class="small-action" id="downloadTopics">下载 CSV</button>
               </div>
@@ -473,13 +484,13 @@
       粉丝向二创工作台示例，不代表官方内容或授权关系。发布前请核对平台规范与 IP 授权边界。
     </footer>
 
-    <script src="./generator.js?v=20260713-segment-bible"></script>
-    <script src="./workflow-core.js?v=20260713-segment-bible"></script>
-    <script src="./project-domain.js?v=20260713-segment-bible"></script>
-    <script src="./episode-planner.js?v=20260713-segment-bible"></script>
-    <script src="./ui-templates.js?v=20260713-segment-bible"></script>
-    <script src="./api-client.js?v=20260713-segment-bible"></script>
-    <script src="./data-store.js?v=20260713-segment-bible"></script>
-    <script src="./app.js?v=20260713-segment-bible"></script>
+    <script src="./generator.js?v=20260713-meme-model-copy"></script>
+    <script src="./workflow-core.js?v=20260713-meme-model-copy"></script>
+    <script src="./project-domain.js?v=20260713-meme-model-copy"></script>
+    <script src="./episode-planner.js?v=20260713-meme-model-copy"></script>
+    <script src="./ui-templates.js?v=20260713-meme-model-copy"></script>
+    <script src="./api-client.js?v=20260713-meme-model-copy"></script>
+    <script src="./data-store.js?v=20260713-meme-model-copy"></script>
+    <script src="./app.js?v=20260713-meme-model-copy"></script>
   </body>
 </html>
