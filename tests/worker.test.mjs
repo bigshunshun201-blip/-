@@ -68,6 +68,26 @@ test("storyboard normalizer retains production fields", () => {
   assert.equal(result.storyboard[0].clipId, "CLIP-01");
 });
 
+test("storyboard chunks allow omitted dialogue text and restore it from script ids", () => {
+  const script = {
+    structure: [{ beatIds: ["BEAT-01"] }, { beatIds: ["BEAT-02"] }],
+    dialogue: [{ id: "LINE-01", line: "先别碰那枚徽章。" }, { id: "LINE-02", line: "它在倒着指路。" }],
+  };
+  const storyboard = [0, 1].map((index) => ({
+    beatIds: [`BEAT-0${index + 1}`], dialogueIds: [`LINE-0${index + 1}`],
+    segmentGoal: `推进任务${index + 1}`, continuityIn: `第${index + 1}段开始状态`, continuityOut: `第${index + 1}段结束状态`,
+    beatBreakdown: [{ range: "0-3秒", content: "角色发现异常" }, { range: "3-8秒", content: "角色完成反应" }],
+    characters: "阿洛、迪莫", scene: "月牙镇", visual: "徽章发光", action: "阿洛伸手后停住",
+    line: "", scale: "中近景", movement: "缓慢推镜", sound: "低频提示音", subtitle: "",
+    visualPrompt: "9:16月牙镇单场景连续镜头，前景徽章，中景角色，背景路牌，字幕安全区留空",
+  }));
+  assert.equal(__test.normalizeStoryboardChunk({ storyboard }, __test.storyboardSegmentPlan(15).segments).storyboard.length, 2);
+  const result = __test.normalizeStoryboard({ storyboard }, 15, "smart", script).storyboard;
+  assert.equal(result[0].line, "先别碰那枚徽章。");
+  assert.equal(result[0].subtitle, "先别碰那枚徽章。");
+  assert.equal(result[1].line, "它在倒着指路。");
+});
+
 test("storyboard segment planner adapts duration and marks fixed-mode trimming", () => {
   const sixty = __test.storyboardSegmentPlan(60, "smart");
   assert.equal(sixty.targetSeconds, 8);

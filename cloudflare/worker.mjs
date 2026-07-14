@@ -1237,6 +1237,7 @@ function normalizeStoryboard(result, duration, clipMode = "smart", script = null
       const fallbackDialogue = scriptDialogueIds.length ? [scriptDialogueIds[Math.min(scriptDialogueIds.length - 1, Math.floor(index * scriptDialogueIds.length / source.length))]] : [];
       const resolvedDialogueIds = suppliedDialogueIds.length ? suppliedDialogueIds : fallbackDialogue;
       const referencedLine = resolvedDialogueIds.map((id) => scriptDialogueById.get(id)).filter(Boolean).join(" / ");
+      const resolvedLine = referencedLine || textValue(shot.line);
       return {
         clipId: `CLIP-${String(index + 1).padStart(2, "0")}`,
         shot: index + 1,
@@ -1255,8 +1256,8 @@ function normalizeStoryboard(result, duration, clipMode = "smart", script = null
           content: textValue(beat?.content),
         })),
         visual: textValue(shot.visual), characters: textValue(shot.characters), scene: textValue(shot.scene), action: textValue(shot.action),
-        line: referencedLine || textValue(shot.line), scale: textValue(shot.scale), movement: textValue(shot.movement), sound: textValue(shot.sound),
-        subtitle: textValue(shot.subtitle), visualPrompt: textValue(shot.visualPrompt), assetLinks: textValue(shot.assetLinks), assetNote: textValue(shot.assetNote),
+        line: resolvedLine, scale: textValue(shot.scale), movement: textValue(shot.movement), sound: textValue(shot.sound),
+        subtitle: textValue(shot.subtitle) || resolvedLine, visualPrompt: textValue(shot.visualPrompt), assetLinks: textValue(shot.assetLinks), assetNote: textValue(shot.assetNote),
         assetStatus: ["已有", "待制作", "待采集"].includes(shot.assetStatus) ? shot.assetStatus : "待制作",
       };
     });
@@ -1605,7 +1606,8 @@ function normalizeStoryboardChunk(result, expectedSegments) {
   const source = Array.isArray(result?.storyboard) ? result.storyboard : Array.isArray(result) ? result : [];
   const issues = [];
   if (source.length !== expectedSegments.length) issues.push(`本批应返回${expectedSegments.length}个视频段，实际为${source.length}个`);
-  const requiredFields = ["segmentGoal", "continuityIn", "continuityOut", "visual", "characters", "scene", "action", "line", "scale", "movement", "sound", "subtitle", "visualPrompt"];
+  // Dialogue text and subtitles are deterministically restored from dialogueIds after all chunks merge.
+  const requiredFields = ["segmentGoal", "continuityIn", "continuityOut", "visual", "characters", "scene", "action", "scale", "movement", "sound", "visualPrompt"];
   source.forEach((shot, index) => {
     if (!shot || typeof shot !== "object") {
       issues.push(`本批第${index + 1}段不是有效对象`);
@@ -1857,6 +1859,7 @@ export const __test = {
   storyboardOutputTokens,
   storyboardSegmentChunks,
   normalizeStoryboard,
+  normalizeStoryboardChunk,
   normalizeContinuity,
   normalizeBible,
   normalizeCharacterCard,
