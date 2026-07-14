@@ -1,3 +1,5 @@
+import { jsonrepair } from "jsonrepair";
+
 const JSON_HEADERS = {
   "content-type": "application/json; charset=utf-8",
   "cache-control": "no-store",
@@ -443,6 +445,13 @@ function extractJson(raw) {
   for (const attempt of [...new Set([candidate, normalized, punctuationRepair])]) {
     try {
       return JSON.parse(attempt);
+    } catch (cause) {
+      lastError = cause;
+    }
+  }
+  for (const attempt of [...new Set([punctuationRepair, normalized, candidate])]) {
+    try {
+      return JSON.parse(jsonrepair(attempt));
     } catch (cause) {
       lastError = cause;
     }
@@ -1359,6 +1368,9 @@ async function askDeepSeek(env, input, prompt, maxTokens, usageMeter, options = 
     throw upstream;
   }
   const data = JSON.parse(raw);
+  if (data.choices?.[0]?.finish_reason === "length") {
+    throw codedError("AI 输出达到长度上限，本次结果不完整。系统已经提高剧本上限，请重新生成一次。", "AI_OUTPUT_TRUNCATED");
+  }
   const content = data.choices?.[0]?.message?.content || raw;
   try {
     return extractJson(content);
@@ -1464,8 +1476,8 @@ async function api(request, env, url) {
   };
 
   if (url.pathname === "/api/script") {
-    const raw = await askDeepSeek(env, input, scriptPrompt(input), 2200, usageMeter);
-    const result = await normalizeWithRepair(env, input, raw, (value) => normalizeScript(value, input), 2200, usageMeter, "script");
+    const raw = await askDeepSeek(env, input, scriptPrompt(input), 4200, usageMeter);
+    const result = await normalizeWithRepair(env, input, raw, (value) => normalizeScript(value, input), 4200, usageMeter, "script");
     return success(result);
   }
 
@@ -1546,8 +1558,8 @@ async function api(request, env, url) {
   }
 
   if (url.pathname === "/api/generate") {
-    const rawScript = await askDeepSeek(env, input, scriptPrompt(input), 2200, usageMeter);
-    const scriptResult = await normalizeWithRepair(env, input, rawScript, (value) => normalizeScript(value, input), 2200, usageMeter, "script");
+    const rawScript = await askDeepSeek(env, input, scriptPrompt(input), 4200, usageMeter);
+    const scriptResult = await normalizeWithRepair(env, input, rawScript, (value) => normalizeScript(value, input), 4200, usageMeter, "script");
     const storyboardDuration = Math.max(15, Math.min(Number(input.duration || 60), 180));
     const segmentCount = storyboardSegmentPlan(storyboardDuration, input.clipMode).segments.length;
     const segmentTokens = Math.min(7000, 1600 + (segmentCount * 380));

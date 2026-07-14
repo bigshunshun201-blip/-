@@ -270,6 +270,9 @@ test("JSON extraction repairs common missing commas from model output", () => {
   assert.deepEqual(betweenObjects.storyboard.map((shot) => shot.shot), [1, 2]);
   const betweenProperties = __test.extractJson('{"shots":[1,2] "title":"分镜"}');
   assert.equal(betweenProperties.title, "分镜");
+  const truncated = __test.extractJson('{"script":{"title":"未闭合剧本","hooks":["下一集见"');
+  assert.equal(truncated.script.title, "未闭合剧本");
+  assert.deepEqual(truncated.script.hooks, ["下一集见"]);
 });
 
 test("episode planner produces three complete and distinct starting plans", () => {
