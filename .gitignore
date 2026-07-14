@@ -1,6 +1,6 @@
 node_modules/
 public/
-.netlify/
+.wrangler/
 .env
 .env.*
 !.env.example

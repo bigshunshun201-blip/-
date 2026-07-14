@@ -9,7 +9,6 @@ DeepSeek 官方 API 兼容 OpenAI Chat Completions 格式。当前推荐使用 `
 ```powershell
 cd C:\Users\Administrator.DESKTOP-NB96DIF\Documents\Codex\2026-07-03\wo\outputs\rock-kingdom-shortdrama-studio
 
-$env:AI_PROVIDER="deepseek"
 $env:DEEPSEEK_API_KEY="你的 DeepSeek API Key"
 $env:DEEPSEEK_MODEL="deepseek-v4-flash"
 
@@ -28,12 +27,12 @@ http://127.0.0.1:8765/
 AI 已连接 · deepseek · deepseek-v4-flash
 ```
 
-页面左侧有 `DeepSeek 模型` 下拉框，可以在每次生成前切换：
+每个 AI 模块都有独立的模型开关：
 
 - `Flash`：`deepseek-v4-flash`，更快，适合批量出稿和选题测试。
 - `Pro`：`deepseek-v4-pro`，质量更高，适合定稿和复杂剧情。
 
-`DEEPSEEK_MODEL` 只是默认值；页面下拉框会覆盖本次生成使用的模型。
+`DEEPSEEK_MODEL` 只是默认值；策划、节拍、剧本、分镜、台账和剧本医生等模块可以分别选择模型，互不影响。
 
 ## 部署到 Cloudflare Workers
 
@@ -65,45 +64,11 @@ npm.cmd run deploy:cloudflare
 
 仓库已包含 GitHub Actions 自动部署工作流。配置一次 `CLOUDFLARE_API_TOKEN` GitHub Secret 后，每次推送 `main` 都会自动部署；本地命令仍可用于立刻手动发布。
 
-## 其他模型方式
-
-### Ollama 本地模型
-
-先启动 Ollama 并准备一个支持中文创作的模型，然后运行：
-
-```powershell
-$env:AI_PROVIDER="ollama"
-$env:OLLAMA_HOST="http://127.0.0.1:11434"
-$env:OLLAMA_MODEL="你的本地模型名"
-node server.js
-```
-
-### LM Studio / OpenAI-compatible 服务
-
-如果你的本地模型服务兼容 `/v1/chat/completions`：
-
-```powershell
-$env:AI_PROVIDER="compatible"
-$env:COMPATIBLE_BASE_URL="http://127.0.0.1:1234/v1"
-$env:COMPATIBLE_API_KEY="not-needed"
-$env:COMPATIBLE_MODEL="你的模型名"
-node server.js
-```
-
-### OpenAI
-
-```powershell
-$env:AI_PROVIDER="openai"
-$env:OPENAI_API_KEY="你的 OpenAI API Key"
-$env:OPENAI_MODEL="gpt-4.1-mini"
-node server.js
-```
-
 ## 使用流程
 
 1. 左侧填写主题、角色、剧情方向、目标受众、视频时长和风格。
-2. 点击 `AI 生成剧本`，先筛选和确认剧本。
-3. 满意后点击 `AI 生成分镜`；分镜会严格以当前剧本为依据生成，并写回同一条生成记录。
+2. 先生成或填写本集策划，再生成并确认8节拍表。
+3. 点击 `AI 生成剧本`，筛选和确认剧本；满意后再生成分镜，分镜会写回对应剧本版本。
 4. 查看 `剧本`、`分镜`、`生成记录`、`标题封面`、`完整示例` 等页签。
 4. 如果觉得当前题材不错，在 `续写要求` 里写下一集方向，然后点击 `AI 续写下一集`。
 5. 如果有爆款参考数据，把 CSV 粘到 `爆款参考 CSV` 后点击 `更新选题库`；没有数据也会使用默认样例生成选题参考。
@@ -139,7 +104,7 @@ node server.js
 
 ## 生成记录用法
 
-每次点击 `AI 生成剧本` 或 `AI 续写下一集`，工具都会自动把结果保存到 `作品库`，最多显示 60 条。项目版本是剧本和分镜的唯一完整档案；作品库只保存索引，避免同一内容重复占用空间。项目档案使用浏览器 IndexedDB 保存，旧版 `localStorage` 数据会首次打开时自动迁移。
+每次点击 `AI 生成剧本` 或 `AI 续写下一集`，工具都会自动把结果保存到 `作品库`，最多显示 60 条。项目版本是剧本和分镜的唯一完整档案；作品库只保存索引，避免同一内容重复占用空间。项目档案先写入浏览器 IndexedDB，再通过现有 Cloudflare D1 自动创建最多20个云端恢复点。恢复密钥只保存在浏览器中，可复制到新设备连接同一备份空间。
 
 - `查看/恢复`：把某条历史结果恢复到当前剧本和分镜区。
 - `基于它续写`：先恢复这条记录，再把它作为上一集生成下一集。
@@ -149,8 +114,12 @@ node server.js
 
 ## 文件说明
 
-- `server.js`：本地 AI 后端；DeepSeek 直接复用线上 Worker 路由，其他本地模型仍保持兼容。
+- `server.js`：轻量本地静态服务，所有 DeepSeek API 路由直接复用 Cloudflare Worker 实现。
 - `cloudflare/worker.mjs`：线上 AI API、访问控制、生成提示、超时和每日预算保护。
+- `app-state.js`：前端工作台状态与各模块独立模型偏好。
+- `ai-operation.js`：AI 生成互斥、上下文指纹和过期结果保护。
+- `generation-client.js`：AI 请求、异步任务轮询和生成进度回调。
+- `archive-sync.js`：本地版本写入、跨标签冲突保护、云端备份和恢复点。
 - `workflow-core.js`：项目连续性选集和作品库去重规则。
 - `project-domain.js`：内容项目、集数版本、本集策划校验和发布复盘规则。
 - `episode-planner.js`：不消耗 AI 积分的本集策划起步器与补全规则。

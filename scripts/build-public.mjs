@@ -11,6 +11,10 @@ const files = [
   "ui-templates.js",
   "api-client.js",
   "data-store.js",
+  "archive-sync.js",
+  "app-state.js",
+  "ai-operation.js",
+  "generation-client.js",
 ];
 
 await rm("public", { recursive: true, force: true });

@@ -8,6 +8,10 @@ const require = createRequire(import.meta.url);
 const workflow = require("../workflow-core.js");
 const apiClientModule = require("../api-client.js");
 const dataStoreModule = require("../data-store.js");
+const archiveSyncModule = require("../archive-sync.js");
+const appStateModule = require("../app-state.js");
+const aiOperationModule = require("../ai-operation.js");
+const generationClientModule = require("../generation-client.js");
 const projectDomain = require("../project-domain.js");
 const episodePlanner = require("../episode-planner.js");
 const uiTemplates = require("../ui-templates.js");
@@ -251,7 +255,7 @@ test("beat sheet normalizer requires eight causal production beats", () => {
 
 test("UI contains the production workflow controls", async () => {
   const html = await readFile(new URL("../index.html", import.meta.url), "utf8");
-  for (const id of ["clipMode", "creativeMixBrief", "characterPicker", "memePicker", "suggestCreativeMixBtn", "creativeMixHistoryList", "planOpeningHook", "planProtagonistGoal", "planStakes", "planForcedChoice", "planRelationshipShift", "autoPlanBtn", "suggestPlansBtn", "planSuggestions", "planHistoryList", "generateBeatSheetBtn", "beatSheetList", "approveBeatSheetBtn", "beatSheetHistoryList", "planReadyState", "memeLabBtn", "memeInspireBtn", "memeLabResults", "memeLibrary", "addMemeBtn", "generateBibleBtn", "applyBibleTemplateBtn", "generateCharacterBtn", "saveCharacterBtn", "characterLibrary", "storyboardHistory", "checkContinuityBtn", "assetLibrary", "reviewCommentThemes", "exportProjectBtn", "updateSeriesLedgerBtn", "runScriptDoctorBtn", "addCanonSourceBtn", "characterSpeechPattern"]) {
+  for (const id of ["clipMode", "creativeMixBrief", "characterPicker", "memePicker", "suggestCreativeMixBtn", "creativeMixHistoryList", "planOpeningHook", "planProtagonistGoal", "planStakes", "planForcedChoice", "planRelationshipShift", "autoPlanBtn", "suggestPlansBtn", "planSuggestions", "planHistoryList", "generateBeatSheetBtn", "beatSheetList", "approveBeatSheetBtn", "beatSheetHistoryList", "planReadyState", "memeLabBtn", "memeInspireBtn", "memeLabResults", "memeLibrary", "addMemeBtn", "generateBibleBtn", "applyBibleTemplateBtn", "generateCharacterBtn", "saveCharacterBtn", "characterLibrary", "storyboardHistory", "checkContinuityBtn", "assetLibrary", "reviewCommentThemes", "exportProjectBtn", "updateSeriesLedgerBtn", "runScriptDoctorBtn", "addCanonSourceBtn", "characterSpeechPattern", "backupCloudNowBtn", "cloudArchiveVersions", "copyWorkspaceKeyBtn", "connectWorkspaceKeyBtn"]) {
     assert.match(html, new RegExp(`id="${id}"`));
   }
   assert.match(html, /open\.douyin\.com\/platform\/resource\/docs\/openapi\/data-open-service\/tops-data\/hot-video-list/);
@@ -305,6 +309,24 @@ test("continuity uses episodes before the target instead of the selected episode
   assert.deepEqual(context.at(-1).mustPreserve, ["事实3"]);
 });
 
+test("series ledger input compacts long episodes below the request budget", () => {
+  const episodes = Array.from({ length: 30 }, (_, index) => ({
+    episodeNumber: index + 1,
+    updatedAt: `2026-07-${String(index + 1).padStart(2, "0")}`,
+    script: {
+      title: `第${index + 1}集`,
+      synopsis: "很长的剧情".repeat(300),
+      structure: Array.from({ length: 8 }, (_, beat) => ({ beat: `节拍${beat + 1}`, content: "推进内容".repeat(100) })),
+      dialogue: Array.from({ length: 20 }, (_, line) => ({ id: `LINE-${line + 1}`, role: "阿洛", line: "很长的台词".repeat(100) })),
+      hooks: ["结尾悬念".repeat(100)],
+    },
+  }));
+  const batch = workflow.ledgerEpisodeBatch(episodes, 30);
+  assert.equal(batch.length, 30);
+  assert.ok(JSON.stringify(batch).length < 80_000);
+  assert.equal(batch[0].dialogueSignals.length, 3);
+});
+
 test("project-backed history is compacted and hydrated without duplicating scripts", () => {
   const history = [{
     id: "history-1",
@@ -335,7 +357,7 @@ test("project-backed history is compacted and hydrated without duplicating scrip
 
 test("frontend includes request timeout and stale-result protection", async () => {
   const source = await readFile(new URL("../app.js", import.meta.url), "utf8");
-  assert.match(source, /apiTimeoutMs = 90_000/);
+  assert.match(source, /apiTimeoutMs = 210_000/);
   assert.match(source, /assertActiveAiOperation\(operation\)/);
   assert.match(source, /resetCurrentCreation\(\)/);
   assert.doesNotMatch(source, /window\.prompt\("新项目名称"/);
@@ -440,6 +462,61 @@ test("data store migrates legacy JSON and preserves a localStorage fallback", as
   assert.deepEqual(JSON.parse(values.get("snapshot")), { title: "写入时版本" });
 });
 
+test("archive sync migrates legacy arrays and blocks stale tab overwrites", async () => {
+  let stored = [{ id: "legacy-project" }];
+  const store = { get: async () => structuredClone(stored), set: async (_key, value) => { stored = structuredClone(value); } };
+  const storageValues = new Map();
+  const storage = { getItem: (key) => storageValues.get(key) || null, setItem: (key, value) => storageValues.set(key, value) };
+  const first = archiveSyncModule.create({ store, storage, projectsKey: "projects" });
+  const second = archiveSyncModule.create({ store, storage, projectsKey: "projects" });
+  assert.deepEqual((await first.load()).projects, [{ id: "legacy-project" }]);
+  await second.load();
+  const saved = await first.save([{ id: "project-a" }], { cloud: false });
+  assert.equal(saved.revision, 1);
+  await assert.rejects(second.save([{ id: "project-b" }], { cloud: false }), (error) => error.code === "LOCAL_VERSION_CONFLICT");
+  first.dispose();
+  second.dispose();
+});
+
+test("AI operation coordinator rejects results after input changes", () => {
+  const state = appStateModule.createState();
+  state.currentProjectId = "project-1";
+  let token = "input-a";
+  const coordinator = aiOperationModule.create({
+    state,
+    newId: () => "operation-1",
+    getProjectId: () => state.currentProjectId,
+    getContextToken: () => token,
+  });
+  const operation = coordinator.begin("剧本生成");
+  assert.equal(state.activeAiOperation.id, "operation-1");
+  token = "input-b";
+  assert.throws(() => coordinator.assertActive(operation), (error) => error.code === "STALE_AI_RESULT");
+  coordinator.end(operation);
+  assert.equal(state.activeAiOperation, null);
+});
+
+test("app state initializes independent model preferences", () => {
+  const state = appStateModule.createState();
+  state.aiModels.plan = "deepseek-v4-pro";
+  assert.equal(state.aiModels.script, "deepseek-v4-flash");
+  assert.equal(appStateModule.aiModelScopes.length, 12);
+});
+
+test("generation client resolves asynchronous provider jobs", async () => {
+  const calls = [];
+  const client = generationClientModule.create({
+    apiClient: { request: async (path) => {
+      calls.push(path);
+      return calls.length === 1 ? { status: "pending" } : { status: "done", result: { title: "完成" }, model: "flash" };
+    } },
+    sleep: async () => {},
+  });
+  const result = await client.resolveJob({ async: true, jobId: "job-1", source: "deepseek" }, "剧本");
+  assert.equal(result.result.title, "完成");
+  assert.equal(calls.length, 2);
+});
+
 test("project schema migrates legacy episode inputs and rejects future versions", () => {
   const legacy = projectDomain.migrateProjectRecord({
     id: "legacy", name: "旧项目", episodes: [{ episodeNumber: 1, input: { theme: "旧主题" }, script: { title: "旧剧本" } }],
@@ -473,6 +550,46 @@ test("project domain appends versions without overwriting an episode", () => {
   assert.equal(second.episode.script.title, "第二版");
   projectDomain.applyEpisodeVersion(second.episode, first.version.id);
   assert.equal(second.episode.script.title, "第一版");
+});
+
+test("episode versions preserve a complete script doctor result", () => {
+  const project = projectDomain.createProjectRecord("医生留档");
+  const doctorResult = { report: { score: 80 }, revisedScript: { title: "修订稿" }, createdAt: "2026-07-14" };
+  const { episode, version } = projectDomain.upsertEpisodeVersion(project, {
+    mode: "new",
+    input: { episodeNumber: 1 },
+    versionSnapshot: { script: { title: "原稿" }, doctorResult },
+  });
+  assert.equal(version.doctorResult.revisedScript.title, "修订稿");
+  projectDomain.applyEpisodeVersion(episode, version.id);
+  assert.equal(episode.doctorResult.report.score, 80);
+});
+
+test("import rekeying preserves content asset references and isolates archive ids", () => {
+  const project = projectDomain.createProjectRecord("导入测试");
+  project.characterCards = [{ id: "character-1", name: "阿洛" }];
+  project.memes = [{ id: "meme-1", phrase: "嘴硬检测" }];
+  const { episode, version } = projectDomain.upsertEpisodeVersion(project, {
+    mode: "new",
+    input: {
+      episodeNumber: 1,
+      activeCharacterIds: ["character-1"],
+      activeMemeIds: ["meme-1"],
+      beatSheet: [{ id: "BEAT-01", assetIds: ["character-1", "meme-1"] }],
+    },
+    versionSnapshot: { script: { title: "原剧本" }, historyId: "history-original" },
+  });
+  const oldProjectId = project.id;
+  const oldEpisodeId = episode.id;
+  const oldVersionId = version.id;
+  projectDomain.rekeyImportedProject(project);
+  assert.notEqual(project.id, oldProjectId);
+  assert.notEqual(project.episodes[0].id, oldEpisodeId);
+  assert.notEqual(project.episodes[0].versions[0].id, oldVersionId);
+  assert.equal(project.episodes[0].versions[0].historyId, null);
+  assert.deepEqual(project.episodes[0].input.activeCharacterIds, ["character-1"]);
+  assert.deepEqual(project.episodes[0].input.activeMemeIds, ["meme-1"]);
+  assert.deepEqual(project.episodes[0].input.beatSheet[0].assetIds, ["character-1", "meme-1"]);
 });
 
 test("storyboard versions stay attached to one script version and can be restored", () => {
@@ -530,6 +647,10 @@ test("page loads domain and template modules before app.js", async () => {
   const domainIndex = html.indexOf("project-domain.js");
   const plannerIndex = html.indexOf("episode-planner.js");
   const templatesIndex = html.indexOf("ui-templates.js");
+  const archiveIndex = html.indexOf("archive-sync.js");
+  const stateIndex = html.indexOf("app-state.js");
+  const operationIndex = html.indexOf("ai-operation.js");
+  const generationIndex = html.indexOf("generation-client.js");
   const appIndex = html.indexOf("app.js");
-  assert.ok(domainIndex > 0 && plannerIndex > domainIndex && templatesIndex > plannerIndex && appIndex > templatesIndex);
+  assert.ok(domainIndex > 0 && plannerIndex > domainIndex && templatesIndex > plannerIndex && archiveIndex > templatesIndex && stateIndex > archiveIndex && operationIndex > stateIndex && generationIndex > operationIndex && appIndex > generationIndex);
 });

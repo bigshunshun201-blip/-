@@ -1,54 +1,34 @@
 (function () {
-  const aiModelScopes = ["meme", "mix", "plan", "beat", "script", "storyboard", "bible", "character", "continuity", "topics", "ledger", "doctor"];
-  const defaultAiModels = Object.fromEntries(aiModelScopes.map((scope) => [scope, "deepseek-v4-flash"]));
-  const aiModelScopeLabels = {
-    meme: "热梗提炼", mix: "角色与梗搭配", plan: "单集策划", beat: "剧情节拍表",
-    script: "剧本", storyboard: "分镜", bible: "短剧圣经", character: "角色卡",
-    continuity: "一致性检查", topics: "选题", ledger: "连载台账", doctor: "剧本医生",
-  };
-  const state = {
-    script: null,
-    storyboard: [],
-    competitors: [],
-    analysis: null,
-    topics: [],
-    selectedTopic: null,
-    creativePack: null,
-    calendar: [],
-    history: [],
-    currentHistoryId: null,
-    projects: [],
-    currentProjectId: null,
-    currentEpisodeId: null,
-    reviewEpisodeId: null,
-    topicBatch: 0,
-    planOptions: [],
-    selectedPlanOptionId: null,
-    activePlanBatchId: null,
-    memeIdeas: [],
-    activeMemeIds: [],
-    activeCharacterIds: [],
-    creativeMixOptions: [],
-    selectedCreativeMixId: null,
-    activeCreativeMixBatchId: null,
-    beatSheet: [],
-    beatSheetApproved: false,
-    activeBeatSheetBatchId: null,
-    continuationSource: null,
-    activeAiOperation: null,
-    aiModels: { ...defaultAiModels },
-    scriptDoctor: null,
-  };
+  const { aiModelScopes, defaultAiModels, aiModelScopeLabels } = window.RocoAppState;
+  const state = window.RocoAppState.createState();
 
   const draftKey = "roco-shortdrama-studio-draft";
   const historyKey = "roco-shortdrama-studio-history";
   const projectsKey = "roco-shortdrama-studio-projects";
   const accessCodeKey = "roco-shortdrama-access-code";
   const maxHistoryItems = 60;
-  const apiTimeoutMs = 90_000;
+  const apiTimeoutMs = 210_000;
   const characterFieldIds = ["characterName", "characterRole", "characterTraits", "characterContrast", "characterDesire", "characterWeakness", "characterCatchphrases", "characterMannerism", "characterComedyTrigger", "characterBoundary", "characterSpeechPattern", "characterPressureResponse", "characterLieTell", "characterAddressStyle", "characterForbiddenPhrases", "characterInnerNeed", "characterWound", "characterSecret"];
   const apiClient = window.RocoApiClient.create({ accessCodeKey, timeoutMs: apiTimeoutMs });
+  const generationClient = window.RocoGenerationClient.create({
+    apiClient,
+    onProgress: ({ label, seconds }) => setStatus(`${label}生成中... ${seconds}秒`),
+  });
   const archiveStore = window.RocoDataStore.create();
+  const archiveSync = window.RocoArchiveSync.create({
+    store: archiveStore,
+    apiClient,
+    projectsKey,
+    accessCodeStorageKey: accessCodeKey,
+    onStatus: (status) => {
+      state.cloudArchive = { ...state.cloudArchive, ...status };
+      renderCloudArchive();
+    },
+    onConflict: (error) => {
+      setSaveState("error");
+      setStatus(error.message, true);
+    },
+  });
   let projectWriteRevision = 0;
   let persistedProjectRevision = 0;
 
@@ -74,6 +54,19 @@
   const escapeHtml = uiTemplates.escapeHtml;
   const formatItem = uiTemplates.formatItem;
   const renderList = uiTemplates.renderList;
+  const aiOperations = window.RocoAiOperation.create({
+    state,
+    newId,
+    getProjectId: () => state.currentProjectId,
+    getContextToken: () => JSON.stringify({
+      projectId: state.currentProjectId,
+      episodeId: state.currentEpisodeId,
+      historyId: state.currentHistoryId,
+      input: getInput(),
+      script: state.script ? { title: state.script.title, synopsis: state.script.synopsis } : null,
+    }),
+    onChange: () => refreshCreationActions(),
+  });
 
   function createProjectRecord(name = "未命名短剧项目") {
     return projectDomain.createProjectRecord(name, defaultBible);
@@ -171,33 +164,15 @@
   }
 
   function beginAiOperation(label) {
-    if (state.activeAiOperation) {
-      const error = new Error(`${state.activeAiOperation.label}仍在处理中，请等待完成后再操作。`);
-      error.code = "AI_OPERATION_BUSY";
-      throw error;
-    }
-    const operation = {
-      id: newId("ai"),
-      label,
-      projectId: state.currentProjectId,
-      startedAt: Date.now(),
-    };
-    state.activeAiOperation = operation;
-    refreshCreationActions();
-    return operation;
+    return aiOperations.begin(label);
   }
 
   function assertActiveAiOperation(operation) {
-    if (state.activeAiOperation?.id !== operation.id || state.currentProjectId !== operation.projectId) {
-      const error = new Error("生成期间项目状态已变化，本次返回结果已丢弃。请在当前项目重新生成。");
-      error.code = "STALE_AI_RESULT";
-      throw error;
-    }
+    aiOperations.assertActive(operation);
   }
 
   function endAiOperation(operation) {
-    if (state.activeAiOperation?.id === operation.id) state.activeAiOperation = null;
-    refreshCreationActions();
+    aiOperations.end(operation);
   }
 
   function resetCurrentCreation() {
@@ -1072,6 +1047,7 @@
   }
 
   function clearCharacterDraft() {
+    state.editingCharacterId = null;
     characterFieldIds.forEach((id) => setInputValue(id, ""));
     $("#characterName")?.focus();
   }
@@ -1082,7 +1058,8 @@
       throw new Error("请至少填写角色名、身份定位、鲜明特质、口头禅和底线。");
     }
     const project = currentProject();
-    const existing = (project.characterCards || []).find((item) => item.name === card.name);
+    const existing = (project.characterCards || []).find((item) => item.id === state.editingCharacterId)
+      || (project.characterCards || []).find((item) => item.name === card.name);
     if (existing) Object.assign(existing, card, { id: existing.id, createdAt: existing.createdAt, updatedAt: new Date().toISOString() });
     else project.characterCards.push(card);
     persistProjects();
@@ -1174,21 +1151,21 @@
       : JSON.parse(JSON.stringify(state.projects));
     setSaveState("saving");
     try {
-      await archiveStore.set(projectsKey, snapshot);
+      await archiveSync.save(snapshot);
       persistedProjectRevision = Math.max(persistedProjectRevision, revision);
       if (persistedProjectRevision === projectWriteRevision) setSaveState("saved");
       return true;
     } catch (error) {
       setSaveState("error");
-      setStatus("项目档案保存失败：浏览器本地存储空间可能已满", true);
+      setStatus(error.code === "LOCAL_VERSION_CONFLICT" ? error.message : "项目档案保存失败：浏览器本地存储空间可能已满", true);
       return false;
     }
   }
 
   async function loadProjects() {
     try {
-      const stored = await archiveStore.get(projectsKey);
-      state.projects = Array.isArray(stored) ? stored : [];
+      const stored = await archiveSync.load();
+      state.projects = Array.isArray(stored.projects) ? stored.projects : [];
     } catch (_) {
       state.projects = [];
     }
@@ -1202,6 +1179,53 @@
       ? state.currentProjectId
       : state.projects[0].id;
     await persistProjects();
+  }
+
+  function renderCloudArchive() {
+    const status = $("#cloudArchiveStatus");
+    const target = $("#cloudArchiveVersions");
+    if (!status || !target) return;
+    status.textContent = state.cloudArchive.message || "云端备份待连接";
+    status.dataset.state = state.cloudArchive.state || "idle";
+    const versions = state.cloudArchive.versions || archiveSync.getCloudVersions();
+    target.innerHTML = versions.length ? versions.map((item) => `
+      <article class="cloud-version-row">
+        <div><strong>恢复点 v${escapeHtml(item.revision)}</strong><span>${escapeHtml(item.createdAt ? new Date(item.createdAt).toLocaleString("zh-CN", { hour12: false }) : "时间未知")} · ${escapeHtml(item.projectCount || 0)} 个项目</span></div>
+        <button class="small-action" type="button" data-cloud-restore="${escapeHtml(item.revision)}">恢复此版本</button>
+      </article>`).join("") : `<p class="helper">尚无云端恢复点。点击“立即备份”创建第一版。</p>`;
+  }
+
+  async function refreshCloudArchive(interactive = true) {
+    const result = await archiveSync.listCloud({ interactive });
+    state.cloudArchive.versions = result.versions;
+    renderCloudArchive();
+    return result;
+  }
+
+  async function backupCloudNow() {
+    const saved = await persistProjects();
+    if (!saved) throw new Error("本地档案存在写入冲突，云端备份已停止。");
+    await archiveSync.backupNow(state.projects, { interactive: true });
+    await refreshCloudArchive(false);
+  }
+
+  async function restoreCloudArchive(revision) {
+    if (!window.confirm(`确定恢复云端 v${revision}？当前本地内容会先保留为云端已有版本，但未备份的本地改动将被替换。`)) return;
+    await archiveSync.backupNow(state.projects, { interactive: true });
+    const result = await archiveSync.loadCloud(revision, { interactive: true });
+    const projects = Array.isArray(result.archive?.projects) ? result.archive.projects : [];
+    if (!projects.length) throw new Error("该恢复点不包含有效项目。");
+    state.projects = projects.map((source) => {
+      const project = projectDomain.migrateProjectRecord(source, defaultBible);
+      project.characterCards = project.characterCards.map(normalizeCharacterCard);
+      return project;
+    });
+    state.currentProjectId = state.projects[0].id;
+    resetCurrentCreation();
+    await archiveSync.save(state.projects, { force: true, cloud: false });
+    renderProject(); renderBible(); renderCharacterCards(); renderMemeLibrary(); renderCreativeAssetPicker(); renderAssets(); renderConsistency();
+    await saveDraft(false);
+    setStatus(`已恢复云端恢复点 v${revision}`);
   }
 
   function nextEpisodeNumber(project = currentProject()) {
@@ -1470,9 +1494,9 @@
           id: newId("project"),
           name: `${String(imported.name).trim()}（导入）`,
           bible: { ...defaultBible, ...(imported.bible || {}) },
-          assets: Array.isArray(imported.assets) ? imported.assets.map((asset) => ({ ...asset, id: newId("asset") })) : [],
-          memes: Array.isArray(imported.memes) ? imported.memes.map((meme) => ({ ...meme, id: newId("meme") })) : [],
-          characterCards: Array.isArray(imported.characterCards) ? imported.characterCards.map((card) => normalizeCharacterCard({ ...card, id: newId("character") })) : [],
+          assets: Array.isArray(imported.assets) ? imported.assets.map((asset) => ({ ...asset })) : [],
+          memes: Array.isArray(imported.memes) ? imported.memes.map((meme) => ({ ...meme })) : [],
+          characterCards: Array.isArray(imported.characterCards) ? imported.characterCards.map((card) => normalizeCharacterCard(card)) : [],
           planBatches: Array.isArray(imported.planBatches) ? imported.planBatches.map((batch) => ({
             ...batch,
             plans: (batch.plans || []).map((plan) => ({ ...plan, plan: { ...(plan.plan || {}) } })),
@@ -1484,17 +1508,7 @@
           updatedAt: new Date().toISOString(),
         };
         Object.assign(project, projectDomain.migrateProjectRecord(project, defaultBible));
-        project.episodes.forEach((episode) => {
-          episode.id = newId("episode");
-          (episode.versions || []).forEach((version) => {
-            version.id = newId("version");
-            (version.storyboardVersions || []).forEach((storyboardVersion) => {
-              storyboardVersion.scriptVersionId = version.id;
-            });
-          });
-          episode.activeVersionId = episode.versions?.at(-1)?.id || null;
-          applyEpisodeVersion(episode, episode.activeVersionId);
-        });
+        projectDomain.rekeyImportedProject(project);
         state.projects.unshift(project);
         state.currentProjectId = project.id;
         resetCurrentCreation();
@@ -1558,13 +1572,15 @@
     state.script = episode.script || null;
     state.storyboard = episode.storyboard || [];
     state.creativePack = episode.creativePack || null;
-    state.scriptDoctor = null;
+    state.scriptDoctor = episode.doctorResult || null;
     state.currentHistoryId = episode.historyId || null;
     state.continuationSource = null;
     state.activePlanBatchId = episode.input?.episodePlanRef?.batchId || null;
     state.selectedPlanOptionId = episode.input?.episodePlanRef?.planId || null;
     const episodePlanBatch = (project.planBatches || []).find((batch) => batch.id === state.activePlanBatchId);
     state.planOptions = episodePlanBatch?.plans?.map((option) => ({ ...option, plan: { ...option.plan } })) || [];
+    project.updatedAt = new Date().toISOString();
+    persistProjects();
     renderPlanSuggestions();
     renderScript(); renderStoryboard(); renderCreativePack(); renderProject(); renderAssets(); renderConsistency(); renderExample(); saveDraft(false);
     switchTab("script");
@@ -1710,6 +1726,7 @@
       characterStates: list("characterStates"), abilityStates: list("abilityStates"), propStates: list("propStates"),
       antagonistProgress: String(value.antagonistProgress || "").trim(), recurringGags: list("recurringGags"),
       nextObligations: list("nextObligations").map((item) => typeof item === "string" ? item : item?.content || item?.obligation || "").filter(Boolean),
+      throughEpisode: Math.max(0, Number(value.throughEpisode || 0)),
       updatedAt: value.updatedAt || new Date().toISOString(),
     };
   }
@@ -1748,7 +1765,7 @@
     const operation = beginAiOperation("连载台账更新");
     try {
       setStatus("AI 正在核对全部已归档集数并更新连载台账...");
-      const projectEpisodes = project.episodes.slice().sort((a, b) => Number(a.episodeNumber) - Number(b.episodeNumber)).slice(-30).map((episode) => ({ episodeNumber: episode.episodeNumber, title: episode.script?.title, synopsis: episode.script?.synopsis, structure: episode.script?.structure, hooks: episode.script?.hooks, dialogue: episode.script?.dialogue, consistency: episode.consistency }));
+      const projectEpisodes = window.RocoWorkflowCore.ledgerEpisodeBatch(project.episodes, 30);
       const response = await apiRequest("/api/series-ledger", { input: generationContext({ ...getInput(), projectEpisodes }, "ledger") });
       assertActiveAiOperation(operation);
       const ledger = normalizeSeriesLedger(response.result?.ledger || response.result);
@@ -1828,11 +1845,19 @@
       assertActiveAiOperation(operation);
       const report = response.result?.report || {};
       const revisedScript = response.result?.revisedScript || null;
-      state.scriptDoctor = { report, revisedScript, response };
+      state.scriptDoctor = {
+        report,
+        revisedScript,
+        response: { source: response.source || "", model: response.model || "" },
+        createdAt: new Date().toISOString(),
+      };
       const episode = currentProjectEpisode();
       if (episode) {
         const version = activeEpisodeVersion(episode);
-        if (version) version.doctorReport = report;
+        if (version) {
+          version.doctorResult = structuredClone(state.scriptDoctor);
+          version.doctorReport = report;
+        }
         applyEpisodeVersion(episode, version?.id);
         persistProjects();
       }
@@ -2169,36 +2194,11 @@
   }
 
   async function apiRequest(path, payload) {
-    return apiClient.request(path, payload);
-  }
-
-  function sleep(ms) {
-    return new Promise((resolve) => window.setTimeout(resolve, ms));
+    return generationClient.request(path, payload);
   }
 
   async function resolveAiJob(response, label) {
-    if (!response.async || !response.jobId) return response;
-    const startedAt = Date.now();
-    for (let attempt = 0; attempt < 180; attempt += 1) {
-      await sleep(attempt < 2 ? 1200 : 2000);
-      const job = await apiRequest(`/api/job?id=${encodeURIComponent(response.jobId)}`);
-      if (job.status === "done") {
-        return {
-          ok: true,
-          source: job.source || response.source,
-          model: job.model || response.model,
-          result: job.result,
-        };
-      }
-      if (job.status === "error") {
-        const error = new Error(job.error || `${label}生成失败`);
-        error.code = job.code || "JOB_ERROR";
-        throw error;
-      }
-      const seconds = Math.max(1, Math.round((Date.now() - startedAt) / 1000));
-      setStatus(`${label}生成中... ${seconds}秒`);
-    }
-    throw new Error(`${label}仍在生成中，请稍后重试或缩短输入。`);
+    return generationClient.resolveJob(response, label);
   }
 
   function normalizeGeneratedResult(result) {
@@ -2569,11 +2569,18 @@
   function restoreHistoryItem(index, keepInstruction = false) {
     const item = state.history[index];
     if (!item) throw new Error("没有找到这条生成记录。");
-    if (item.projectId && state.projects.some((project) => project.id === item.projectId)) {
-      state.currentProjectId = item.projectId;
-      const projectEpisode = currentProject()?.episodes?.find((episode) => episode.historyId === item.id);
-      state.currentEpisodeId = projectEpisode?.id || null;
+    const archived = window.RocoWorkflowCore.findArchivedVersion(state.projects, item.id);
+    if (archived) {
+      state.currentProjectId = archived.project.id;
+      applyEpisodeVersion(archived.episode, archived.version.id);
+      archived.project.updatedAt = new Date().toISOString();
+      state.currentEpisodeId = archived.episode.id;
       state.reviewEpisodeId = state.currentEpisodeId;
+      persistProjects();
+    } else if (item.projectId && state.projects.some((project) => project.id === item.projectId)) {
+      state.currentProjectId = item.projectId;
+      state.currentEpisodeId = null;
+      state.reviewEpisodeId = null;
     }
     Object.entries(item.input || {}).forEach(([key, value]) => {
       if (key === "continueInstruction" && keepInstruction) return;
@@ -2585,7 +2592,7 @@
     state.script = item.script;
     state.storyboard = item.storyboard || [];
     state.creativePack = item.creativePack || null;
-    state.scriptDoctor = null;
+    state.scriptDoctor = archived?.version?.doctorResult || null;
     state.currentHistoryId = item.id || null;
     state.continuationSource = null;
     state.activePlanBatchId = item.input?.episodePlanRef?.batchId || null;
@@ -3087,6 +3094,7 @@
         state.script = episode.script || null;
         state.storyboard = Array.isArray(episode.storyboard) ? episode.storyboard : [];
         state.creativePack = episode.creativePack || null;
+        state.scriptDoctor = episode.doctorResult || null;
       } else {
         // Older drafts embedded content directly; keep this one-time migration fallback.
         state.script = draft.script || null;
@@ -3241,6 +3249,33 @@
       importProjectFile(event.target.files?.[0]);
       event.target.value = "";
     });
+    $("#backupCloudNowBtn").addEventListener("click", async () => {
+      try { await backupCloudNow(); } catch (error) { reportError("云端备份", error); }
+    });
+    $("#refreshCloudArchiveBtn").addEventListener("click", async () => {
+      try { await refreshCloudArchive(true); } catch (error) { reportError("刷新恢复点", error); }
+    });
+    $("#copyWorkspaceKeyBtn").addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(archiveSync.workspaceKey());
+        setStatus("恢复密钥已复制，请单独安全保存，不要公开分享");
+      } catch (error) { reportError("复制恢复密钥", error); }
+    });
+    $("#connectWorkspaceKeyBtn").addEventListener("click", async () => {
+      try {
+        const key = $("#workspaceKeyInput").value.trim();
+        const result = await archiveSync.connectWorkspaceKey(key);
+        state.cloudArchive.versions = result.versions;
+        $("#workspaceKeyInput").value = "";
+        renderCloudArchive();
+        setStatus("已连接恢复密钥，可以选择云端恢复点");
+      } catch (error) { reportError("连接云端备份", error); }
+    });
+    $("#cloudArchiveVersions").addEventListener("click", async (event) => {
+      const button = event.target.closest("[data-cloud-restore]");
+      if (!button) return;
+      try { await restoreCloudArchive(Number(button.dataset.cloudRestore)); } catch (error) { reportError("恢复云端版本", error); }
+    });
     $("#saveBibleBtn").addEventListener("click", saveBible);
     $("#addCanonSourceBtn").addEventListener("click", () => {
       try { addCanonSource(); } catch (error) { reportError("设定来源入库", error); }
@@ -3317,6 +3352,7 @@
         if (editButton) {
           const card = (currentProject()?.characterCards || []).find((item) => item.id === editButton.dataset.characterEdit);
           if (!card) throw new Error("没有找到这个角色。");
+          state.editingCharacterId = card.id;
           applyCharacterDraft(card);
           $("#characterName")?.focus();
         }
@@ -3614,7 +3650,7 @@
   }
 
   async function init() {
-    if (!window.RocoStudio || !window.RocoWorkflowCore || !window.RocoProjectDomain || !window.RocoEpisodePlanner || !window.RocoUiTemplates || !window.RocoApiClient || !window.RocoDataStore) {
+    if (!window.RocoStudio || !window.RocoWorkflowCore || !window.RocoProjectDomain || !window.RocoEpisodePlanner || !window.RocoUiTemplates || !window.RocoApiClient || !window.RocoDataStore || !window.RocoArchiveSync || !window.RocoAppState || !window.RocoAiOperation || !window.RocoGenerationClient) {
       setStatus("生成器未加载，请用本地服务打开或刷新缓存", true);
       return;
     }
@@ -3644,11 +3680,15 @@
       renderAssets();
       renderConsistency();
       renderExample();
+      renderCloudArchive();
       checkAiStatus();
+      if (localStorage.getItem(accessCodeKey)) refreshCloudArchive(false).catch(() => {});
     } catch (error) {
       reportError("初始化", error);
     }
   }
+
+  window.addEventListener("pagehide", () => archiveSync.dispose(), { once: true });
 
   document.addEventListener("DOMContentLoaded", init);
   window.addEventListener("error", (event) => {

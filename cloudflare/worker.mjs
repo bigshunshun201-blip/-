@@ -5,8 +5,11 @@ const JSON_HEADERS = {
 
 const ALLOWED_MODELS = new Set(["deepseek-v4-flash", "deepseek-v4-pro"]);
 const MAX_INPUT_BYTES = 120_000;
+const MAX_ARCHIVE_BYTES = 2_000_000;
 const RATE_WINDOW_MS = 60_000;
 const MAX_AI_REQUESTS_PER_WINDOW = 12;
+const AI_GENERATION_TIMEOUT_MS = 70_000;
+const AI_REPAIR_TIMEOUT_MS = 50_000;
 const rateBuckets = new Map();
 const fallbackDailyUsage = new Map();
 const AI_PATH_COST = new Map([
@@ -37,6 +40,128 @@ function codedError(message, code) {
   const cause = new Error(message);
   cause.code = code;
   return cause;
+}
+
+function bytesToHex(bytes) {
+  return [...new Uint8Array(bytes)].map((value) => value.toString(16).padStart(2, "0")).join("");
+}
+
+async function sha256(value) {
+  return bytesToHex(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(String(value || ""))));
+}
+
+async function readArchiveRequest(request) {
+  if (!request.body) throw codedError("备份请求缺少内容。", "INVALID_ARCHIVE_REQUEST");
+  const declaredSize = Number(request.headers.get("content-length") || 0);
+  if (declaredSize > MAX_ARCHIVE_BYTES) throw codedError("云端备份超过 2MB，请先精简大型历史资产。", "ARCHIVE_TOO_LARGE");
+  const raw = await request.text();
+  if (new TextEncoder().encode(raw).byteLength > MAX_ARCHIVE_BYTES) throw codedError("云端备份超过 2MB，请先精简大型历史资产。", "ARCHIVE_TOO_LARGE");
+  try {
+    return raw ? JSON.parse(raw) : {};
+  } catch (_) {
+    throw codedError("备份内容不是有效 JSON。", "INVALID_ARCHIVE_REQUEST");
+  }
+}
+
+async function archiveWorkspaceHash(workspaceKey) {
+  const key = String(workspaceKey || "").trim();
+  if (key.length < 24 || key.length > 200) throw codedError("恢复密钥无效。", "INVALID_WORKSPACE_KEY");
+  return sha256(key);
+}
+
+async function archiveList(env, workspaceHash) {
+  if (!env.USAGE_DB) throw codedError("云端档案数据库不可用。", "ARCHIVE_DB_UNAVAILABLE");
+  const head = await env.USAGE_DB.prepare(
+    "SELECT current_revision AS currentRevision, updated_at AS updatedAt FROM archive_workspaces WHERE workspace_hash = ?",
+  ).bind(workspaceHash).first();
+  const result = await env.USAGE_DB.prepare(
+    "SELECT revision, checksum, project_count AS projectCount, created_at AS createdAt FROM project_archive_versions WHERE workspace_hash = ? ORDER BY revision DESC LIMIT 20",
+  ).bind(workspaceHash).all();
+  return {
+    currentRevision: Number(head?.currentRevision || 0),
+    updatedAt: head?.updatedAt || null,
+    versions: (result?.results || []).map((item) => ({ ...item, revision: Number(item.revision), projectCount: Number(item.projectCount || 0) })),
+  };
+}
+
+async function saveArchive(env, request) {
+  const body = await readArchiveRequest(request);
+  const workspaceHash = await archiveWorkspaceHash(body.workspaceKey);
+  const archive = body.archive && typeof body.archive === "object" ? body.archive : null;
+  if (!archive || !Array.isArray(archive.projects)) throw codedError("备份中缺少项目档案。", "INVALID_ARCHIVE_REQUEST");
+  const payloadJson = JSON.stringify(archive);
+  if (new TextEncoder().encode(payloadJson).byteLength > MAX_ARCHIVE_BYTES) throw codedError("云端备份超过 2MB，请先精简大型历史资产。", "ARCHIVE_TOO_LARGE");
+  if (!env.USAGE_DB) throw codedError("云端档案数据库不可用。", "ARCHIVE_DB_UNAVAILABLE");
+  const current = await env.USAGE_DB.prepare(
+    `SELECT current_revision AS currentRevision,
+      (SELECT checksum FROM project_archive_versions WHERE workspace_hash = ? ORDER BY revision DESC LIMIT 1) AS currentChecksum
+     FROM archive_workspaces WHERE workspace_hash = ?`,
+  ).bind(workspaceHash, workspaceHash).first();
+  const currentRevision = Number(current?.currentRevision || 0);
+  const baseRevision = body.baseRevision === null || body.baseRevision === undefined ? null : Number(body.baseRevision);
+  if ((currentRevision > 0 && baseRevision === null) || (baseRevision !== null && baseRevision !== currentRevision)) {
+    const cause = codedError("云端已有更新版本，请先刷新恢复点后再备份。", "ARCHIVE_VERSION_CONFLICT");
+    cause.currentRevision = currentRevision;
+    throw cause;
+  }
+  const now = new Date().toISOString();
+  const checksum = await sha256(payloadJson);
+  if (currentRevision > 0 && current?.currentChecksum === checksum) {
+    return { revision: currentRevision, checksum, projectCount: archive.projects.length, createdAt: now, unchanged: true };
+  }
+  const revision = currentRevision + 1;
+  try {
+    await env.USAGE_DB.batch([
+      env.USAGE_DB.prepare(`
+      INSERT INTO archive_workspaces (workspace_hash, current_revision, created_at, updated_at)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(workspace_hash) DO UPDATE SET
+        current_revision = excluded.current_revision,
+        updated_at = excluded.updated_at
+      WHERE current_revision = ?
+    `).bind(workspaceHash, revision, now, now, currentRevision),
+      env.USAGE_DB.prepare(`
+      INSERT INTO project_archive_versions (workspace_hash, revision, payload_json, checksum, project_count, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).bind(workspaceHash, revision, payloadJson, checksum, archive.projects.length, now),
+      env.USAGE_DB.prepare(`
+      DELETE FROM project_archive_versions
+      WHERE workspace_hash = ? AND revision NOT IN (
+        SELECT revision FROM project_archive_versions WHERE workspace_hash = ? ORDER BY revision DESC LIMIT 20
+      )
+      `).bind(workspaceHash, workspaceHash),
+    ]);
+  } catch (cause) {
+    const latest = await env.USAGE_DB.prepare(
+      "SELECT current_revision AS currentRevision FROM archive_workspaces WHERE workspace_hash = ?",
+    ).bind(workspaceHash).first();
+    if (Number(latest?.currentRevision || 0) !== currentRevision) {
+      throw codedError("云端已有更新版本，请先刷新恢复点后再备份。", "ARCHIVE_VERSION_CONFLICT");
+    }
+    throw cause;
+  }
+  return { revision, checksum, projectCount: archive.projects.length, createdAt: now };
+}
+
+async function loadArchive(env, body) {
+  const workspaceHash = await archiveWorkspaceHash(body.workspaceKey);
+  if (!env.USAGE_DB) throw codedError("云端档案数据库不可用。", "ARCHIVE_DB_UNAVAILABLE");
+  const requestedRevision = Math.max(0, Number(body.revision || 0));
+  const row = requestedRevision
+    ? await env.USAGE_DB.prepare("SELECT revision, payload_json AS payloadJson, checksum, created_at AS createdAt FROM project_archive_versions WHERE workspace_hash = ? AND revision = ?").bind(workspaceHash, requestedRevision).first()
+    : await env.USAGE_DB.prepare("SELECT revision, payload_json AS payloadJson, checksum, created_at AS createdAt FROM project_archive_versions WHERE workspace_hash = ? ORDER BY revision DESC LIMIT 1").bind(workspaceHash).first();
+  if (!row) throw codedError("没有找到对应的云端恢复点。", "ARCHIVE_NOT_FOUND");
+  return { revision: Number(row.revision), checksum: row.checksum, createdAt: row.createdAt, archive: JSON.parse(row.payloadJson) };
+}
+
+async function handleArchiveApi(request, env, url) {
+  if (request.method !== "POST") return error("Not found", "NOT_FOUND", 404);
+  if (url.pathname === "/api/archive/save") return json({ ok: true, result: await saveArchive(env, request) });
+  const body = await readArchiveRequest(request);
+  const workspaceHash = await archiveWorkspaceHash(body.workspaceKey);
+  if (url.pathname === "/api/archive/list") return json({ ok: true, result: await archiveList(env, workspaceHash) });
+  if (url.pathname === "/api/archive/load") return json({ ok: true, result: await loadArchive(env, body) });
+  return error("Not found", "NOT_FOUND", 404);
 }
 
 function consumeRateLimit(request, path) {
@@ -151,11 +276,12 @@ async function releaseDailyBudget(env, reservation) {
   return { day: reservation.day, ...next, limit, remaining: limit - next.usedUnits, fallback: true };
 }
 
-function createUsageMeter(env, model) {
+function createUsageMeter(env, model, signal = null) {
   let latest = null;
   let totalUnits = 0;
   let providerCalls = 0;
   return {
+    signal,
     async reserve(label = "generation") {
       try {
         const reservation = await reserveUsageUnits(env, providerCallUnits(model));
@@ -515,10 +641,10 @@ function seriesLedgerPrompt(input) {
 
 项目资料：${bibleContext(payload)}
 旧台账：${stringify(payload.projectSeriesLedger || {}, 7500)}
-已归档集数（按集数顺序）：${stringify(payload.projectEpisodes || [], 22000)}
+已归档集数场记摘要（按集数顺序，摘要中的代表台词只用于辨认人物声音）：${stringify(payload.projectEpisodes || [], 52000)}
 
 返回结构：
-{"ledger":{"openQuestions":[{"id":"Q-01","question":"未解问题","originEpisode":1,"nextAction":"何时如何承接"}],"resolvedQuestions":[{"id":"Q-00","resolution":"解决事实","resolvedEpisode":2}],"characterStates":[{"name":"角色名","currentGoal":"当前目标","knownFacts":"已知事实","hiddenFacts":"隐瞒事实","relationshipState":"核心关系现状","lastChange":"最后一次变化"}],"abilityStates":[{"name":"精灵或能力","status":"当前可用状态","costCooldown":"代价或冷却","lastUsedEpisode":1}],"propStates":[{"name":"道具名","holder":"持有人","status":"状态","setupPayoff":"铺垫或回收进度"}],"antagonistProgress":"反派计划推进到哪一步","recurringGags":[{"name":"梗名","lastUse":"上次用法","evolution":"已经怎样变化","nextUseRule":"下次如何升级或暂停"}],"nextObligations":["下一集必须承接的具体行动"]}}`;
+{"ledger":{"throughEpisode":3,"openQuestions":[{"id":"Q-01","question":"未解问题","originEpisode":1,"nextAction":"何时如何承接"}],"resolvedQuestions":[{"id":"Q-00","resolution":"解决事实","resolvedEpisode":2}],"characterStates":[{"name":"角色名","currentGoal":"当前目标","knownFacts":"已知事实","hiddenFacts":"隐瞒事实","relationshipState":"核心关系现状","lastChange":"最后一次变化"}],"abilityStates":[{"name":"精灵或能力","status":"当前可用状态","costCooldown":"代价或冷却","lastUsedEpisode":1}],"propStates":[{"name":"道具名","holder":"持有人","status":"状态","setupPayoff":"铺垫或回收进度"}],"antagonistProgress":"反派计划推进到哪一步","recurringGags":[{"name":"梗名","lastUse":"上次用法","evolution":"已经怎样变化","nextUseRule":"下次如何升级或暂停"}],"nextObligations":["下一集必须承接的具体行动"]}}`;
 }
 
 function scriptDoctorPrompt(input) {
@@ -972,6 +1098,7 @@ function normalizeSeriesLedger(result) {
   if (!source || typeof source !== "object") throw validationError("连载台账", ["缺少 ledger 对象"]);
   const objects = (key, fields) => (Array.isArray(source[key]) ? source[key] : []).slice(0, 30).map((item) => Object.fromEntries(fields.map((field) => [field, field.toLowerCase().includes("episode") ? Number(item?.[field] || 0) : textValue(item?.[field])]))).filter((item) => fields.some((field) => item[field]));
   const ledger = {
+    throughEpisode: Math.max(0, Number(source.throughEpisode || 0)),
     openQuestions: objects("openQuestions", ["id", "question", "originEpisode", "nextAction"]),
     resolvedQuestions: objects("resolvedQuestions", ["id", "resolution", "resolvedEpisode"]),
     characterStates: objects("characterStates", ["name", "currentGoal", "knownFacts", "hiddenFacts", "relationshipState", "lastChange"]),
@@ -1143,7 +1270,7 @@ function normalizeTopics(result, count) {
 async function repairJsonWithDeepSeek(env, input, malformed, maxTokens, usageMeter) {
   const reservation = await usageMeter.reserve("json-repair");
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 60_000);
+  const timeoutId = setTimeout(() => controller.abort(), AI_REPAIR_TIMEOUT_MS);
   let response;
   try {
     response = await fetch(`${env.DEEPSEEK_BASE_URL || "https://api.deepseek.com"}/chat/completions`, {
@@ -1163,11 +1290,14 @@ async function repairJsonWithDeepSeek(env, input, malformed, maxTokens, usageMet
         response_format: { type: "json_object" },
         stream: false,
       }),
-      signal: controller.signal,
+      signal: usageMeter.signal ? AbortSignal.any([controller.signal, usageMeter.signal]) : controller.signal,
     });
   } catch (cause) {
     await usageMeter.release(reservation);
-    if (cause?.name === "AbortError") throw codedError("AI 返回格式异常，自动修复超时，请重新生成。", "AI_JSON_REPAIR_TIMEOUT");
+    if (cause?.name === "AbortError") {
+      if (usageMeter.signal?.aborted) throw codedError("请求已取消，自动修复已停止。", "CLIENT_ABORTED");
+      throw codedError("AI 返回格式异常，自动修复超时，请重新生成。", "AI_JSON_REPAIR_TIMEOUT");
+    }
     throw cause;
   } finally {
     clearTimeout(timeoutId);
@@ -1189,7 +1319,7 @@ async function askDeepSeek(env, input, prompt, maxTokens, usageMeter, options = 
   }
   const reservation = await usageMeter.reserve(options.label || "generation");
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 75_000);
+  const timeoutId = setTimeout(() => controller.abort(), AI_GENERATION_TIMEOUT_MS);
   let response;
   try {
     response = await fetch(`${env.DEEPSEEK_BASE_URL || "https://api.deepseek.com"}/chat/completions`, {
@@ -1209,11 +1339,14 @@ async function askDeepSeek(env, input, prompt, maxTokens, usageMeter, options = 
         response_format: { type: "json_object" },
         stream: false,
       }),
-      signal: controller.signal,
+      signal: usageMeter.signal ? AbortSignal.any([controller.signal, usageMeter.signal]) : controller.signal,
     });
   } catch (cause) {
     await usageMeter.release(reservation);
-    if (cause?.name === "AbortError") throw codedError("DeepSeek 响应超时，请缩短输入后重试。", "UPSTREAM_TIMEOUT");
+    if (cause?.name === "AbortError") {
+      if (usageMeter.signal?.aborted) throw codedError("请求已取消，生成已停止。", "CLIENT_ABORTED");
+      throw codedError("DeepSeek 响应超时，请缩短输入后重试。", "UPSTREAM_TIMEOUT");
+    }
     throw cause;
   } finally {
     clearTimeout(timeoutId);
@@ -1298,6 +1431,8 @@ async function api(request, env, url) {
     });
   }
 
+  if (url.pathname.startsWith("/api/archive/")) return handleArchiveApi(request, env, url);
+
   if (request.method !== "POST") return error("Not found", "NOT_FOUND", 404);
   if (!AI_PATH_COST.has(url.pathname)) return error("Not found", "NOT_FOUND", 404);
   const retryAfter = consumeRateLimit(request, url.pathname);
@@ -1320,7 +1455,7 @@ async function api(request, env, url) {
   }
   const model = modelFor(input, env);
   if (!env.DEEPSEEK_API_KEY) return error("未配置 DeepSeek API Key", "NO_DEEPSEEK_KEY", 500);
-  const usageMeter = createUsageMeter(env, model);
+  const usageMeter = createUsageMeter(env, model, request.signal);
   const requestId = crypto.randomUUID();
   const success = (result) => {
     const usage = usageMeter.snapshot();
@@ -1437,12 +1572,22 @@ export default {
         ? 500
         : code === "REQUEST_TOO_LARGE"
           ? 413
-          : code === "INVALID_REQUEST"
+          : code === "INVALID_REQUEST" || code === "INVALID_ARCHIVE_REQUEST" || code === "INVALID_WORKSPACE_KEY"
             ? 400
+            : code === "ARCHIVE_TOO_LARGE"
+              ? 413
+              : code === "ARCHIVE_VERSION_CONFLICT"
+                ? 409
+                : code === "ARCHIVE_NOT_FOUND"
+                  ? 404
+                  : code === "ARCHIVE_DB_UNAVAILABLE"
+                    ? 503
             : code === "DAILY_BUDGET_EXCEEDED" || code === "USAGE_GUARD_UNAVAILABLE"
               ? 429
               : code === "UPSTREAM_TIMEOUT"
                 ? 504
+                : code === "CLIENT_ABORTED"
+                  ? 499
                 : 502;
       return error(cause?.message || "生成服务暂时不可用", code, status);
     }

@@ -3,12 +3,13 @@
   if (typeof module === "object" && module.exports) module.exports = api;
   if (root) root.RocoProjectDomain = api;
 })(typeof globalThis !== "undefined" ? globalThis : this, function () {
-  const PROJECT_SCHEMA_VERSION = 4;
+  const PROJECT_SCHEMA_VERSION = 5;
 
   function emptySeriesLedger() {
     return {
       openQuestions: [], resolvedQuestions: [], characterStates: [], abilityStates: [], propStates: [],
       antagonistProgress: "", recurringGags: [], nextObligations: [], updatedAt: null,
+      throughEpisode: 0,
     };
   }
 
@@ -68,6 +69,11 @@
       ? snapshot.activeStoryboardVersionId
       : storyboardVersions.at(-1)?.id || null;
     const activeStoryboard = storyboardVersions.find((item) => item.id === activeStoryboardVersionId);
+    const doctorResult = snapshot.doctorResult && typeof snapshot.doctorResult === "object"
+      ? snapshot.doctorResult
+      : snapshot.doctorReport
+        ? { report: snapshot.doctorReport, revisedScript: null, createdAt: snapshot.createdAt || new Date().toISOString() }
+        : null;
     return {
       id,
       createdAt: snapshot.createdAt || new Date().toISOString(),
@@ -81,7 +87,8 @@
       source: snapshot.source || "",
       model: snapshot.model || "",
       consistency: snapshot.consistency || null,
-      doctorReport: snapshot.doctorReport || null,
+      doctorResult,
+      doctorReport: doctorResult?.report || snapshot.doctorReport || null,
     };
   }
 
@@ -106,6 +113,7 @@
     episode.source = version.source || "";
     episode.model = version.model || "";
     episode.consistency = version.consistency || null;
+    episode.doctorResult = version.doctorResult || null;
     episode.doctorReport = version.doctorReport || null;
     return episode;
   }
@@ -123,6 +131,48 @@
 
   function normalizeIdList(value) {
     return [...new Set((Array.isArray(value) ? value : []).map(String).map((item) => item.trim()).filter(Boolean))];
+  }
+
+  function rekeyImportedProject(project) {
+    project.id = newId("project");
+    project.episodes = (project.episodes || []).map((episode) => {
+      const versionIdMap = new Map();
+      const versions = (episode.versions || []).map((sourceVersion) => {
+        const oldVersionId = sourceVersion.id;
+        const versionId = newId("version");
+        versionIdMap.set(oldVersionId, versionId);
+        const storyboardIdMap = new Map();
+        const storyboardVersions = (sourceVersion.storyboardVersions || []).map((sourceStoryboard) => {
+          const storyboard = {
+            ...sourceStoryboard,
+            id: newId("storyboard-version"),
+            scriptVersionId: versionId,
+          };
+          storyboardIdMap.set(sourceStoryboard.id, storyboard.id);
+          return storyboard;
+        });
+        return createEpisodeVersion({
+          ...sourceVersion,
+          id: versionId,
+          historyId: null,
+          storyboardVersions,
+          activeStoryboardVersionId: storyboardIdMap.get(sourceVersion.activeStoryboardVersionId)
+            || storyboardVersions.at(-1)?.id
+            || null,
+        });
+      });
+      const normalized = {
+        ...episode,
+        id: newId("episode"),
+        historyId: null,
+        versions,
+        activeVersionId: versionIdMap.get(episode.activeVersionId) || versions.at(-1)?.id || null,
+      };
+      return applyEpisodeVersion(normalized, normalized.activeVersionId);
+    });
+    project.createdAt = new Date().toISOString();
+    project.updatedAt = project.createdAt;
+    return project;
   }
 
   function migrateProjectRecord(source = {}, defaultBible = {}) {
@@ -180,6 +230,21 @@
       project.ledgerVersions = [];
       project.canonSources = [];
       project.schemaVersion = 4;
+    }
+
+    if (project.schemaVersion < 5) {
+      project.episodes = project.episodes.map((episode) => ({
+        ...episode,
+        versions: Array.isArray(episode.versions)
+          ? episode.versions.map((version) => ({
+            ...version,
+            doctorResult: version.doctorResult || (version.doctorReport
+              ? { report: version.doctorReport, revisedScript: null, createdAt: version.createdAt || null }
+              : null),
+          }))
+          : episode.versions,
+      }));
+      project.schemaVersion = 5;
     }
 
     project.schemaVersion = PROJECT_SCHEMA_VERSION;
@@ -242,7 +307,10 @@
       episode = { id: newId("episode"), episodeNumber, review: { status: "draft" } };
       project.episodes.push(episode);
     }
-    const version = createEpisodeVersion(options.versionSnapshot || {});
+    const version = createEpisodeVersion({
+      ...(options.versionSnapshot || {}),
+      input: options.versionSnapshot?.input || input,
+    });
     episode.versions = Array.isArray(episode.versions) ? episode.versions : [];
     episode.versions.push(version);
     episode.episodeNumber = episodeNumber;
@@ -295,6 +363,7 @@
     activeEpisodeVersion,
     applyEpisodeVersion,
     normalizeProjectEpisodes,
+    rekeyImportedProject,
     migrateProjectRecord,
     nextEpisodeNumber,
     validateEpisodePlan,

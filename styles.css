@@ -523,6 +523,14 @@ tbody tr:hover td { background: rgba(200, 221, 124, 0.035); }
 .doctor-dimensions { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; }
 .doctor-dimensions span { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 9px; border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--signal); font-size: 11px; }
 .doctor-dimensions strong { color: var(--ink-soft); font-size: 10px; }
+.cloud-archive-status { margin: 12px 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: rgba(255, 255, 255, 0.018); color: var(--ink-soft); }
+.cloud-archive-status[data-state="saved"] { border-color: color-mix(in srgb, var(--signal) 55%, var(--line)); color: var(--ink); }
+.cloud-archive-status[data-state="error"] { border-color: #9a4f52; color: #d77f83; }
+.cloud-archive-versions { display: grid; gap: 8px; }
+.cloud-version-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.cloud-version-row div { display: grid; gap: 3px; }
+.cloud-version-row span { color: var(--ink-soft); font-size: 12px; }
+.cloud-recovery-controls { display: grid; grid-template-columns: auto minmax(260px, 1fr) auto; gap: 8px; align-items: center; padding-top: 12px; }
 #applyDoctorRevisionBtn { margin-top: 16px; }
 
 .schema-grid { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }

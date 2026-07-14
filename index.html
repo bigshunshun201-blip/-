@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>洛克王国短剧创作工作台</title>
-    <link rel="stylesheet" href="./styles.css?v=20260714-production-system" />
+    <link rel="stylesheet" href="./styles.css?v=20260714-archive-system" />
   </head>
   <body>
     <a class="skip-link" href="#workspace">跳到创作工作区</a>
@@ -325,6 +325,22 @@
               </section>
               <section class="project-overview" id="projectOverview"></section>
             </div>
+            <section class="project-section cloud-archive-section">
+              <div class="section-title">
+                <div><h3>云端备份</h3><p>使用现有 Cloudflare D1 保存版本化恢复点；恢复密钥只保存在你的浏览器中。</p></div>
+                <div class="header-actions"><button class="small-action" id="refreshCloudArchiveBtn" type="button">刷新恢复点</button><button class="small-action" id="backupCloudNowBtn" type="button">立即备份</button></div>
+              </div>
+              <div class="cloud-archive-status" id="cloudArchiveStatus" data-state="idle">本地档案已启用，等待首次云端备份。</div>
+              <div class="cloud-archive-versions" id="cloudArchiveVersions"></div>
+              <details class="compact-history cloud-recovery-key">
+                <summary>恢复密钥与新设备连接</summary>
+                <div class="cloud-recovery-controls">
+                  <button class="small-action" id="copyWorkspaceKeyBtn" type="button">复制本机恢复密钥</button>
+                  <input id="workspaceKeyInput" autocomplete="off" placeholder="在新设备粘贴 roco_ 开头的恢复密钥" />
+                  <button class="small-action" id="connectWorkspaceKeyBtn" type="button">连接该备份空间</button>
+                </div>
+              </details>
+            </section>
             <section class="project-section">
               <div class="section-title">
                 <h3>集数生产档案</h3>
@@ -626,13 +642,17 @@
       粉丝向二创工作台示例，不代表官方内容或授权关系。发布前请核对平台规范与 IP 授权边界。
     </footer>
 
-    <script src="./generator.js?v=20260714-production-system"></script>
-    <script src="./workflow-core.js?v=20260714-production-system"></script>
-    <script src="./project-domain.js?v=20260714-production-system"></script>
-    <script src="./episode-planner.js?v=20260714-production-system"></script>
-    <script src="./ui-templates.js?v=20260714-production-system"></script>
-    <script src="./api-client.js?v=20260714-production-system"></script>
-    <script src="./data-store.js?v=20260714-production-system"></script>
-    <script src="./app.js?v=20260714-production-system"></script>
+    <script src="./generator.js?v=20260714-archive-system"></script>
+    <script src="./workflow-core.js?v=20260714-archive-system"></script>
+    <script src="./project-domain.js?v=20260714-archive-system"></script>
+    <script src="./episode-planner.js?v=20260714-archive-system"></script>
+    <script src="./ui-templates.js?v=20260714-archive-system"></script>
+    <script src="./api-client.js?v=20260714-archive-system"></script>
+    <script src="./data-store.js?v=20260714-archive-system"></script>
+    <script src="./archive-sync.js?v=20260714-archive-system"></script>
+    <script src="./app-state.js?v=20260714-archive-system"></script>
+    <script src="./ai-operation.js?v=20260714-archive-system"></script>
+    <script src="./generation-client.js?v=20260714-archive-system"></script>
+    <script src="./app.js?v=20260714-archive-system"></script>
   </body>
 </html>

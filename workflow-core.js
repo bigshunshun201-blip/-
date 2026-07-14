@@ -57,6 +57,41 @@
     });
   }
 
+  function compactText(value, limit) {
+    const text = String(value || "").trim();
+    return text.length > limit ? `${text.slice(0, limit)}…` : text;
+  }
+
+  function ledgerEpisodeSummary(episode) {
+    const script = episode?.script || {};
+    const dialogue = Array.isArray(script.dialogue) ? script.dialogue : [];
+    const dialogueSignals = [...dialogue.slice(0, 1), ...dialogue.slice(-2)]
+      .filter((item, index, source) => source.indexOf(item) === index)
+      .map((item) => ({ id: item?.id || "", role: compactText(item?.role, 20), line: compactText(item?.line, 80) }));
+    return {
+      episodeNumber: Number(episode?.episodeNumber || 0),
+      title: compactText(script.title, 120),
+      synopsis: compactText(script.synopsis, 260),
+      structure: (Array.isArray(script.structure) ? script.structure : []).slice(0, 6).map((item) => ({
+        beat: compactText(item?.beat, 36),
+        content: compactText(item?.content, 90),
+      })),
+      hooks: (Array.isArray(script.hooks) ? script.hooks : []).slice(0, 2).map((item) => compactText(typeof item === "string" ? item : JSON.stringify(item), 100)),
+      dialogueSignals,
+      mustPreserve: (episode?.consistency?.mustPreserve || []).slice(0, 5).map((item) => compactText(item, 160)),
+      nextEpisodeCarryover: compactText(episode?.consistency?.nextEpisodeCarryover, 160),
+      updatedAt: episode?.updatedAt || "",
+    };
+  }
+
+  function ledgerEpisodeBatch(episodes, limit = 30) {
+    return (Array.isArray(episodes) ? episodes : [])
+      .filter((episode) => episode?.script)
+      .sort((a, b) => Number(a.episodeNumber) - Number(b.episodeNumber))
+      .slice(-Math.max(1, Number(limit) || 30))
+      .map(ledgerEpisodeSummary);
+  }
+
   function hydrateHistory(history, projects) {
     return (Array.isArray(history) ? history : []).map((item) => {
       if (!item?.archivedInProject || item.script) return item;
@@ -75,5 +110,5 @@
     });
   }
 
-  return { activeVersion, continuityForTarget, compactHistory, hydrateHistory, findArchivedVersion };
+  return { activeVersion, continuityForTarget, compactHistory, hydrateHistory, findArchivedVersion, ledgerEpisodeSummary, ledgerEpisodeBatch };
 });

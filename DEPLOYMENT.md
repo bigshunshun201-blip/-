@@ -6,6 +6,7 @@
 - GitHub 仓库：https://github.com/bigshunshun201-blip/-.git
 - 托管方式：Cloudflare Worker + Static Assets
 - 用量数据库：Cloudflare D1 `roco-shortdrama-usage`
+- 项目备份：同一 D1 中的版本化档案表；恢复密钥只保存在用户浏览器，服务端仅保存哈希
 
 ## 自动部署
 
@@ -38,12 +39,11 @@ npx.cmd wrangler deploy
 直接使用本地 Node 服务：
 
 ```powershell
-$env:AI_PROVIDER="deepseek"
 $env:DEEPSEEK_API_KEY="你的 DeepSeek API Key"
 node server.js
 ```
 
-打开 `http://127.0.0.1:8765/`。DeepSeek 模式会复用线上 Worker 的同一套 API 路由；Ollama、OpenAI-compatible 和 OpenAI 仍使用 `server.js` 中的兼容实现。
+打开 `http://127.0.0.1:8765/`。本地服务只负责静态页面和转发 DeepSeek 请求，生成逻辑统一复用 Cloudflare Worker。
 
 使用 Wrangler 本地 Worker 前，先初始化本地 D1：
 
