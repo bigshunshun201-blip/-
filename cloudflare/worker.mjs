@@ -10,9 +10,13 @@ const MAX_INPUT_BYTES = 120_000;
 const MAX_ARCHIVE_BYTES = 2_000_000;
 const RATE_WINDOW_MS = 60_000;
 const MAX_AI_REQUESTS_PER_WINDOW = 12;
-const AI_GENERATION_TIMEOUT_MS = 70_000;
-const AI_REPAIR_TIMEOUT_MS = 50_000;
+const AI_GENERATION_TIMEOUT_MS = 90_000;
+const AI_REPAIR_TIMEOUT_MS = 60_000;
 const AI_HEARTBEAT_INTERVAL_MS = 10_000;
+const SCRIPT_OUTPUT_TOKENS = 5600;
+const SCRIPT_DOCTOR_OUTPUT_TOKENS = 6800;
+const RECAST_OUTPUT_TOKENS = 6000;
+const MAX_STORYBOARD_OUTPUT_TOKENS = 8000;
 const rateBuckets = new Map();
 const fallbackDailyUsage = new Map();
 const AI_PATH_COST = new Map([
@@ -477,6 +481,10 @@ function storyboardSegmentPlan(duration, clipMode = "smart") {
   return { clipMode, targetSeconds, total, segments };
 }
 
+function storyboardOutputTokens(segmentCount) {
+  return Math.min(MAX_STORYBOARD_OUTPUT_TOKENS, 2200 + (Math.max(1, Number(segmentCount) || 1) * 520));
+}
+
 function roleNames(input) {
   const text = String(input.roles || "");
   const fieldLabels = new Set(["反差", "口头禅", "动作习惯", "底线", "弱点", "欲望", "身份", "特点", "笑点", "喜剧触发", "能力", "代价", "限制"]);
@@ -632,14 +640,14 @@ function scriptPrompt(input) {
 {
   "script": {
     "title": "标题，18字以内",
-    "synopsis": "80-160字故事梗概",
-    "characters": [{"name":"角色名","description":"人物设定和本集作用"}],
+    "synopsis": "120-220字故事梗概，交代目标、阻力、反转和未解决悬念",
+    "characters": [{"name":"角色名","description":"人物性格、当前目标、本集关键选择、能力边界及可拍摄的动作或说话特征"}],
     "structure": [
-      {"beat":"0-3秒 强钩子","beatIds":["BEAT-01"],"content":"剧情"},
-      {"beat":"冲突建立","beatIds":["BEAT-02"],"content":"剧情"},
-      {"beat":"行动与升级","beatIds":["BEAT-03","BEAT-04","BEAT-05"],"content":"剧情"},
-      {"beat":"反转与选择","beatIds":["BEAT-06","BEAT-07"],"content":"剧情"},
-      {"beat":"选择后果与结尾钩子","beatIds":["BEAT-08"],"content":"下一集悬念"}
+      {"beat":"0-3秒 强钩子","beatIds":["BEAT-01"],"content":"包含角色动作、可见异常和立即问题的具体剧情"},
+      {"beat":"冲突建立","beatIds":["BEAT-02"],"content":"包含人物目标、阻力和失败代价的具体剧情"},
+      {"beat":"行动与升级","beatIds":["BEAT-03","BEAT-04","BEAT-05"],"content":"分层写清行动、笑点回扣和新信息造成的升级"},
+      {"beat":"反转与选择","beatIds":["BEAT-06","BEAT-07"],"content":"写清前置铺垫如何兑现，以及人物被迫做出的选择"},
+      {"beat":"选择后果与结尾钩子","beatIds":["BEAT-08"],"content":"呈现选择后果和下一集能直接承接的悬念"}
     ],
     "dialogue": [{"id":"LINE-01","beatIds":["BEAT-01"],"role":"角色名","line":"短台词","intention":"这句话想让对方做什么","subtext":"没说出口的真实意思"}],
     "rhythm": ["情绪节奏"],
@@ -655,7 +663,7 @@ function scriptPrompt(input) {
     "tags": ["话题标签"]
   }
 }
-限制：characters 2-5 个；structure 固定 5 段并覆盖 BEAT-01 至 BEAT-08；dialogue 6-10 句；innovationPoints 1-3 条；comedyBeats 1-3 条；visualHighlights 2-4 条；rhythm、reversals、hooks、tags 各不超过 3 条。`;
+限制：characters 2-5 个；structure 固定 5 段并覆盖 BEAT-01 至 BEAT-08；dialogue 以 8-14 句为目标，每句都要有 intention 和 subtext，避免用长独白凑字数；innovationPoints 1-3 条；comedyBeats 1-3 条；visualHighlights 2-4 条；rhythm、reversals、hooks、tags 各不超过 3 条。`;
 }
 
 function recastPrompt(input) {
@@ -675,7 +683,7 @@ function recastPrompt(input) {
 4. 如果目标角色能力无法完成原动作，用符合设定的动作、道具或协作方式实现同一剧情后果，不得突破能力边界。
 5. 每个目标角色卡都必须进入 assetIntegration.characters，并写清本集戏剧任务与关键选择。未入库角色允许保留，但不要为其伪造 assetId。
 6. 原剧本已有的梗绑定、创新机制、视觉爆点和铺垫回扣应尽量保留；因角色特质变化而调整时，必须保持同等戏剧功能。
-7. 返回完整 script 对象，字段与原剧本完全一致；characters 2-5 个，dialogue 6-10 句，structure 固定5段。
+7. 返回完整 script 对象，字段与原剧本完全一致；characters 2-5 个，dialogue 6-14 句，structure 固定5段。
 
 换角映射：
 ${stringify(mappings, 9000)}
@@ -712,6 +720,8 @@ function storyboardPrompt(input) {
 11. 所有视频段合起来必须完整实现当前剧本；最后一段必须呈现剧本结尾悬念，不能擅自增加新反转或混入其他剧本内容。
 12. 角色若有结构化角色卡，动作链和画面提示词必须体现其标志性动作、反差或喜剧触发器；口头禅只能出现在剧本已有台词中，不得为分镜擅自加戏。
 13. 每段必须用 beatIds 和 dialogueIds 原样引用剧本中的节拍与台词 id；分镜台词必须与所引用 LINE 原台词一致，不能只写意思相近的新台词。
+14. 每段 visualPrompt 建议 100-180 字，完整写清环境、构图、角色外观与位置、连续动作、镜头、光色、特效和禁止事项；continuityIn、continuityOut 各建议 40-90 字。增加的是制作信息密度，不得增加剧本之外的新事件。
+15. beatBreakdown 按本段时长拆成 2-3 个连续动作阶段，写清每阶段的起点、动作变化和落点，确保可直接用于一次 AI 视频生成。
 
 项目连续性资料：${canon}
 
@@ -723,7 +733,7 @@ function storyboardPrompt(input) {
     {"clipId":"CLIP-01","shot":1,"beatIds":["BEAT-01"],"dialogueIds":["LINE-01"],"timeRange":"00-08秒","seconds":8,"generationSeconds":8,"segmentGoal":"本段推进的唯一剧情任务","continuityIn":"段首人物、道具和环境状态","continuityOut":"段尾人物、道具和环境状态","beatBreakdown":[{"range":"0-3秒","content":"同一镜头内的动作阶段"},{"range":"3-8秒","content":"同一镜头内的动作阶段"}],"characters":"出镜角色","scene":"单一场景","visual":"整段画面概述","action":"一个主动作和最多一个反应","line":"所引用剧本原台词/旁白","scale":"单一主景别或平滑景别变化","movement":"一种主要镜头运动","sound":"音效/配乐建议","subtitle":"字幕文案","visualPrompt":"单场景连续镜头、无硬切的完整9:16提示词","assetLinks":"资产库名称或待采集素材","assetNote":"制作备注","assetStatus":"待制作"}
   ]
 }
-限制：storyboard 必须正好 ${segmentCount} 条，按时间顺序排列；每段内容只能来自当前剧本。`;
+限制：storyboard 必须正好 ${segmentCount} 条，按时间顺序排列；每段内容只能来自当前剧本。宁可把同一动作写具体，也不要用空泛形容词或新增剧情来拉长输出。`;
 }
 
 function continuityPrompt(input) {
@@ -1118,7 +1128,7 @@ function normalizeScript(result, input = {}) {
   if (!script.synopsis || script.synopsis.length < 30) issues.push("故事梗概不足30字");
   if (script.characters.length < 2 || script.characters.length > 5 || script.characters.some((item) => !item.name || !item.description)) issues.push("人物设定需要2-5个完整角色");
   if (script.structure.length !== 5 || script.structure.some((item) => !item.beat || !item.content)) issues.push("剧情结构必须是5个完整节拍");
-  if (script.dialogue.length < 6 || script.dialogue.length > 10 || script.dialogue.some((item) => !item.role || !item.line)) issues.push("台词必须是6-10句且角色、内容均不为空");
+  if (script.dialogue.length < 6 || script.dialogue.length > 14 || script.dialogue.some((item) => !item.role || !item.line)) issues.push("台词必须是6-14句且角色、内容均不为空");
   if (!script.rhythm.length || script.rhythm.length > 3) issues.push("情绪节奏需要1-3条");
   if (!script.reversals.length || script.reversals.length > 3) issues.push("反转点需要1-3条");
   if (script.innovationPoints.length < 1 || script.innovationPoints.length > 3) issues.push("创新机制需要1-3条");
@@ -1461,7 +1471,7 @@ async function repairJsonWithDeepSeek(env, input, malformed, maxTokens, usageMet
           { role: "user", content: String(malformed || "").slice(0, 24_000) },
         ],
         temperature: 0,
-        max_tokens: Math.max(1200, Math.min(Number(maxTokens || 1800), 7000)),
+        max_tokens: Math.max(1200, Math.min(Number(maxTokens || 1800), MAX_STORYBOARD_OUTPUT_TOKENS)),
         response_format: { type: "json_object" },
         stream: false,
       }),
@@ -1642,15 +1652,15 @@ async function api(request, env, url) {
   };
 
   if (url.pathname === "/api/script") {
-    const raw = await askDeepSeek(env, input, scriptPrompt(input), 4200, usageMeter);
-    const result = await normalizeWithRepair(env, input, raw, (value) => normalizeScript(value, input), 4200, usageMeter, "script");
+    const raw = await askDeepSeek(env, input, scriptPrompt(input), SCRIPT_OUTPUT_TOKENS, usageMeter);
+    const result = await normalizeWithRepair(env, input, raw, (value) => normalizeScript(value, input), SCRIPT_OUTPUT_TOKENS, usageMeter, "script");
     return success(result);
   }
 
   if (url.pathname === "/api/storyboard") {
     const storyboardDuration = Math.max(15, Math.min(Number(input.duration || 60), 180));
     const segmentCount = storyboardSegmentPlan(storyboardDuration, input.clipMode).segments.length;
-    const segmentTokens = Math.min(7000, 1600 + (segmentCount * 380));
+    const segmentTokens = storyboardOutputTokens(segmentCount);
     const raw = await askDeepSeek(env, input, storyboardPrompt(input), segmentTokens, usageMeter);
     const script = input.script || input.previousScript;
     const result = await normalizeWithRepair(env, input, raw, (value) => normalizeStoryboard(value, storyboardDuration, input.clipMode, script), segmentTokens, usageMeter, "storyboard");
@@ -1718,8 +1728,8 @@ async function api(request, env, url) {
 
   if (url.pathname === "/api/script-doctor") {
     if (!input.script && !input.previousScript) return error("请先提供需要诊断的剧本", "SCRIPT_REQUIRED", 400);
-    const raw = await askDeepSeek(env, input, scriptDoctorPrompt(input), 5200, usageMeter, { temperature: 0.55 });
-    const result = await normalizeWithRepair(env, input, raw, (value) => normalizeScriptDoctor(value, input), 5200, usageMeter, "script-doctor");
+    const raw = await askDeepSeek(env, input, scriptDoctorPrompt(input), SCRIPT_DOCTOR_OUTPUT_TOKENS, usageMeter, { temperature: 0.55 });
+    const result = await normalizeWithRepair(env, input, raw, (value) => normalizeScriptDoctor(value, input), SCRIPT_DOCTOR_OUTPUT_TOKENS, usageMeter, "script-doctor");
     return success(result);
   }
 
@@ -1727,17 +1737,17 @@ async function api(request, env, url) {
     if (!input.script || !Array.isArray(input.recastMappings) || !input.recastMappings.length) {
       return error("请先提供当前剧本，并至少选择一个角色替换关系", "RECAST_MAPPING_REQUIRED", 400);
     }
-    const raw = await askDeepSeek(env, input, recastPrompt(input), 4600, usageMeter, { temperature: 0.5 });
-    const result = await normalizeWithRepair(env, input, raw, (value) => normalizeRecastScript(value, input), 4600, usageMeter, "recast-script");
+    const raw = await askDeepSeek(env, input, recastPrompt(input), RECAST_OUTPUT_TOKENS, usageMeter, { temperature: 0.5 });
+    const result = await normalizeWithRepair(env, input, raw, (value) => normalizeRecastScript(value, input), RECAST_OUTPUT_TOKENS, usageMeter, "recast-script");
     return success(result);
   }
 
   if (url.pathname === "/api/generate") {
-    const rawScript = await askDeepSeek(env, input, scriptPrompt(input), 4200, usageMeter);
-    const scriptResult = await normalizeWithRepair(env, input, rawScript, (value) => normalizeScript(value, input), 4200, usageMeter, "script");
+    const rawScript = await askDeepSeek(env, input, scriptPrompt(input), SCRIPT_OUTPUT_TOKENS, usageMeter);
+    const scriptResult = await normalizeWithRepair(env, input, rawScript, (value) => normalizeScript(value, input), SCRIPT_OUTPUT_TOKENS, usageMeter, "script");
     const storyboardDuration = Math.max(15, Math.min(Number(input.duration || 60), 180));
     const segmentCount = storyboardSegmentPlan(storyboardDuration, input.clipMode).segments.length;
-    const segmentTokens = Math.min(7000, 1600 + (segmentCount * 380));
+    const segmentTokens = storyboardOutputTokens(segmentCount);
     const storyboardInput = { ...input, script: scriptResult.script };
     const rawStoryboard = await askDeepSeek(env, storyboardInput, storyboardPrompt(storyboardInput), segmentTokens, usageMeter);
     const storyboardResult = await normalizeWithRepair(env, storyboardInput, rawStoryboard, (value) => normalizeStoryboard(value, storyboardDuration, input.clipMode, scriptResult.script), segmentTokens, usageMeter, "storyboard");
@@ -1766,6 +1776,7 @@ export const __test = {
   normalizeInput,
   normalizeScript,
   storyboardSegmentPlan,
+  storyboardOutputTokens,
   normalizeStoryboard,
   normalizeContinuity,
   normalizeBible,

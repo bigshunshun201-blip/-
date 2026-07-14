@@ -89,6 +89,8 @@ test("storyboard segment planner adapts duration and marks fixed-mode trimming",
       if (mode === "smart") assert.ok(plan.segments.every((segment) => segment.seconds >= 4));
     }
   }
+  assert.equal(__test.storyboardOutputTokens(8), 6360);
+  assert.equal(__test.storyboardOutputTokens(24), 8000);
 });
 
 test("script normalizer rejects incomplete output and missing requested roles", () => {
@@ -119,6 +121,11 @@ test("script normalizer rejects incomplete output and missing requested roles", 
   scalarMetadata.script.tags = "洛克王国世界短剧";
   assert.deepEqual(__test.normalizeScript(scalarMetadata).script.rhythm, ["紧张推进到悬念收束"]);
   assert.deepEqual(__test.normalizeScript(scalarMetadata).script.tags, ["洛克王国世界短剧"]);
+  const expandedDialogue = structuredClone(valid);
+  expandedDialogue.script.dialogue = Array.from({ length: 14 }, (_, index) => ({ role: index % 2 ? "迪莫" : "阿洛", line: `扩展台词${index + 1}` }));
+  assert.equal(__test.normalizeScript(expandedDialogue).script.dialogue.length, 14);
+  expandedDialogue.script.dialogue.push({ role: "阿洛", line: "超出上限" });
+  assert.throws(() => __test.normalizeScript(expandedDialogue), /6-14句/);
   const integrated = structuredClone(valid);
   integrated.script.structure.forEach((item, index) => { item.beatIds = index < 4 ? [`BEAT-0${index + 1}`] : ["BEAT-05", "BEAT-06", "BEAT-07", "BEAT-08"]; });
   integrated.script.assetIntegration = {
