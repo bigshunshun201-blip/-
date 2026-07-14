@@ -1072,6 +1072,15 @@ function textValue(value) {
   return String(value || "").trim();
 }
 
+function normalizeTextList(value, maxItems) {
+  const items = Array.isArray(value) ? value : [value];
+  return [...new Set(items
+    .filter((item) => typeof item === "string" || typeof item === "number")
+    .map(textValue)
+    .filter(Boolean))]
+    .slice(0, maxItems);
+}
+
 function normalizedLine(value) {
   return textValue(value).replace(/[\s，。！？、：；,.!?:;“”"'（）()\-]/g, "");
 }
@@ -1092,17 +1101,17 @@ function normalizeScript(result, input = {}) {
       const fallback = validBeatIds.length ? [validBeatIds[Math.min(validBeatIds.length - 1, Math.floor(index * validBeatIds.length / Math.max(1, sourceDialogue.length)))]] : [];
       return { id: `LINE-${String(index + 1).padStart(2, "0")}`, beatIds: supplied.length ? supplied : fallback, role: textValue(item?.role), line: textValue(item?.line), intention: textValue(item?.intention), subtext: textValue(item?.subtext) };
     }),
-    rhythm: (Array.isArray(source.rhythm) ? source.rhythm : []).map(textValue).filter(Boolean),
-    reversals: (Array.isArray(source.reversals) ? source.reversals : []).map(textValue).filter(Boolean),
-    innovationPoints: (Array.isArray(source.innovationPoints) ? source.innovationPoints : []).map(textValue).filter(Boolean),
+    rhythm: normalizeTextList(source.rhythm, 3),
+    reversals: normalizeTextList(source.reversals, 3),
+    innovationPoints: normalizeTextList(source.innovationPoints, 3),
     comedyBeats: (Array.isArray(source.comedyBeats) ? source.comedyBeats : []).map((item) => ({ setup: textValue(item?.setup), payoff: textValue(item?.payoff), visualAction: textValue(item?.visualAction) })),
     visualHighlights: (Array.isArray(source.visualHighlights) ? source.visualHighlights : []).map((item) => ({ moment: textValue(item?.moment), verticalComposition: textValue(item?.verticalComposition), effect: textValue(item?.effect) })),
     assetIntegration: {
       characters: (Array.isArray(source.assetIntegration?.characters) ? source.assetIntegration.characters : []).map((item) => ({ assetId: textValue(item?.assetId), name: textValue(item?.name), storyFunction: textValue(item?.storyFunction), choice: textValue(item?.choice) })),
       memes: (Array.isArray(source.assetIntegration?.memes) ? source.assetIntegration.memes : []).map((item) => ({ assetId: textValue(item?.assetId), name: textValue(item?.name), triggerRole: textValue(item?.triggerRole), setup: textValue(item?.setup), payoff: textValue(item?.payoff), plotEffect: textValue(item?.plotEffect) })),
     },
-    hooks: (Array.isArray(source.hooks) ? source.hooks : []).map(textValue).filter(Boolean),
-    tags: (Array.isArray(source.tags) ? source.tags : []).map(textValue).filter(Boolean),
+    hooks: normalizeTextList(source.hooks, 3),
+    tags: normalizeTextList(source.tags, 3),
   };
   const issues = [];
   if (!script.title) issues.push("标题为空");

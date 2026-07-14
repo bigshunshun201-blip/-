@@ -108,6 +108,17 @@ test("script normalizer rejects incomplete output and missing requested roles", 
   };
   assert.equal(__test.normalizeScript(valid, { roles: "阿洛：调查者；迪莫：搭档" }).script.dialogue.length, 6);
   assert.equal(__test.normalizeScript(valid, { roles: "阿洛：调查者；反差：越怕越逞强；底线：不牺牲伙伴\n迪莫：搭档；动作习惯：紧张时后退" }).script.characters.length, 2);
+  const verboseMetadata = structuredClone(valid);
+  verboseMetadata.script.rhythm = ["紧张", "反转", "悬念", "释然"];
+  verboseMetadata.script.tags = ["洛克王国世界", "短剧", "短剧", "反转", "连续剧"];
+  const normalizedMetadata = __test.normalizeScript(verboseMetadata).script;
+  assert.deepEqual(normalizedMetadata.rhythm, ["紧张", "反转", "悬念"]);
+  assert.deepEqual(normalizedMetadata.tags, ["洛克王国世界", "短剧", "反转"]);
+  const scalarMetadata = structuredClone(valid);
+  scalarMetadata.script.rhythm = "紧张推进到悬念收束";
+  scalarMetadata.script.tags = "洛克王国世界短剧";
+  assert.deepEqual(__test.normalizeScript(scalarMetadata).script.rhythm, ["紧张推进到悬念收束"]);
+  assert.deepEqual(__test.normalizeScript(scalarMetadata).script.tags, ["洛克王国世界短剧"]);
   const integrated = structuredClone(valid);
   integrated.script.structure.forEach((item, index) => { item.beatIds = index < 4 ? [`BEAT-0${index + 1}`] : ["BEAT-05", "BEAT-06", "BEAT-07", "BEAT-08"]; });
   integrated.script.assetIntegration = {
