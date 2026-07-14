@@ -13,10 +13,11 @@ const MAX_AI_REQUESTS_PER_WINDOW = 12;
 const AI_GENERATION_TIMEOUT_MS = 90_000;
 const AI_REPAIR_TIMEOUT_MS = 60_000;
 const AI_HEARTBEAT_INTERVAL_MS = 10_000;
-const SCRIPT_OUTPUT_TOKENS = 5600;
-const SCRIPT_DOCTOR_OUTPUT_TOKENS = 6800;
-const RECAST_OUTPUT_TOKENS = 6000;
+const SCRIPT_OUTPUT_TOKENS = 7200;
+const SCRIPT_DOCTOR_OUTPUT_TOKENS = 8000;
+const RECAST_OUTPUT_TOKENS = 8000;
 const MAX_STORYBOARD_OUTPUT_TOKENS = 8000;
+const STORYBOARD_CHUNK_SIZE = 4;
 const rateBuckets = new Map();
 const fallbackDailyUsage = new Map();
 const AI_PATH_COST = new Map([
@@ -485,6 +486,13 @@ function storyboardOutputTokens(segmentCount) {
   return Math.min(MAX_STORYBOARD_OUTPUT_TOKENS, 2200 + (Math.max(1, Number(segmentCount) || 1) * 520));
 }
 
+function storyboardSegmentChunks(segments, chunkSize = STORYBOARD_CHUNK_SIZE) {
+  const size = Math.max(1, Math.floor(Number(chunkSize) || STORYBOARD_CHUNK_SIZE));
+  const chunks = [];
+  for (let index = 0; index < segments.length; index += size) chunks.push(segments.slice(index, index + size));
+  return chunks;
+}
+
 function roleNames(input) {
   const text = String(input.roles || "");
   const fieldLabels = new Set(["反差", "口头禅", "动作习惯", "底线", "弱点", "欲望", "身份", "特点", "笑点", "喜剧触发", "能力", "代价", "限制"]);
@@ -604,6 +612,9 @@ function scriptPrompt(input) {
   const payload = normalizeInput(input);
   const names = roleNames(payload);
   const canon = bibleContext(payload);
+  const dialogueTarget = Math.max(12, Math.min(24, Math.round(payload.duration / 4)));
+  const dialogueMinimum = Math.max(10, dialogueTarget - 2);
+  const dialogueMaximum = Math.min(24, dialogueTarget + 2);
   const continuation = payload.mode === "continue"
     ? `\n这是续写任务：必须承接上一集结尾钩子，不重写上一集。续写要求：${compact(payload.continueInstruction, "升级冲突并保留核心角色关系")}。\n上一集剧本：${stringify(payload.previousScript, 9000)}`
     : "";
@@ -663,7 +674,7 @@ function scriptPrompt(input) {
     "tags": ["话题标签"]
   }
 }
-限制：characters 2-5 个；structure 固定 5 段并覆盖 BEAT-01 至 BEAT-08；dialogue 以 8-14 句为目标，每句都要有 intention 和 subtext，避免用长独白凑字数；innovationPoints 1-3 条；comedyBeats 1-3 条；visualHighlights 2-4 条；rhythm、reversals、hooks、tags 各不超过 3 条。`;
+限制：characters 2-5 个；structure 固定 5 段并覆盖 BEAT-01 至 BEAT-08；根据本集 ${payload.duration} 秒时长，dialogue 应为 ${dialogueMinimum}-${dialogueMaximum} 句，每句都要有 intention 和 subtext，避免用长独白凑字数；innovationPoints 1-3 条；comedyBeats 1-3 条；visualHighlights 2-4 条；rhythm、reversals、hooks、tags 各不超过 3 条。`;
 }
 
 function recastPrompt(input) {
@@ -683,7 +694,7 @@ function recastPrompt(input) {
 4. 如果目标角色能力无法完成原动作，用符合设定的动作、道具或协作方式实现同一剧情后果，不得突破能力边界。
 5. 每个目标角色卡都必须进入 assetIntegration.characters，并写清本集戏剧任务与关键选择。未入库角色允许保留，但不要为其伪造 assetId。
 6. 原剧本已有的梗绑定、创新机制、视觉爆点和铺垫回扣应尽量保留；因角色特质变化而调整时，必须保持同等戏剧功能。
-7. 返回完整 script 对象，字段与原剧本完全一致；characters 2-5 个，dialogue 6-14 句，structure 固定5段。
+7. 返回完整 script 对象，字段与原剧本完全一致；characters 2-5 个，dialogue 6-24 句，structure 固定5段。
 
 换角映射：
 ${stringify(mappings, 9000)}
@@ -697,24 +708,32 @@ ${stringify(payload.script, 22000)}
 返回结构：{"script":{"title":"","synopsis":"","characters":[],"structure":[],"dialogue":[],"rhythm":[],"reversals":[],"innovationPoints":[],"comedyBeats":[],"visualHighlights":[],"assetIntegration":{"characters":[],"memes":[]},"hooks":[],"tags":[]}}`;
 }
 
-function storyboardPrompt(input) {
+function storyboardPrompt(input, options = {}) {
   const payload = normalizeInput(input);
   const script = payload.script || payload.previousScript;
   const names = roleNames(payload);
   const canon = bibleContext(payload);
   const segmentPlan = storyboardSegmentPlan(payload.duration, payload.clipMode);
-  const segmentCount = segmentPlan.segments.length;
+  const requestedSegments = Array.isArray(options.segments) && options.segments.length ? options.segments : segmentPlan.segments;
+  const segmentCount = requestedSegments.length;
+  const isChunk = segmentCount !== segmentPlan.segments.length;
+  const firstShot = requestedSegments[0]?.shot || 1;
+  const lastShot = requestedSegments.at(-1)?.shot || firstShot;
+  const productionInstruction = isChunk
+    ? `整集 ${payload.duration} 秒共 ${segmentPlan.segments.length} 段。本次只生成第 ${firstShot}-${lastShot} 段，必须严格返回下面 ${segmentCount} 段，不要输出其他段：${stringify(requestedSegments, 3000)}`
+    : `整集 ${payload.duration} 秒必须严格按下面的制作段计划拆成正好 ${segmentCount} 段，每段对应一次独立 AI 视频生成任务：${stringify(requestedSegments, 3000)}`;
+  const previousContinuity = textValue(options.previousContinuity);
   return `你是抖音竖屏 9:16 短剧分镜导演。只根据给定剧本生成分镜，不能改写或另起剧情。只输出严格 JSON，不要 Markdown 或解释。
 
 要求：
 1. 必须延续剧本的标题、冲突、反转、结尾钩子及核心角色；不新增无关主角。
-2. 整集 ${payload.duration} 秒必须严格按下面的制作段计划拆成正好 ${segmentCount} 段，每段对应一次独立 AI 视频生成任务：${stringify(segmentPlan.segments, 3000)}。
+2. ${productionInstruction}。每段对应一次独立 AI 视频生成任务。
 3. 每段只允许一个连续场景、一个主动作和最多一个角色反应，不允许在一次生成里硬切多个场景或堆叠复杂动作。beatBreakdown 是同一镜头内的动作阶段，不是多个剪辑镜头；第 1 段的前 3 秒必须完成强画面钩子。
 4. 场景为《洛克王国：世界》手游开放世界，主要场景：${compact(payload.scene)}。
 5. 必须使用这些角色名：${names.length ? names.join("、") : "以剧本为准"}。
 6. 必须服从短剧圣经：镜头不能让角色使用超出能力边界的能力，角色关系和反派线索必须延续已完成集数。
 7. 每段都必须填写段目标、承接入点、承接出点、角色、场景、动作、台词/旁白、景别、画面提示词、音效/配乐、关联资产和素材状态；素材状态只能是“已有”“待制作”“待采集”。
-8. 必须把剧本中的 visualHighlights 和 comedyBeats 落到具体视频段；至少 3 段有清晰的动作变化、遮挡转场、道具反应或环境异变，避免只写“角色震惊”“光芒闪烁”。
+8. 必须把本批所对应的 visualHighlights 和 comedyBeats 落到具体视频段；本批尽可能安排清晰的动作变化、遮挡转场、道具反应或环境异变，避免只写“角色震惊”“光芒闪烁”。
 9. visualPrompt 必须包含前景、中景、背景、主体动作、明暗或色彩反差、9:16 字幕安全区；音效必须与画面动作卡点。
 10. 每段 visualPrompt 要能脱离上下文直接交给视频模型，并明确“单场景连续镜头、无硬切”；continuityIn 和 continuityOut 必须精确描述首尾人物位置、朝向、表情、道具和环境状态，使相邻视频段能用首尾帧或参考图衔接。
 11. 所有视频段合起来必须完整实现当前剧本；最后一段必须呈现剧本结尾悬念，不能擅自增加新反转或混入其他剧本内容。
@@ -722,6 +741,7 @@ function storyboardPrompt(input) {
 13. 每段必须用 beatIds 和 dialogueIds 原样引用剧本中的节拍与台词 id；分镜台词必须与所引用 LINE 原台词一致，不能只写意思相近的新台词。
 14. 每段 visualPrompt 建议 100-180 字，完整写清环境、构图、角色外观与位置、连续动作、镜头、光色、特效和禁止事项；continuityIn、continuityOut 各建议 40-90 字。增加的是制作信息密度，不得增加剧本之外的新事件。
 15. beatBreakdown 按本段时长拆成 2-3 个连续动作阶段，写清每阶段的起点、动作变化和落点，确保可直接用于一次 AI 视频生成。
+${previousContinuity ? `16. 本批第一段 continuityIn 必须准确承接上一批最后状态，不得重置人物或道具：${previousContinuity}` : ""}
 
 项目连续性资料：${canon}
 
@@ -733,7 +753,7 @@ function storyboardPrompt(input) {
     {"clipId":"CLIP-01","shot":1,"beatIds":["BEAT-01"],"dialogueIds":["LINE-01"],"timeRange":"00-08秒","seconds":8,"generationSeconds":8,"segmentGoal":"本段推进的唯一剧情任务","continuityIn":"段首人物、道具和环境状态","continuityOut":"段尾人物、道具和环境状态","beatBreakdown":[{"range":"0-3秒","content":"同一镜头内的动作阶段"},{"range":"3-8秒","content":"同一镜头内的动作阶段"}],"characters":"出镜角色","scene":"单一场景","visual":"整段画面概述","action":"一个主动作和最多一个反应","line":"所引用剧本原台词/旁白","scale":"单一主景别或平滑景别变化","movement":"一种主要镜头运动","sound":"音效/配乐建议","subtitle":"字幕文案","visualPrompt":"单场景连续镜头、无硬切的完整9:16提示词","assetLinks":"资产库名称或待采集素材","assetNote":"制作备注","assetStatus":"待制作"}
   ]
 }
-限制：storyboard 必须正好 ${segmentCount} 条，按时间顺序排列；每段内容只能来自当前剧本。宁可把同一动作写具体，也不要用空泛形容词或新增剧情来拉长输出。`;
+限制：storyboard 必须正好 ${segmentCount} 条，对应第 ${firstShot}-${lastShot} 段并按时间顺序排列；每段内容只能来自当前剧本。宁可把同一动作写具体，也不要用空泛形容词或新增剧情来拉长输出。`;
 }
 
 function continuityPrompt(input) {
@@ -1128,7 +1148,7 @@ function normalizeScript(result, input = {}) {
   if (!script.synopsis || script.synopsis.length < 30) issues.push("故事梗概不足30字");
   if (script.characters.length < 2 || script.characters.length > 5 || script.characters.some((item) => !item.name || !item.description)) issues.push("人物设定需要2-5个完整角色");
   if (script.structure.length !== 5 || script.structure.some((item) => !item.beat || !item.content)) issues.push("剧情结构必须是5个完整节拍");
-  if (script.dialogue.length < 6 || script.dialogue.length > 14 || script.dialogue.some((item) => !item.role || !item.line)) issues.push("台词必须是6-14句且角色、内容均不为空");
+  if (script.dialogue.length < 6 || script.dialogue.length > 24 || script.dialogue.some((item) => !item.role || !item.line)) issues.push("台词必须是6-24句且角色、内容均不为空");
   if (!script.rhythm.length || script.rhythm.length > 3) issues.push("情绪节奏需要1-3条");
   if (!script.reversals.length || script.reversals.length > 3) issues.push("反转点需要1-3条");
   if (script.innovationPoints.length < 1 || script.innovationPoints.length > 3) issues.push("创新机制需要1-3条");
@@ -1208,17 +1228,20 @@ function normalizeStoryboard(result, duration, clipMode = "smart", script = null
   if (source.length !== expectedSegments) throw validationError("分镜", [`应返回${expectedSegments}个视频段，实际为${source.length}个`]);
   const scriptBeatIds = [...new Set((script?.structure || []).flatMap((item) => normalizeIdList(item?.beatIds, 8)))];
   const scriptDialogueIds = (script?.dialogue || []).map((item, index) => textValue(item?.id) || `LINE-${String(index + 1).padStart(2, "0")}`);
+  const scriptDialogueById = new Map((script?.dialogue || []).map((item, index) => [scriptDialogueIds[index], textValue(item?.line)]));
   const storyboard = source.map((shot, index) => {
       const planned = plan.segments[index];
       const suppliedBeatIds = normalizeIdList(shot?.beatIds, 8).filter((id) => scriptBeatIds.includes(id));
       const suppliedDialogueIds = normalizeIdList(shot?.dialogueIds, 10).filter((id) => scriptDialogueIds.includes(id));
       const fallbackBeat = scriptBeatIds.length ? [scriptBeatIds[Math.min(scriptBeatIds.length - 1, Math.floor(index * scriptBeatIds.length / source.length))]] : [];
       const fallbackDialogue = scriptDialogueIds.length ? [scriptDialogueIds[Math.min(scriptDialogueIds.length - 1, Math.floor(index * scriptDialogueIds.length / source.length))]] : [];
+      const resolvedDialogueIds = suppliedDialogueIds.length ? suppliedDialogueIds : fallbackDialogue;
+      const referencedLine = resolvedDialogueIds.map((id) => scriptDialogueById.get(id)).filter(Boolean).join(" / ");
       return {
         clipId: `CLIP-${String(index + 1).padStart(2, "0")}`,
         shot: index + 1,
         beatIds: suppliedBeatIds.length ? suppliedBeatIds : fallbackBeat,
-        dialogueIds: suppliedDialogueIds.length ? suppliedDialogueIds : fallbackDialogue,
+        dialogueIds: resolvedDialogueIds,
         timeRange: planned.timeRange,
         seconds: planned.seconds,
         generationSeconds: planned.generationSeconds,
@@ -1232,7 +1255,7 @@ function normalizeStoryboard(result, duration, clipMode = "smart", script = null
           content: textValue(beat?.content),
         })),
         visual: textValue(shot.visual), characters: textValue(shot.characters), scene: textValue(shot.scene), action: textValue(shot.action),
-        line: textValue(shot.line), scale: textValue(shot.scale), movement: textValue(shot.movement), sound: textValue(shot.sound),
+        line: referencedLine || textValue(shot.line), scale: textValue(shot.scale), movement: textValue(shot.movement), sound: textValue(shot.sound),
         subtitle: textValue(shot.subtitle), visualPrompt: textValue(shot.visualPrompt), assetLinks: textValue(shot.assetLinks), assetNote: textValue(shot.assetNote),
         assetStatus: ["已有", "待制作", "待采集"].includes(shot.assetStatus) ? shot.assetStatus : "待制作",
       };
@@ -1545,7 +1568,7 @@ async function askDeepSeek(env, input, prompt, maxTokens, usageMeter, options = 
   }
   const data = JSON.parse(raw);
   if (data.choices?.[0]?.finish_reason === "length") {
-    throw codedError("AI 输出达到长度上限，本次结果不完整。系统已经提高剧本上限，请重新生成一次。", "AI_OUTPUT_TRUNCATED");
+    throw codedError("AI 单次输出达到模型长度上限，本次结果不完整。分镜会自动拆成更小批次重试；剧本请缩短输入或降低时长后重试。", "AI_OUTPUT_TRUNCATED");
   }
   const content = data.choices?.[0]?.message?.content || raw;
   try {
@@ -1576,6 +1599,68 @@ async function normalizeWithRepair(env, input, rawResult, normalizer, maxTokens,
     });
     return normalizer(repaired);
   }
+}
+
+function normalizeStoryboardChunk(result, expectedSegments) {
+  const source = Array.isArray(result?.storyboard) ? result.storyboard : Array.isArray(result) ? result : [];
+  const issues = [];
+  if (source.length !== expectedSegments.length) issues.push(`本批应返回${expectedSegments.length}个视频段，实际为${source.length}个`);
+  const requiredFields = ["segmentGoal", "continuityIn", "continuityOut", "visual", "characters", "scene", "action", "line", "scale", "movement", "sound", "subtitle", "visualPrompt"];
+  source.forEach((shot, index) => {
+    if (!shot || typeof shot !== "object") {
+      issues.push(`本批第${index + 1}段不是有效对象`);
+      return;
+    }
+    const missing = requiredFields.filter((field) => !textValue(shot[field]));
+    if (missing.length) issues.push(`本批第${index + 1}段缺少${missing.join("/")}`);
+    const breakdown = Array.isArray(shot.beatBreakdown) ? shot.beatBreakdown : [];
+    if (breakdown.length < 2 || breakdown.some((beat) => !textValue(beat?.range) || !textValue(beat?.content))) issues.push(`本批第${index + 1}段需要2-3个完整动作阶段`);
+  });
+  if (issues.length) throw validationError("分镜分批", issues);
+  return { storyboard: source };
+}
+
+async function generateStoryboardInChunks(env, input, duration, usageMeter) {
+  const plan = storyboardSegmentPlan(duration, input.clipMode);
+  const script = input.script || input.previousScript;
+
+  const generateChunk = async (segments, previousContinuity = "") => {
+    const maxTokens = storyboardOutputTokens(segments.length);
+    try {
+      const raw = await askDeepSeek(env, input, storyboardPrompt(input, { segments, previousContinuity }), maxTokens, usageMeter, {
+        label: `storyboard-${segments[0].shot}-${segments.at(-1).shot}`,
+      });
+      const normalized = await normalizeWithRepair(
+        env,
+        input,
+        raw,
+        (value) => normalizeStoryboardChunk(value, segments),
+        maxTokens,
+        usageMeter,
+        `storyboard-${segments[0].shot}-${segments.at(-1).shot}`,
+      );
+      return normalized.storyboard;
+    } catch (cause) {
+      if (cause?.code !== "AI_OUTPUT_TRUNCATED" || segments.length === 1) throw cause;
+      const middle = Math.ceil(segments.length / 2);
+      console.warn(JSON.stringify({ event: "storyboard_chunk_split", firstShot: segments[0].shot, lastShot: segments.at(-1).shot }));
+      const firstHalf = await generateChunk(segments.slice(0, middle), previousContinuity);
+      const secondHalf = await generateChunk(segments.slice(middle), textValue(firstHalf.at(-1)?.continuityOut));
+      return [
+        ...firstHalf,
+        ...secondHalf,
+      ];
+    }
+  };
+
+  const storyboard = [];
+  let previousContinuity = "";
+  for (const segments of storyboardSegmentChunks(plan.segments)) {
+    const generated = await generateChunk(segments, previousContinuity);
+    storyboard.push(...generated);
+    previousContinuity = textValue(generated.at(-1)?.continuityOut);
+  }
+  return normalizeStoryboard({ storyboard }, duration, input.clipMode, script);
 }
 
 function authorized(request, env) {
@@ -1659,11 +1744,7 @@ async function api(request, env, url) {
 
   if (url.pathname === "/api/storyboard") {
     const storyboardDuration = Math.max(15, Math.min(Number(input.duration || 60), 180));
-    const segmentCount = storyboardSegmentPlan(storyboardDuration, input.clipMode).segments.length;
-    const segmentTokens = storyboardOutputTokens(segmentCount);
-    const raw = await askDeepSeek(env, input, storyboardPrompt(input), segmentTokens, usageMeter);
-    const script = input.script || input.previousScript;
-    const result = await normalizeWithRepair(env, input, raw, (value) => normalizeStoryboard(value, storyboardDuration, input.clipMode, script), segmentTokens, usageMeter, "storyboard");
+    const result = await generateStoryboardInChunks(env, input, storyboardDuration, usageMeter);
     return success(result);
   }
 
@@ -1746,11 +1827,8 @@ async function api(request, env, url) {
     const rawScript = await askDeepSeek(env, input, scriptPrompt(input), SCRIPT_OUTPUT_TOKENS, usageMeter);
     const scriptResult = await normalizeWithRepair(env, input, rawScript, (value) => normalizeScript(value, input), SCRIPT_OUTPUT_TOKENS, usageMeter, "script");
     const storyboardDuration = Math.max(15, Math.min(Number(input.duration || 60), 180));
-    const segmentCount = storyboardSegmentPlan(storyboardDuration, input.clipMode).segments.length;
-    const segmentTokens = storyboardOutputTokens(segmentCount);
     const storyboardInput = { ...input, script: scriptResult.script };
-    const rawStoryboard = await askDeepSeek(env, storyboardInput, storyboardPrompt(storyboardInput), segmentTokens, usageMeter);
-    const storyboardResult = await normalizeWithRepair(env, storyboardInput, rawStoryboard, (value) => normalizeStoryboard(value, storyboardDuration, input.clipMode, scriptResult.script), segmentTokens, usageMeter, "storyboard");
+    const storyboardResult = await generateStoryboardInChunks(env, storyboardInput, storyboardDuration, usageMeter);
     return success({ ...scriptResult, ...storyboardResult });
   }
 
@@ -1777,6 +1855,7 @@ export const __test = {
   normalizeScript,
   storyboardSegmentPlan,
   storyboardOutputTokens,
+  storyboardSegmentChunks,
   normalizeStoryboard,
   normalizeContinuity,
   normalizeBible,

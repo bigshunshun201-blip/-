@@ -7,7 +7,7 @@
   const projectsKey = "roco-shortdrama-studio-projects";
   const accessCodeKey = "roco-shortdrama-access-code";
   const maxHistoryItems = 60;
-  const apiTimeoutMs = 210_000;
+  const apiTimeoutMs = 600_000;
   const characterFieldIds = ["characterName", "characterRole", "characterTraits", "characterContrast", "characterDesire", "characterWeakness", "characterCatchphrases", "characterMannerism", "characterComedyTrigger", "characterBoundary", "characterSpeechPattern", "characterPressureResponse", "characterLieTell", "characterAddressStyle", "characterForbiddenPhrases", "characterInnerNeed", "characterWound", "characterSecret"];
   const apiClient = window.RocoApiClient.create({ accessCodeKey, timeoutMs: apiTimeoutMs });
   const generationClient = window.RocoGenerationClient.create({
@@ -3044,7 +3044,7 @@
     try {
       const input = getInput();
       const script = state.script;
-      setStatus("AI 正在基于当前剧本生成分镜...");
+      setStatus("AI 正在分批生成详细分镜并自动合并，请保持页面开启...");
       const initialResponse = await apiRequest("/api/storyboard", {
         input: {
           ...generationContext(input, "storyboard"),

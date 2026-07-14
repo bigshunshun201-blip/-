@@ -89,8 +89,10 @@ test("storyboard segment planner adapts duration and marks fixed-mode trimming",
       if (mode === "smart") assert.ok(plan.segments.every((segment) => segment.seconds >= 4));
     }
   }
-  assert.equal(__test.storyboardOutputTokens(8), 6360);
-  assert.equal(__test.storyboardOutputTokens(24), 8000);
+  const chunks = __test.storyboardSegmentChunks(sixty.segments);
+  assert.deepEqual(chunks.map((chunk) => chunk.length), [4, 4]);
+  assert.equal(chunks.reduce((total, chunk) => total + __test.storyboardOutputTokens(chunk.length), 0), 8560);
+  assert.equal(__test.storyboardSegmentChunks(__test.storyboardSegmentPlan(180, "smart").segments).length, 6);
 });
 
 test("script normalizer rejects incomplete output and missing requested roles", () => {
@@ -122,10 +124,10 @@ test("script normalizer rejects incomplete output and missing requested roles", 
   assert.deepEqual(__test.normalizeScript(scalarMetadata).script.rhythm, ["紧张推进到悬念收束"]);
   assert.deepEqual(__test.normalizeScript(scalarMetadata).script.tags, ["洛克王国世界短剧"]);
   const expandedDialogue = structuredClone(valid);
-  expandedDialogue.script.dialogue = Array.from({ length: 14 }, (_, index) => ({ role: index % 2 ? "迪莫" : "阿洛", line: `扩展台词${index + 1}` }));
-  assert.equal(__test.normalizeScript(expandedDialogue).script.dialogue.length, 14);
+  expandedDialogue.script.dialogue = Array.from({ length: 24 }, (_, index) => ({ role: index % 2 ? "迪莫" : "阿洛", line: `扩展台词${index + 1}` }));
+  assert.equal(__test.normalizeScript(expandedDialogue).script.dialogue.length, 24);
   expandedDialogue.script.dialogue.push({ role: "阿洛", line: "超出上限" });
-  assert.throws(() => __test.normalizeScript(expandedDialogue), /6-14句/);
+  assert.throws(() => __test.normalizeScript(expandedDialogue), /6-24句/);
   const integrated = structuredClone(valid);
   integrated.script.structure.forEach((item, index) => { item.beatIds = index < 4 ? [`BEAT-0${index + 1}`] : ["BEAT-05", "BEAT-06", "BEAT-07", "BEAT-08"]; });
   integrated.script.assetIntegration = {
@@ -411,7 +413,7 @@ test("project-backed history is compacted and hydrated without duplicating scrip
 
 test("frontend includes request timeout and stale-result protection", async () => {
   const source = await readFile(new URL("../app.js", import.meta.url), "utf8");
-  assert.match(source, /apiTimeoutMs = 210_000/);
+  assert.match(source, /apiTimeoutMs = 600_000/);
   assert.match(source, /assertActiveAiOperation\(operation\)/);
   assert.match(source, /resetCurrentCreation\(\)/);
   assert.doesNotMatch(source, /window\.prompt\("新项目名称"/);
