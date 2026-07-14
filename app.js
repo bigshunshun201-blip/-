@@ -148,7 +148,7 @@
       beatSheetButton.disabled = isBusy || !hasCompletePlan;
       beatSheetButton.title = hasCompletePlan ? "根据本集策划和已选角色/梗生成 8 个因果节拍" : "请先完成本集策划";
     }
-    ["checkContinuityBtn", "regenerateTopicsBtn", "suggestPlansBtn", "autoPlanBtn", "approveBeatSheetBtn", "suggestCreativeMixBtn", "generateBibleBtn", "generateCharacterBtn", "applyBibleTemplateBtn", "memeLabBtn", "memeInspireBtn", "projectSelect", "newProjectBtn", "importProjectBtn"].forEach((id) => {
+    ["checkContinuityBtn", "regenerateTopicsBtn", "suggestPlansBtn", "autoPlanBtn", "approveBeatSheetBtn", "suggestCreativeMixBtn", "generateBibleBtn", "generateCharacterBtn", "applyBibleTemplateBtn", "memeLabBtn", "memeInspireBtn", "projectSelect", "newProjectBtn", "importProjectBtn", "applyRecastBtn"].forEach((id) => {
       const control = document.getElementById(id);
       if (control) control.disabled = isBusy;
     });
@@ -160,6 +160,8 @@
       stage.classList.toggle("has-script", hasScript);
       stage.classList.toggle("has-storyboard", hasStoryboard);
     }
+    const recastButton = $("#openRecastBtn");
+    if (recastButton) recastButton.disabled = isBusy || !hasScript || !(currentProject()?.characterCards || []).length;
     refreshToolbarState();
   }
 
@@ -214,6 +216,7 @@
     const tabLabels = {
       project: "项目",
       bible: "短剧圣经",
+      characters: "角色库",
       consistency: "一致性检查",
       assets: "资产库",
       script: "剧本",
@@ -349,7 +352,7 @@
     $("#activeMemeCount").textContent = `${state.activeMemeIds.length}/${memes.length}`;
     characterTarget.innerHTML = cards.length
       ? cards.map((card) => `<button type="button" class="asset-picker-button ${state.activeCharacterIds.includes(card.id) ? "is-active" : ""}" data-creative-character="${escapeHtml(card.id)}" title="${escapeHtml(card.role || card.traits)}">${escapeHtml(card.name)}</button>`).join("")
-      : `<p class="asset-picker-empty">角色库为空，请先到资产库创建角色卡。</p>`;
+      : `<p class="asset-picker-empty">角色库为空，请先到“设定库 → 角色库”创建角色卡。</p>`;
     memeTarget.innerHTML = memes.length
       ? memes.map((meme) => `<button type="button" class="asset-picker-button ${state.activeMemeIds.includes(meme.id) ? "is-active" : ""}" data-creative-meme="${escapeHtml(meme.id)}" title="${escapeHtml(meme.mechanism)}">${escapeHtml(meme.phrase)}</button>`).join("")
       : `<p class="asset-picker-empty">梗库为空，请先收藏或录入可复用梗。</p>`;
@@ -381,7 +384,7 @@
       : [...state.activeCharacterIds, id];
     setCreativeAssetSelection(ids, state.activeMemeIds);
     state.selectedCreativeMixId = null;
-    setStatus("已更新本集角色，生成时只引用当前选中角色卡");
+    setStatus("已更新本集重点角色卡；未入库角色仍可参与剧情");
     saveDraft(false);
   }
 
@@ -1086,6 +1089,7 @@
         <p><strong>动作：</strong>${escapeHtml(card.mannerism || "待补")}</p><p><strong>笑点触发：</strong>${escapeHtml(card.comedyTrigger || "待补")}</p>
         <div class="library-card-actions"><button class="small-action ${state.activeCharacterIds.includes(card.id) ? "is-active" : ""}" data-character-use="${escapeHtml(card.id)}">${state.activeCharacterIds.includes(card.id) ? "移出本集" : "加入本集"}</button><button class="small-action" data-character-edit="${escapeHtml(card.id)}">编辑</button><button class="small-action danger-action" data-character-delete="${escapeHtml(card.id)}">移除</button></div>
       </article>`).join("") : `<p class="helper">还没有结构化角色卡。可以先填写名字和定位，再让 DeepSeek 补全鲜明特点。</p>`;
+    renderRecastAvailability();
   }
 
   async function generateCharacterDraft() {
@@ -2321,10 +2325,132 @@
     const script = state.script;
     if (!script) {
       renderEmptyStudio();
+      renderRecastAvailability();
       return;
     }
     $("#scriptTitle").textContent = script.title;
     $("#scriptOutput").innerHTML = uiTemplates.script(script);
+    renderRecastAvailability();
+  }
+
+  function renderRecastAvailability() {
+    const button = $("#openRecastBtn");
+    const panel = $("#recastPanel");
+    if (!button || !panel) return;
+    const cardCount = currentProject()?.characterCards?.length || 0;
+    button.disabled = !state.script || !cardCount || Boolean(state.activeAiOperation);
+    button.title = !state.script
+      ? "请先生成或恢复一个剧本"
+      : !cardCount
+        ? "请先在角色库创建角色卡"
+        : "把剧本中的一个或多个人物替换成角色库人物";
+    if (!state.script || !cardCount) panel.hidden = true;
+    if (!panel.hidden) renderRecastMappings();
+  }
+
+  function renderRecastMappings() {
+    const target = $("#recastMappingList");
+    if (!target) return;
+    const previous = new Map($$("[data-recast-source]").map((select) => [select.dataset.recastSource, select.value]));
+    const characters = state.script?.characters || [];
+    const cards = currentProject()?.characterCards || [];
+    target.innerHTML = characters.map((character) => {
+      const options = cards
+        .filter((card) => card.name !== character.name)
+        .map((card) => `<option value="${escapeHtml(card.id)}">${escapeHtml(card.name)} · ${escapeHtml(card.role || card.traits || "角色卡")}</option>`)
+        .join("");
+      return `<div class="recast-mapping-row"><strong>${escapeHtml(character.name)}</strong><span>→</span><select data-recast-source="${escapeHtml(character.name)}" aria-label="将${escapeHtml(character.name)}替换为角色库人物"><option value="">保持不变</option>${options}</select></div>`;
+    }).join("");
+    $$("[data-recast-source]").forEach((select) => {
+      const saved = previous.get(select.dataset.recastSource);
+      if (saved && Array.from(select.options).some((option) => option.value === saved)) select.value = saved;
+    });
+  }
+
+  function openRecastPanel() {
+    if (!state.script) throw new Error("请先生成或恢复一个剧本。");
+    if (!(currentProject()?.characterCards || []).length) throw new Error("角色库还没有角色卡，请先到“设定库 → 角色库”创建人物。");
+    $("#recastPanel").hidden = false;
+    renderRecastMappings();
+    $("#recastPanel").scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+
+  function collectRecastMappings() {
+    const cardMap = new Map((currentProject()?.characterCards || []).map((card) => [card.id, card]));
+    const mappings = $$("[data-recast-source]")
+      .filter((select) => select.value)
+      .map((select) => ({ fromName: select.dataset.recastSource, targetCharacterId: select.value, targetCharacter: cardMap.get(select.value) }));
+    if (!mappings.length) throw new Error("请至少为一个剧本角色选择新的角色卡。");
+    if (mappings.some((item) => !item.targetCharacter)) throw new Error("所选角色卡已经不存在，请重新选择。");
+    if (mappings.length > 4) throw new Error("一次最多替换 4 个角色，请分两次完成。");
+    if (new Set(mappings.map((item) => item.targetCharacterId)).size !== mappings.length) throw new Error("不同原角色不能替换成同一个目标角色。");
+    const currentNames = new Set((state.script?.characters || []).map((item) => item.name));
+    const conflict = mappings.find((item) => currentNames.has(item.targetCharacter?.name));
+    if (conflict) throw new Error(`“${conflict.targetCharacter.name}”已经在当前剧本中，请选择尚未出场的角色卡。`);
+    return mappings;
+  }
+
+  function updateRoleInputsAfterRecast(mappings) {
+    const project = currentProject();
+    const sourceNames = new Set(mappings.map((item) => item.fromName));
+    const targetIds = mappings.map((item) => item.targetCharacterId);
+    const sourceCardIds = new Set((project?.characterCards || []).filter((card) => sourceNames.has(card.name)).map((card) => card.id));
+    const remainingActive = state.activeCharacterIds.filter((id) => !sourceCardIds.has(id) && !targetIds.includes(id));
+    state.activeCharacterIds = [...targetIds, ...remainingActive].slice(0, 4);
+    const remainingRoleLines = $("#roles").value.split("\n").filter((line) => {
+      const name = line.split(/[：:]/)[0].trim();
+      return line.trim() && !sourceNames.has(name);
+    });
+    setInputValue("roles", remainingRoleLines.join("\n"));
+    syncActiveAssetsToInputs();
+    renderCreativeAssetPicker();
+    renderCharacterCards();
+  }
+
+  async function applyScriptRecast() {
+    const mappings = collectRecastMappings();
+    const operation = beginAiOperation("智能换角");
+    try {
+      const input = getInput();
+      const targetIds = mappings.map((item) => item.targetCharacterId);
+      setStatus(`AI 正在替换 ${mappings.length} 个角色，并保持原剧情结构...`);
+      const initialResponse = await apiRequest("/api/recast-script", {
+        input: {
+          ...generationContext({ ...input, activeCharacterIds: targetIds }, "recast"),
+          script: state.script,
+          recastMappings: mappings.map(({ fromName, targetCharacterId }) => ({ fromName, targetCharacterId })),
+        },
+      });
+      const response = await resolveAiJob(initialResponse, "智能换角");
+      assertActiveAiOperation(operation);
+      const generated = normalizeScriptResult(response.result);
+      updateRoleInputsAfterRecast(mappings);
+      const versionInput = getInput();
+      state.script = generated.script;
+      state.storyboard = [];
+      state.scriptDoctor = null;
+      state.creativePack = window.RocoStudio.generateCreativePack(state.script, versionInput, state.topics);
+      const item = addHistoryItem({
+        mode: "recast",
+        input: versionInput,
+        response,
+        projectId: state.currentProjectId,
+        projectName: currentProject()?.name,
+        episodeNumber: versionInput.episodeNumber,
+        generated: { ...generated, creativePack: state.creativePack },
+      });
+      state.currentHistoryId = item.id;
+      upsertProjectEpisode({ mode: "recast", input: versionInput, response, generated: { ...generated, creativePack: state.creativePack }, historyId: item.id });
+      persistHistory();
+      renderScript(); renderStoryboard(); renderCreativePack(); renderHistory(); renderConsistency(); renderExample();
+      saveDraft(false);
+      $("#recastPanel").hidden = true;
+      pulseResult();
+      const versionCount = currentProjectEpisode()?.versions?.length || 1;
+      setStatus(`智能换角完成，已保存为剧本 v${versionCount}；原版本及其分镜仍可在项目档案中恢复。${usageSuffix(response)}`);
+    } finally {
+      endAiOperation(operation);
+    }
   }
 
   function renderTable(target, rows, columns) {
@@ -3113,6 +3239,19 @@
   }
 
   function switchTab(tabName) {
+    const workspaceGroups = {
+      creation: ["script", "storyboard", "consistency", "creative"],
+      planning: ["topics", "example"],
+      world: ["bible", "characters", "assets"],
+      operations: ["project", "history", "calendar", "optimize"],
+    };
+    const groupName = Object.entries(workspaceGroups).find(([, tabs]) => tabs.includes(tabName))?.[0] || "creation";
+    $$(".workspace-group").forEach((button) => {
+      const active = button.dataset.workspaceGroup === groupName;
+      button.classList.toggle("is-active", active);
+      button.setAttribute("aria-pressed", String(active));
+    });
+    $$("[data-workspace-tabs]").forEach((group) => group.classList.toggle("is-active", group.dataset.workspaceTabs === groupName));
     $$(".tab").forEach((tab) => tab.classList.toggle("active", tab.dataset.tab === tabName));
     $$(".tab-panel").forEach((panel) => panel.classList.toggle("active", panel.id === `tab-${tabName}`));
     refreshToolbarState(tabName);
@@ -3195,7 +3334,7 @@
       `## ${index + 1}. ${item.script?.title || "未命名剧本"}`,
       "",
       `- 时间：${item.createdAtText || item.createdAt || ""}`,
-      `- 类型：${item.mode === "continue" ? "续写" : "新生成"}`,
+      `- 类型：${item.mode === "continue" ? "续写" : item.mode === "recast" ? "智能换角" : "新生成"}`,
       `- 模型：${item.model || ""}`,
       `- 状态：${item.pinned ? "入围" : "未入围"}`,
       "",
@@ -3594,7 +3733,18 @@
     });
     $("#exportHistoryBtn").addEventListener("click", exportHistoryMarkdown);
     $("#clearHistoryBtn").addEventListener("click", clearHistory);
+    $$(".workspace-group").forEach((button) => button.addEventListener("click", () => {
+      const firstTab = $(`[data-workspace-tabs="${button.dataset.workspaceGroup}"] .tab`);
+      if (firstTab) switchTab(firstTab.dataset.tab);
+    }));
     $$(".tab").forEach((tab) => tab.addEventListener("click", () => switchTab(tab.dataset.tab)));
+    $("#openRecastBtn").addEventListener("click", () => {
+      try { openRecastPanel(); } catch (error) { reportError("智能换角", error); }
+    });
+    $("#closeRecastBtn").addEventListener("click", () => { $("#recastPanel").hidden = true; });
+    $("#applyRecastBtn").addEventListener("click", async () => {
+      try { await applyScriptRecast(); } catch (error) { reportError("智能换角", error); }
+    });
     $("#historyList").addEventListener("click", async (event) => {
       const restoreButton = event.target.closest("[data-history-restore]");
       const continueButton = event.target.closest("[data-history-continue]");

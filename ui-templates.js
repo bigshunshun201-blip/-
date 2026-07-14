@@ -127,7 +127,7 @@
 
   function historyMeta(item) {
     return [
-      item.mode === "continue" ? "续写" : "新生成",
+      item.mode === "continue" ? "续写" : item.mode === "recast" ? "智能换角" : "新生成",
       item.model || "model",
       `${item.storyboard?.length || 0}个视频段`,
       `${item.input?.duration || "-"}秒`,

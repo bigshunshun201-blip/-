@@ -3,12 +3,12 @@
   if (typeof module === "object" && module.exports) module.exports = api;
   if (root) root.RocoAppState = api;
 })(typeof globalThis !== "undefined" ? globalThis : this, function () {
-  const aiModelScopes = ["meme", "mix", "plan", "beat", "script", "storyboard", "bible", "character", "continuity", "topics", "ledger", "doctor"];
+  const aiModelScopes = ["meme", "mix", "plan", "beat", "script", "storyboard", "bible", "character", "continuity", "topics", "ledger", "doctor", "recast"];
   const defaultAiModels = Object.fromEntries(aiModelScopes.map((scope) => [scope, "deepseek-v4-flash"]));
   const aiModelScopeLabels = {
     meme: "热梗提炼", mix: "角色与梗搭配", plan: "单集策划", beat: "剧情节拍表",
     script: "剧本", storyboard: "分镜", bible: "短剧圣经", character: "角色卡",
-    continuity: "一致性检查", topics: "选题", ledger: "连载台账", doctor: "剧本医生",
+    continuity: "一致性检查", topics: "选题", ledger: "连载台账", doctor: "剧本医生", recast: "智能换角",
   };
 
   function createState() {

@@ -123,9 +123,42 @@ test("script normalizer rejects incomplete output and missing requested roles", 
   assert.equal(normalizedIntegrated.assetIntegration.memes[0].triggerRole, "阿洛");
   assert.equal(normalizedIntegrated.dialogue[0].id, "LINE-01");
   assert.ok(normalizedIntegrated.dialogue.every((line) => line.beatIds.length));
+  const withTemporaryRoleBinding = structuredClone(integrated);
+  withTemporaryRoleBinding.script.characters.push({ name: "巡逻员", description: "未入角色库的临时阻碍角色" });
+  withTemporaryRoleBinding.script.assetIntegration.characters.push({ assetId: "temporary-role", name: "巡逻员", storyFunction: "封路", choice: "是否放行" });
+  const temporaryRoleResult = __test.normalizeScript(withTemporaryRoleBinding, integratedInput).script;
+  assert.deepEqual(temporaryRoleResult.assetIntegration.characters.map((item) => item.assetId), ["char-1"]);
   assert.throws(() => __test.normalizeScript({ script: { ...integrated.script, assetIntegration: { characters: [], memes: [] } } }, integratedInput), /已选角色卡/);
   assert.throws(() => __test.normalizeScript({ script: { title: "空壳" } }), (error) => error.code === "AI_OUTPUT_INVALID");
   assert.throws(() => __test.normalizeScript(valid, { roles: "阿洛：调查者；雪影娃娃：搭档" }), /雪影娃娃/);
+});
+
+test("script recast replaces multiple story roles with library cards without changing the beat structure", () => {
+  const original = {
+    title: "契约裂开的第八秒",
+    synopsis: "阿洛在月牙镇发现迪莫的契约突然裂开，追查时却发现裂纹会回应谎言。两人必须在巡逻队赶到前找出真相，结尾坐标却指向被封锁的聆风塔。",
+    characters: [{ name: "阿洛", description: "调查者" }, { name: "迪莫", description: "谨慎搭档" }],
+    structure: Array.from({ length: 5 }, (_, index) => ({ beat: `节拍${index + 1}`, beatIds: index < 4 ? [`BEAT-0${index + 1}`] : ["BEAT-05", "BEAT-06", "BEAT-07", "BEAT-08"], content: `推进剧情${index + 1}` })),
+    dialogue: Array.from({ length: 6 }, (_, index) => ({ role: index % 2 ? "迪莫" : "阿洛", line: `有效短台词${index + 1}`, beatIds: [`BEAT-0${Math.min(index + 1, 8)}`] })),
+    rhythm: ["惊讶到悬疑"], reversals: ["裂纹回应谎言"], innovationPoints: ["契约测谎"],
+    comedyBeats: [{ setup: "装镇定", payoff: "契约拆台", visualAction: "裂纹追人" }],
+    visualHighlights: [{ moment: "裂纹亮起", verticalComposition: "前中后景", effect: "冷光" }, { moment: "坐标显现", verticalComposition: "近景叠后景", effect: "字符浮现" }],
+    assetIntegration: { characters: [], memes: [] }, hooks: ["坐标指向聆风塔"], tags: ["短剧"],
+  };
+  const revised = JSON.parse(JSON.stringify(original).replaceAll("阿洛", "雪影娃娃"));
+  revised.characters[0] = { name: "雪影娃娃", description: "冷脸护短的调查者" };
+  revised.assetIntegration.characters = [{ assetId: "char-snow", name: "雪影娃娃", storyFunction: "调查契约裂纹", choice: "暴露弱点保护迪莫" }];
+  const input = {
+    script: original,
+    recastMappings: [{ fromName: "阿洛", targetCharacterId: "char-snow" }],
+    activeCharacterIds: ["char-snow"],
+    projectCharacterCards: [{ id: "char-snow", name: "雪影娃娃", role: "冷脸护短的冰系精灵" }],
+    beatSheet: Array.from({ length: 8 }, (_, index) => ({ id: `BEAT-0${index + 1}` })),
+  };
+  const result = __test.normalizeRecastScript({ script: revised }, input);
+  assert.deepEqual(result.script.characters.map((item) => item.name), ["雪影娃娃", "迪莫"]);
+  assert.equal(result.script.structure.length, original.structure.length);
+  assert.equal(result.mappings[0].targetName, "雪影娃娃");
 });
 
 test("generation input only accepts explicitly selected library assets", () => {
@@ -255,12 +288,12 @@ test("beat sheet normalizer requires eight causal production beats", () => {
 
 test("UI contains the production workflow controls", async () => {
   const html = await readFile(new URL("../index.html", import.meta.url), "utf8");
-  for (const id of ["clipMode", "creativeMixBrief", "characterPicker", "memePicker", "suggestCreativeMixBtn", "creativeMixHistoryList", "planOpeningHook", "planProtagonistGoal", "planStakes", "planForcedChoice", "planRelationshipShift", "autoPlanBtn", "suggestPlansBtn", "planSuggestions", "planHistoryList", "generateBeatSheetBtn", "beatSheetList", "approveBeatSheetBtn", "beatSheetHistoryList", "planReadyState", "memeLabBtn", "memeInspireBtn", "memeLabResults", "memeLibrary", "addMemeBtn", "generateBibleBtn", "applyBibleTemplateBtn", "generateCharacterBtn", "saveCharacterBtn", "characterLibrary", "storyboardHistory", "checkContinuityBtn", "assetLibrary", "reviewCommentThemes", "exportProjectBtn", "updateSeriesLedgerBtn", "runScriptDoctorBtn", "addCanonSourceBtn", "characterSpeechPattern", "backupCloudNowBtn", "cloudArchiveVersions", "copyWorkspaceKeyBtn", "connectWorkspaceKeyBtn"]) {
+  for (const id of ["clipMode", "creativeMixBrief", "characterPicker", "memePicker", "suggestCreativeMixBtn", "creativeMixHistoryList", "planOpeningHook", "planProtagonistGoal", "planStakes", "planForcedChoice", "planRelationshipShift", "autoPlanBtn", "suggestPlansBtn", "planSuggestions", "planHistoryList", "generateBeatSheetBtn", "beatSheetList", "approveBeatSheetBtn", "beatSheetHistoryList", "planReadyState", "memeLabBtn", "memeInspireBtn", "memeLabResults", "memeLibrary", "addMemeBtn", "generateBibleBtn", "applyBibleTemplateBtn", "generateCharacterBtn", "saveCharacterBtn", "characterLibrary", "storyboardHistory", "checkContinuityBtn", "assetLibrary", "reviewCommentThemes", "exportProjectBtn", "updateSeriesLedgerBtn", "runScriptDoctorBtn", "addCanonSourceBtn", "characterSpeechPattern", "backupCloudNowBtn", "cloudArchiveVersions", "copyWorkspaceKeyBtn", "connectWorkspaceKeyBtn", "openRecastBtn", "recastPanel", "applyRecastBtn"]) {
     assert.match(html, new RegExp(`id="${id}"`));
   }
   assert.match(html, /open\.douyin\.com\/platform\/resource\/docs\/openapi\/data-open-service\/tops-data\/hot-video-list/);
   assert.match(html, /data-ai-model-switch/);
-  for (const scope of ["meme", "mix", "plan", "beat", "script", "storyboard", "bible", "character", "continuity", "topics", "ledger", "doctor"]) {
+  for (const scope of ["meme", "mix", "plan", "beat", "script", "storyboard", "bible", "character", "continuity", "topics", "ledger", "doctor", "recast"]) {
     assert.match(html, new RegExp(`data-ai-model-scope="${scope}"`));
   }
 });
@@ -389,6 +422,7 @@ test("daily budget weights Pro requests and blocks requests over the limit", asy
   assert.equal(__test.requestUnits("/api/script", "deepseek-v4-flash"), 1);
   assert.equal(__test.requestUnits("/api/plans", "deepseek-v4-flash"), 1);
   assert.equal(__test.requestUnits("/api/bible", "deepseek-v4-flash"), 1);
+  assert.equal(__test.requestUnits("/api/recast-script", "deepseek-v4-flash"), 1);
   assert.equal(__test.requestUnits("/api/meme-lab", "deepseek-v4-flash"), 1);
   assert.equal(__test.requestUnits("/api/character-card", "deepseek-v4-pro"), 3);
   assert.equal(__test.requestUnits("/api/generate", "deepseek-v4-pro"), 6);
@@ -522,7 +556,7 @@ test("app state initializes independent model preferences", () => {
   const state = appStateModule.createState();
   state.aiModels.plan = "deepseek-v4-pro";
   assert.equal(state.aiModels.script, "deepseek-v4-flash");
-  assert.equal(appStateModule.aiModelScopes.length, 12);
+  assert.equal(appStateModule.aiModelScopes.length, 13);
 });
 
 test("generation client resolves asynchronous provider jobs", async () => {

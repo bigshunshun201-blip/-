@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>洛克王国短剧创作工作台</title>
-    <link rel="stylesheet" href="./styles.css?v=20260714-archive-system" />
+    <link rel="stylesheet" href="./styles.css?v=20260714-recast-workspace" />
   </head>
   <body>
     <a class="skip-link" href="#workspace">跳到创作工作区</a>
@@ -162,7 +162,7 @@
             </div>
             <button class="ghost-action compact-action" id="openAssetLibraryBtn" type="button">管理资产</button>
           </div>
-          <p class="helper">直接在这里选择本集角色和梗。AI 只会引用已选内容，不会把整个资产库硬塞进剧本。</p>
+          <p class="helper">角色卡和梗是本集要重点使用的素材，不是角色白名单。你仍可在上方直接填写未入库人物，AI 也可按剧情需要补充临时角色。</p>
           <div class="creative-pickers">
             <div>
               <span class="picker-label">本集角色 <b id="activeCharacterCount">0</b></span>
@@ -244,19 +244,19 @@
           </div>
         </section>
 
-        <section class="panel-section compact reference-panel">
-          <div class="section-title">
-            <h2>选题参考</h2>
+        <details class="panel-section compact reference-panel panel-collapsible">
+          <summary><span>低频工具</span><small>选题参考、草稿和导出</small></summary>
+          <div class="panel-collapsible-body">
+            <p class="helper">可选。没有数据也能直接生成；如果有同赛道爆款，只粘标题和核心数据，用来更新选题库。</p>
+            <label>
+              爆款参考 CSV
+              <textarea id="competitorCsv" rows="3" placeholder="title,likes,comments,favorites,shares,views&#10;十年前的宠物还记得你吗,82000,6200,11000,9000,1800000"></textarea>
+            </label>
+            <button class="secondary-action" id="analyzeBtn">更新选题库</button>
+            <button class="ghost-action" id="saveDraftBtn">保存当前草稿</button>
+            <button class="ghost-action" id="exportBtn">导出当前结果 Markdown</button>
           </div>
-          <p class="helper">可选。没有数据也能直接生成；如果有同赛道爆款，只粘标题和核心数据，用来更新选题库。</p>
-          <label>
-            爆款参考 CSV
-            <textarea id="competitorCsv" rows="3" placeholder="title,likes,comments,favorites,shares,views&#10;十年前的宠物还记得你吗,82000,6200,11000,9000,1800000"></textarea>
-          </label>
-          <button class="secondary-action" id="analyzeBtn">更新选题库</button>
-          <button class="ghost-action" id="saveDraftBtn">保存当前草稿</button>
-          <button class="ghost-action" id="exportBtn">导出当前结果 Markdown</button>
-        </section>
+        </details>
       </aside>
 
       <section class="workspace" id="workspace">
@@ -268,23 +268,34 @@
               <strong id="toolbarActiveLabel">剧本</strong>
             </div>
           </div>
-          <div class="tab-group production-tabs" aria-label="内容制作">
-            <span class="tab-group-label">内容制作</span>
-            <button class="tab" data-tab="project">项目</button>
-            <button class="tab" data-tab="bible">短剧圣经</button>
-            <button class="tab" data-tab="consistency">一致性检查</button>
-            <button class="tab active" data-tab="script">剧本</button>
-            <button class="tab" data-tab="storyboard">分镜</button>
-            <button class="tab" data-tab="creative">标题与封面</button>
+          <div class="workspace-groups" role="tablist" aria-label="工作区分类">
+            <button class="workspace-group is-active" type="button" data-workspace-group="creation" aria-pressed="true">创作</button>
+            <button class="workspace-group" type="button" data-workspace-group="planning" aria-pressed="false">策划</button>
+            <button class="workspace-group" type="button" data-workspace-group="world" aria-pressed="false">设定库</button>
+            <button class="workspace-group" type="button" data-workspace-group="operations" aria-pressed="false">项目</button>
           </div>
-          <div class="tab-group archive-tabs" aria-label="选题与复盘">
-            <span class="tab-group-label">选题与复盘</span>
-            <button class="tab" data-tab="topics">选题库</button>
-            <button class="tab" data-tab="history">作品库</button>
-            <button class="tab" data-tab="calendar">排期复盘</button>
-            <button class="tab" data-tab="assets">资产库</button>
-            <button class="tab" data-tab="optimize">优化方法</button>
-            <button class="tab" data-tab="example">示例</button>
+          <div class="workspace-subnav">
+            <div class="tab-group is-active" data-workspace-tabs="creation" aria-label="创作工作区">
+              <button class="tab active" data-tab="script">剧本</button>
+              <button class="tab" data-tab="storyboard">分镜</button>
+              <button class="tab" data-tab="consistency">质检</button>
+              <button class="tab" data-tab="creative">标题封面</button>
+            </div>
+            <div class="tab-group" data-workspace-tabs="planning" aria-label="策划工作区">
+              <button class="tab" data-tab="topics">选题库</button>
+              <button class="tab" data-tab="example">流程示例</button>
+            </div>
+            <div class="tab-group" data-workspace-tabs="world" aria-label="设定工作区">
+              <button class="tab" data-tab="bible">短剧圣经</button>
+              <button class="tab" data-tab="characters">角色库</button>
+              <button class="tab" data-tab="assets">梗与资产</button>
+            </div>
+            <div class="tab-group" data-workspace-tabs="operations" aria-label="项目工作区">
+              <button class="tab" data-tab="project">项目总控</button>
+              <button class="tab" data-tab="history">作品库</button>
+              <button class="tab" data-tab="calendar">发布复盘</button>
+              <button class="tab" data-tab="optimize">优化方法</button>
+            </div>
           </div>
           <div class="toolbar-state" aria-live="polite">
             <span class="toolbar-state-marker" aria-hidden="true"></span>
@@ -300,10 +311,15 @@
                 <h2>项目总控与集数档案</h2>
               </div>
               <div class="header-actions">
-                <button class="small-action" id="newProjectBtn">新建项目</button>
                 <button class="small-action" id="saveProjectBtn">保存项目信息</button>
-                <button class="small-action" id="exportProjectBtn">导出项目</button>
-                <button class="small-action" id="importProjectBtn">导入项目</button>
+                <details class="action-menu">
+                  <summary class="small-action">更多项目操作</summary>
+                  <div>
+                    <button class="small-action" id="newProjectBtn">新建项目</button>
+                    <button class="small-action" id="exportProjectBtn">导出项目</button>
+                    <button class="small-action" id="importProjectBtn">导入项目</button>
+                  </div>
+                </details>
                 <input id="importProjectFile" type="file" accept="application/json" hidden />
               </div>
             </div>
@@ -424,9 +440,18 @@
               </div>
               <div class="canon-source-library" id="canonSourceLibrary"></div>
             </section>
+          </article>
+
+          <article class="tab-panel" id="tab-characters">
+            <div class="result-header">
+              <div>
+                <p class="eyebrow">可复用人物设定</p>
+                <h2>角色库</h2>
+              </div>
+            </div>
             <section class="character-section" aria-labelledby="characterSectionTitle">
               <div class="section-heading">
-                <div><p class="eyebrow">可复用人物资产</p><h3 id="characterSectionTitle">鲜明角色卡</h3></div>
+                <div><h3 id="characterSectionTitle">鲜明角色卡</h3></div>
                 <span id="characterCardCount">0 个角色</span>
               </div>
               <p class="helper">把角色的稳定特征拆成结构化设定。加入本集后，剧本、分镜和一致性检查都会引用其口头禅、行为习惯、反差与底线。</p>
@@ -515,8 +540,22 @@
                 <p class="eyebrow">本集剧本</p>
                 <h2 id="scriptTitle">等待生成</h2>
               </div>
-              <button class="small-action" data-copy="scriptOutput">复制剧本</button>
+              <div class="header-actions">
+                <button class="small-action" id="openRecastBtn" type="button">批量智能换角</button>
+                <button class="small-action" data-copy="scriptOutput">复制剧本</button>
+              </div>
             </div>
+            <section class="recast-panel" id="recastPanel" hidden>
+              <div class="recast-panel-head">
+                <div><h3>批量智能换角</h3><p>未映射角色保持不变。AI 会按角色卡重写台词与动作，并保存为新的剧本版本；当前版本和已有分镜不会被覆盖。</p></div>
+                <button class="small-action" id="closeRecastBtn" type="button">关闭</button>
+              </div>
+              <div class="recast-mapping-list" id="recastMappingList"></div>
+              <div class="recast-actions">
+                <div data-ai-model-switch data-ai-model-scope="recast" aria-label="智能换角模型"></div>
+                <button class="secondary-action" id="applyRecastBtn" type="button">AI 换角并保存新版本</button>
+              </div>
+            </section>
             <div class="script-output" id="scriptOutput"></div>
           </article>
 
@@ -642,17 +681,17 @@
       粉丝向二创工作台示例，不代表官方内容或授权关系。发布前请核对平台规范与 IP 授权边界。
     </footer>
 
-    <script src="./generator.js?v=20260714-archive-system"></script>
-    <script src="./workflow-core.js?v=20260714-archive-system"></script>
-    <script src="./project-domain.js?v=20260714-archive-system"></script>
-    <script src="./episode-planner.js?v=20260714-archive-system"></script>
-    <script src="./ui-templates.js?v=20260714-archive-system"></script>
-    <script src="./api-client.js?v=20260714-archive-system"></script>
-    <script src="./data-store.js?v=20260714-archive-system"></script>
-    <script src="./archive-sync.js?v=20260714-archive-system"></script>
-    <script src="./app-state.js?v=20260714-archive-system"></script>
-    <script src="./ai-operation.js?v=20260714-archive-system"></script>
-    <script src="./generation-client.js?v=20260714-archive-system"></script>
-    <script src="./app.js?v=20260714-archive-system"></script>
+    <script src="./generator.js?v=20260714-recast-workspace"></script>
+    <script src="./workflow-core.js?v=20260714-recast-workspace"></script>
+    <script src="./project-domain.js?v=20260714-recast-workspace"></script>
+    <script src="./episode-planner.js?v=20260714-recast-workspace"></script>
+    <script src="./ui-templates.js?v=20260714-recast-workspace"></script>
+    <script src="./api-client.js?v=20260714-recast-workspace"></script>
+    <script src="./data-store.js?v=20260714-recast-workspace"></script>
+    <script src="./archive-sync.js?v=20260714-recast-workspace"></script>
+    <script src="./app-state.js?v=20260714-recast-workspace"></script>
+    <script src="./ai-operation.js?v=20260714-recast-workspace"></script>
+    <script src="./generation-client.js?v=20260714-recast-workspace"></script>
+    <script src="./app.js?v=20260714-recast-workspace"></script>
   </body>
 </html>

@@ -28,6 +28,7 @@ const AI_PATH_COST = new Map([
   ["/api/continuity-check", 1],
   ["/api/series-ledger", 1],
   ["/api/script-doctor", 1],
+  ["/api/recast-script", 1],
   ["/api/generate", 2],
 ]);
 
@@ -422,6 +423,10 @@ function normalizeInput(input = {}) {
     previousScript: input.previousScript || null,
     previousStoryboard: input.previousStoryboard || null,
     script: input.script || null,
+    recastMappings: (Array.isArray(input.recastMappings) ? input.recastMappings : []).slice(0, 5).map((item) => ({
+      fromName: String(item?.fromName || "").trim(),
+      targetCharacterId: String(item?.targetCharacterId || "").trim(),
+    })).filter((item) => item.fromName && item.targetCharacterId),
     projectName: String(input.projectName || "").trim(),
     projectLogline: String(input.projectLogline || "").trim(),
     projectBible: input.projectBible && typeof input.projectBible === "object" ? input.projectBible : {},
@@ -577,7 +582,7 @@ ${stringify(payload.projectCanonSources || [], 6500)}
 可复用内容资产（优先复用其中适配本集的角色立绘、场景、口头禅、冲突/标题/封面模板和 BGM/SFX 方案；不适配时不要生硬套用）：
 ${stringify(payload.projectAssets || [], 5000)}
 
-结构化角色卡（只启用本集输入中出现的角色；一旦启用，性格、反差、口头禅、动作习惯、喜剧触发器和底线均为连续性事实）：
+本集选中的结构化角色卡（它们是必须落实的创作素材，但不是全体角色白名单；剧情仍可按需要加入未入库的临时角色。一旦选中，性格、反差、口头禅、动作习惯、喜剧触发器和底线均为连续性事实）：
 ${stringify(payload.projectCharacterCards || [], 6500)}
 
 项目梗库（优先选择与本集情绪和角色匹配的 1-2 条；不得把所有梗同时塞入，也不得声称其为实时热榜）：
@@ -602,7 +607,7 @@ function scriptPrompt(input) {
 3. 不暗示官方授权，不写成官方宣传。
 4. 前 3 秒必须抛出强信息钩子；中段每 8-12 秒至少一次信息变化；结尾留下一集能直接承接的问题。
 5. 台词必须口语化、短句、可拍摄。热梗素材：${compact(payload.memeSeed, "未提供；使用原创的平台化口语，不得冒充实时热梗")}。热梗必须转化为动作、道具、世界规则或误会机制，不能只把流行句塞进台词。
-6. 必须使用下列角色名，不能擅自替换为默认角色：${names.length ? names.join("、") : "根据主题自创 2-4 名角色"}。
+6. 必须使用下列用户指定角色名，不能擅自替换：${names.length ? names.join("、") : "未指定，可根据主题自创 2-4 名角色"}。角色库不是白名单，在总角色数 2-5 人的范围内，可以按剧情需要加入未入库的临时角色。
 7. 必须遵守短剧圣经的性格、能力边界、角色关系、反派动机、世界规则和钩子规则；不得用失忆、突然升级、复活或新能力偷换已建立事实。
 8. 本集为第 ${payload.episodeNumber || 1} 集。它应推进系列主线矛盾，但只解决本集问题，不能终结整个项目主线。
 9. 必须严格执行本集策划：开头钩子、核心冲突、反转信息、结尾悬念、时长与目标情绪都要在标题、结构、台词和钩子中可见；不要写成完整闭环故事。
@@ -611,7 +616,7 @@ function scriptPrompt(input) {
 12. 除非本集输入明确要求，不得重复使用失忆、万能黑衣人、契约突然失效、无代价升级等通用套路。反转必须来自本集已出现的规则、道具或人物选择。
 13. 本集角色若有结构化角色卡，必须让鲜明特质通过选择和动作表现；每名核心角色最多自然使用 1 次口头禅，并在后文用动作、道具或语义反转完成回扣，禁止机械重复。
 14. 必须按已确认的 8 个剧情节拍展开，不得跳过、调换或另起因果；structure 中用 beatIds 标明每一段落实了哪些节拍。
-15. 必须执行“角色与梗融合要求”。每张已选角色卡都要有不可替代的戏剧任务和关键选择；每个已选梗都要绑定触发角色，形成铺垫、回扣和剧情后果，并在 assetIntegration 中逐项说明。
+15. 必须执行“角色与梗融合要求”。每张已选角色卡都要有不可替代的戏剧任务和关键选择；每个已选梗都要绑定触发角色，形成铺垫、回扣和剧情后果，并在 assetIntegration 中逐项说明。assetIntegration 只记录本集明确选中的角色卡和梗；自创角色、临时角色和自然产生的笑点不要伪造 assetId。
 
 项目连续性资料：${canon}
 
@@ -643,14 +648,45 @@ function scriptPrompt(input) {
     "comedyBeats": [{"setup":"笑点铺垫","payoff":"误导或回扣","visualAction":"静音也能看懂的动作"}],
     "visualHighlights": [{"moment":"强画面发生时刻","verticalComposition":"9:16前中后景构图","effect":"画面变化或特效"}],
     "assetIntegration": {
-      "characters":[{"assetId":"已选角色卡id","name":"角色名","storyFunction":"不可替代的本集戏剧任务","choice":"本集关键选择"}],
-      "memes":[{"assetId":"已选梗id","name":"梗名","triggerRole":"触发角色","setup":"铺垫","payoff":"回扣","plotEffect":"如何改变人物行动或剧情结果"}]
+      "characters":[{"assetId":"仅填写已选角色卡id","name":"角色名","storyFunction":"不可替代的本集戏剧任务","choice":"本集关键选择"}],
+      "memes":[{"assetId":"仅填写已选梗id","name":"梗名","triggerRole":"触发角色","setup":"铺垫","payoff":"回扣","plotEffect":"如何改变人物行动或剧情结果"}]
     },
     "hooks": ["爆点或结尾钩子"],
     "tags": ["话题标签"]
   }
 }
 限制：characters 2-5 个；structure 固定 5 段并覆盖 BEAT-01 至 BEAT-08；dialogue 6-10 句；innovationPoints 1-3 条；comedyBeats 1-3 条；visualHighlights 2-4 条；rhythm、reversals、hooks、tags 各不超过 3 条。`;
+}
+
+function recastPrompt(input) {
+  const payload = normalizeInput(input);
+  const cardMap = new Map(payload.projectCharacterCards.map((card) => [textValue(card?.id), card]));
+  const mappings = payload.recastMappings.map((item) => ({
+    fromName: item.fromName,
+    targetCharacterId: item.targetCharacterId,
+    targetCharacter: cardMap.get(item.targetCharacterId) || null,
+  }));
+  return `你是连续短剧的改角编剧。请对现有剧本执行批量智能换角，只输出严格 JSON，不要 Markdown、解释或代码围栏。
+
+换角原则：
+1. 严格按映射把原角色替换为目标角色卡；没有映射的角色必须保留。
+2. 保留原剧本的核心冲突、5段结构、beatIds、反转逻辑、结尾悬念、时长和镜头潜力，不另写一个故事。
+3. 不做机械改名。必须同步改写人物描述、台词角色名、说话节奏、动作习惯、口头禅、关键选择、笑点触发方式和能力使用，使其符合目标角色卡与短剧圣经。
+4. 如果目标角色能力无法完成原动作，用符合设定的动作、道具或协作方式实现同一剧情后果，不得突破能力边界。
+5. 每个目标角色卡都必须进入 assetIntegration.characters，并写清本集戏剧任务与关键选择。未入库角色允许保留，但不要为其伪造 assetId。
+6. 原剧本已有的梗绑定、创新机制、视觉爆点和铺垫回扣应尽量保留；因角色特质变化而调整时，必须保持同等戏剧功能。
+7. 返回完整 script 对象，字段与原剧本完全一致；characters 2-5 个，dialogue 6-10 句，structure 固定5段。
+
+换角映射：
+${stringify(mappings, 9000)}
+
+项目设定：
+${bibleContext(payload)}
+
+原剧本：
+${stringify(payload.script, 22000)}
+
+返回结构：{"script":{"title":"","synopsis":"","characters":[],"structure":[],"dialogue":[],"rhythm":[],"reversals":[],"innovationPoints":[],"comedyBeats":[],"visualHighlights":[],"assetIntegration":{"characters":[],"memes":[]},"hooks":[],"tags":[]}}`;
 }
 
 function storyboardPrompt(input) {
@@ -1092,17 +1128,57 @@ function normalizeScript(result, input = {}) {
     if (script.dialogue.some((item) => !item.beatIds.length)) issues.push("每句台词必须关联至少一个已确认节拍id");
   }
   const selectedCharacterIds = new Set(payload.projectCharacterCards.map((item) => textValue(item?.id)).filter(Boolean));
+  script.assetIntegration.characters = script.assetIntegration.characters.filter((item) => selectedCharacterIds.has(item.assetId));
   const integratedCharacterIds = new Set(script.assetIntegration.characters.map((item) => item.assetId));
   const missingCharacterAssets = [...selectedCharacterIds].filter((id) => !integratedCharacterIds.has(id));
-  const unknownCharacterAssets = [...integratedCharacterIds].filter((id) => !selectedCharacterIds.has(id));
-  if (missingCharacterAssets.length || unknownCharacterAssets.length || script.assetIntegration.characters.some((item) => !item.assetId || !item.name || !item.storyFunction || !item.choice)) issues.push("已选角色卡必须逐个说明戏剧任务和关键选择，且不得引用未选角色卡");
+  if (missingCharacterAssets.length || script.assetIntegration.characters.some((item) => !item.name || !item.storyFunction || !item.choice)) issues.push("已选角色卡必须逐个说明戏剧任务和关键选择；未入库角色可以正常参与剧情，无需写入角色卡绑定");
   const selectedMemeIds = new Set(payload.projectMemes.map((item) => textValue(item?.id)).filter(Boolean));
+  script.assetIntegration.memes = script.assetIntegration.memes.filter((item) => selectedMemeIds.has(item.assetId));
   const integratedMemeIds = new Set(script.assetIntegration.memes.map((item) => item.assetId));
   const missingMemeAssets = [...selectedMemeIds].filter((id) => !integratedMemeIds.has(id));
-  const unknownMemeAssets = [...integratedMemeIds].filter((id) => !selectedMemeIds.has(id));
-  if (missingMemeAssets.length || unknownMemeAssets.length || script.assetIntegration.memes.some((item) => !item.assetId || !item.name || !item.triggerRole || !item.setup || !item.payoff || !item.plotEffect)) issues.push("已选梗必须逐个说明触发角色、铺垫、回扣和剧情后果，且不得引用未选梗");
+  if (missingMemeAssets.length || script.assetIntegration.memes.some((item) => !item.name || !item.triggerRole || !item.setup || !item.payoff || !item.plotEffect)) issues.push("已选梗必须逐个说明触发角色、铺垫、回扣和剧情后果；自然产生的其他笑点无需写入梗库绑定");
   if (issues.length) throw validationError("剧本", issues);
   return { script };
+}
+
+function normalizeRecastScript(result, input = {}) {
+  const payload = normalizeInput(input);
+  const cardMap = new Map(payload.projectCharacterCards.map((card) => [textValue(card?.id), card]));
+  const mappings = payload.recastMappings.map((item) => ({
+    fromName: item.fromName,
+    targetCharacterId: item.targetCharacterId,
+    targetName: textValue(cardMap.get(item.targetCharacterId)?.name),
+  }));
+  const issues = [];
+  if (!payload.script || typeof payload.script !== "object") issues.push("缺少需要换角的原剧本");
+  if (!mappings.length) issues.push("至少选择一个换角映射");
+  if (mappings.some((item) => !item.targetName)) issues.push("换角目标必须来自当前项目角色库");
+  if (new Set(mappings.map((item) => item.fromName)).size !== mappings.length) issues.push("同一个原角色不能重复映射");
+  if (new Set(mappings.map((item) => item.targetCharacterId)).size !== mappings.length) issues.push("多个原角色不能替换成同一张角色卡");
+  if (issues.length) throw validationError("智能换角", issues);
+
+  const recastInput = {
+    ...payload,
+    roles: "",
+    activeCharacterIds: mappings.map((item) => item.targetCharacterId),
+    projectCharacterCards: mappings.map((item) => cardMap.get(item.targetCharacterId)),
+  };
+  const script = normalizeScript(result, recastInput).script;
+  const originalNames = (Array.isArray(payload.script.characters) ? payload.script.characters : []).map((item) => textValue(item?.name)).filter(Boolean);
+  const sourceNames = new Set(mappings.map((item) => item.fromName));
+  const expectedNames = [
+    ...originalNames.filter((name) => !sourceNames.has(name)),
+    ...mappings.map((item) => item.targetName),
+  ];
+  const actualNames = script.characters.map((item) => item.name);
+  const missingNames = expectedNames.filter((name) => !actualNames.some((candidate) => candidate === name || candidate.includes(name) || name.includes(candidate)));
+  const serializedScript = JSON.stringify(script);
+  const retainedSourceNames = [...sourceNames].filter((name) => !mappings.some((item) => item.fromName === name && item.targetName === name)
+    && serializedScript.includes(name));
+  if (missingNames.length) issues.push(`换角后缺少应保留或替换得到的角色：${missingNames.join("、")}`);
+  if (retainedSourceNames.length) issues.push(`换角后仍在人物、梗概、结构或台词中残留原角色：${retainedSourceNames.join("、")}`);
+  if (issues.length) throw validationError("智能换角", issues);
+  return { script, mappings };
 }
 
 function normalizeStoryboard(result, duration, clipMode = "smart", script = null) {
@@ -1638,6 +1714,15 @@ async function api(request, env, url) {
     return success(result);
   }
 
+  if (url.pathname === "/api/recast-script") {
+    if (!input.script || !Array.isArray(input.recastMappings) || !input.recastMappings.length) {
+      return error("请先提供当前剧本，并至少选择一个角色替换关系", "RECAST_MAPPING_REQUIRED", 400);
+    }
+    const raw = await askDeepSeek(env, input, recastPrompt(input), 4600, usageMeter, { temperature: 0.5 });
+    const result = await normalizeWithRepair(env, input, raw, (value) => normalizeRecastScript(value, input), 4600, usageMeter, "recast-script");
+    return success(result);
+  }
+
   if (url.pathname === "/api/generate") {
     const rawScript = await askDeepSeek(env, input, scriptPrompt(input), 4200, usageMeter);
     const scriptResult = await normalizeWithRepair(env, input, rawScript, (value) => normalizeScript(value, input), 4200, usageMeter, "script");
@@ -1678,6 +1763,7 @@ export const __test = {
   normalizeCharacterCard,
   normalizeSeriesLedger,
   normalizeScriptDoctor,
+  normalizeRecastScript,
   normalizeMemeIdeas,
   normalizePlans,
   normalizeCreativeMixes,
