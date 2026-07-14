@@ -97,32 +97,93 @@
     `;
   }
 
-  function storyboard(storyboardRows = [], hasScript = false) {
+  function storyboard(storyboardRows = [], hasScript = false, activeIndex = 0) {
     if (!storyboardRows.length) {
       return hasScript
         ? `<p class="helper">当前剧本版本还没有对应分镜。确认剧本方向可用后，点击“基于本版剧本生成 AI 视频段”。</p>`
         : `<p class="helper">请先生成或恢复一个剧本版本，再为它生成对应的 AI 视频段分镜。</p>`;
     }
+    const selectedIndex = Math.max(0, Math.min(Number(activeIndex) || 0, storyboardRows.length - 1));
     const statusOptions = ["已有", "待制作", "待采集"];
     const beats = (items = []) => items.map((beat) => `<div class="segment-beat"><strong>${escapeHtml(beat.range)}</strong><span>${escapeHtml(beat.content)}</span></div>`).join("");
     return `
-      <table class="storyboard-production-table">
-        <thead><tr><th>视频段</th><th>本段任务</th><th>角色 / 场景</th><th>段内节拍与动作</th><th>台词 / 字幕</th><th>镜头 / 声音</th><th>首尾连续性</th><th>AI 视频提示词</th><th>关联资产</th><th>制作备注</th><th>素材状态</th></tr></thead>
-        <tbody>${storyboardRows.map((shot, index) => `
-          <tr>
-            <td><strong>${escapeHtml(shot.clipId || `CLIP-${String(index + 1).padStart(2, "0")}`)}</strong><br><small>第 ${escapeHtml(shot.shot || index + 1)} 段</small><br>${escapeHtml(shot.timeRange)}<br><small>${escapeHtml((shot.beatIds || []).join("、"))}</small><br><small>${escapeHtml((shot.dialogueIds || []).join("、"))}</small><br><small>成片 ${escapeHtml(shot.seconds)} 秒</small><br><small>生成 ${escapeHtml(shot.generationSeconds || shot.seconds)} 秒${Number(shot.trimSeconds || 0) ? ` · 裁 ${escapeHtml(shot.trimSeconds)} 秒` : ""}</small><br><button class="segment-copy-button" type="button" data-copy-storyboard-segment="${index}">复制本段</button></td>
-            <td>${escapeHtml(shot.segmentGoal)}</td>
-            <td><strong>${escapeHtml(shot.characters)}</strong><br>${escapeHtml(shot.scene)}</td>
-            <td>${beats(shot.beatBreakdown)}<small>${escapeHtml(shot.visual)}；${escapeHtml(shot.action)}</small></td>
-            <td>${escapeHtml(shot.line)}<br><small>${escapeHtml(shot.subtitle)}</small></td>
-            <td>${escapeHtml(shot.scale)} · ${escapeHtml(shot.movement)}<br><small>${escapeHtml(shot.sound)}</small></td>
-            <td><small>承接入点</small><br>${escapeHtml(shot.continuityIn)}<br><small>承接出点</small><br>${escapeHtml(shot.continuityOut)}</td>
-            <td>${escapeHtml(shot.visualPrompt)}</td>
-            <td><input data-shot-field="assetLinks" data-shot-index="${index}" value="${escapeHtml(shot.assetLinks)}" placeholder="资产库名称 / 待采集素材" /></td>
-            <td><input data-shot-field="assetNote" data-shot-index="${index}" value="${escapeHtml(shot.assetNote)}" placeholder="负责人、截止时间或备注" /></td>
-            <td><select data-shot-field="assetStatus" data-shot-index="${index}">${statusOptions.map((status) => `<option value="${status}" ${shot.assetStatus === status ? "selected" : ""}>${status}</option>`).join("")}</select></td>
-          </tr>`).join("")}</tbody>
-      </table>`;
+      <div class="storyboard-review" data-storyboard-review>
+        <nav class="storyboard-segment-rail" aria-label="分镜段落">
+          <div class="storyboard-rail-head"><span>视频段</span><strong>${storyboardRows.length}</strong></div>
+          <div class="storyboard-segment-index" role="tablist" aria-orientation="vertical">
+            ${storyboardRows.map((shot, index) => `
+              <button class="storyboard-segment-link ${index === selectedIndex ? "is-active" : ""}" type="button" role="tab" data-storyboard-jump="${index}" aria-selected="${index === selectedIndex}" aria-controls="storyboard-detail-${index}" tabindex="${index === selectedIndex ? "0" : "-1"}">
+                <span class="storyboard-segment-number">${String(index + 1).padStart(2, "0")}</span>
+                <span class="storyboard-segment-summary">
+                  <strong>${escapeHtml(shot.clipId || `CLIP-${String(index + 1).padStart(2, "0")}`)}</strong>
+                  <small>${escapeHtml(shot.timeRange)} · ${escapeHtml(shot.seconds)}秒</small>
+                  <em>${escapeHtml(shot.segmentGoal || "未填写本段任务")}</em>
+                </span>
+              </button>`).join("")}
+          </div>
+        </nav>
+        <section class="storyboard-reader" aria-label="当前分镜详情">
+          <div class="storyboard-reader-toolbar">
+            <div><strong data-storyboard-position>第 ${selectedIndex + 1} / ${storyboardRows.length} 段</strong><span>逐段审阅</span></div>
+            <div class="storyboard-reader-actions">
+              <button class="storyboard-icon-button" type="button" data-storyboard-step="-1" aria-label="上一段" title="上一段" ${selectedIndex === 0 ? "disabled" : ""}>←</button>
+              <button class="segment-copy-button" type="button" data-copy-storyboard-segment="${selectedIndex}">复制本段</button>
+              <button class="storyboard-icon-button" type="button" data-storyboard-step="1" aria-label="下一段" title="下一段" ${selectedIndex === storyboardRows.length - 1 ? "disabled" : ""}>→</button>
+            </div>
+          </div>
+          ${storyboardRows.map((shot, index) => `
+            <article class="storyboard-segment-detail" id="storyboard-detail-${index}" data-storyboard-detail="${index}" role="tabpanel" ${index === selectedIndex ? "" : "hidden"}>
+              <header class="storyboard-detail-header">
+                <div>
+                  <div class="storyboard-detail-kicker"><span>${escapeHtml(shot.clipId || `CLIP-${String(index + 1).padStart(2, "0")}`)}</span><span>${escapeHtml(shot.timeRange)}</span></div>
+                  <h3>${escapeHtml(shot.segmentGoal || "未填写本段任务")}</h3>
+                  <p>${escapeHtml(shot.characters || "未填写角色")} · ${escapeHtml(shot.scene || "未填写场景")}</p>
+                </div>
+                <div class="storyboard-time-meta">
+                  <span>成片 <strong>${escapeHtml(shot.seconds)}秒</strong></span>
+                  <span>生成 <strong>${escapeHtml(shot.generationSeconds || shot.seconds)}秒</strong></span>
+                  ${Number(shot.trimSeconds || 0) ? `<span>裁剪 <strong>${escapeHtml(shot.trimSeconds)}秒</strong></span>` : ""}
+                </div>
+              </header>
+              <div class="storyboard-detail-grid">
+                <section class="storyboard-detail-block">
+                  <h4>段内节拍与动作</h4>
+                  ${beats(shot.beatBreakdown)}
+                  <p>${escapeHtml(shot.visual)}</p>
+                  <p class="storyboard-action-line">${escapeHtml(shot.action)}</p>
+                </section>
+                <section class="storyboard-detail-block">
+                  <h4>台词与字幕</h4>
+                  <blockquote>${escapeHtml(shot.line || "本段无台词")}</blockquote>
+                  <p class="storyboard-subtitle">字幕：${escapeHtml(shot.subtitle || shot.line || "无")}</p>
+                  <div class="storyboard-id-row"><span>${escapeHtml((shot.beatIds || []).join("、") || "未关联节拍")}</span><span>${escapeHtml((shot.dialogueIds || []).join("、") || "未关联台词")}</span></div>
+                </section>
+                <section class="storyboard-detail-block">
+                  <h4>镜头与声音</h4>
+                  <dl class="storyboard-spec-list">
+                    <div><dt>景别</dt><dd>${escapeHtml(shot.scale)}</dd></div>
+                    <div><dt>运动</dt><dd>${escapeHtml(shot.movement)}</dd></div>
+                    <div><dt>声音</dt><dd>${escapeHtml(shot.sound)}</dd></div>
+                  </dl>
+                </section>
+                <section class="storyboard-detail-block">
+                  <h4>首尾连续性</h4>
+                  <div class="storyboard-continuity"><span>承接入点</span><p>${escapeHtml(shot.continuityIn)}</p></div>
+                  <div class="storyboard-continuity is-out"><span>承接出点</span><p>${escapeHtml(shot.continuityOut)}</p></div>
+                </section>
+                <section class="storyboard-detail-block storyboard-prompt-block">
+                  <h4>AI 视频提示词</h4>
+                  <p>${escapeHtml(shot.visualPrompt)}</p>
+                </section>
+                <section class="storyboard-production-fields">
+                  <label>关联资产<input data-shot-field="assetLinks" data-shot-index="${index}" value="${escapeHtml(shot.assetLinks)}" placeholder="资产库名称 / 待采集素材" /></label>
+                  <label>制作备注<input data-shot-field="assetNote" data-shot-index="${index}" value="${escapeHtml(shot.assetNote)}" placeholder="负责人、截止时间或备注" /></label>
+                  <label>素材状态<select data-shot-field="assetStatus" data-shot-index="${index}">${statusOptions.map((status) => `<option value="${status}" ${shot.assetStatus === status ? "selected" : ""}>${status}</option>`).join("")}</select></label>
+                </section>
+              </div>
+            </article>`).join("")}
+        </section>
+      </div>`;
   }
 
   function historyMeta(item) {

@@ -732,10 +732,12 @@ test("UI templates escape model content and keep production controls", () => {
   const storyboardHtml = uiTemplates.storyboard([{ shot: 1, timeRange: "00-08秒", seconds: 8, generationSeconds: 8, segmentGoal: "抛出异常", beatBreakdown: [{ range: "0-3秒", content: "徽章裂开" }], assetStatus: "待制作" }], true);
   assert.match(storyboardHtml, /data-shot-field="assetLinks"/);
   assert.match(storyboardHtml, /option value="待制作" selected/);
-  assert.match(storyboardHtml, /第 1 段/);
+  assert.match(storyboardHtml, /第 1 \/ 1 段/);
   assert.match(storyboardHtml, /徽章裂开/);
   assert.match(storyboardHtml, /data-copy-storyboard-segment="0"/);
-  assert.match(storyboardHtml, /生成 8 秒/);
+  assert.match(storyboardHtml, /生成 <strong>8秒<\/strong>/);
+  assert.match(storyboardHtml, /data-storyboard-jump="0"/);
+  assert.match(storyboardHtml, /data-storyboard-detail="0"/);
 });
 
 test("page loads domain and template modules before app.js", async () => {

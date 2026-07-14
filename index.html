@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>洛克王国短剧创作工作台</title>
-    <link rel="stylesheet" href="./styles.css?v=20260714-recast-workspace" />
+    <link rel="stylesheet" href="./styles.css?v=20260714-storyboard-reader" />
   </head>
   <body>
     <a class="skip-link" href="#workspace">跳到创作工作区</a>
@@ -565,11 +565,11 @@
                 <p class="eyebrow">9:16 竖屏镜头表</p>
                 <h2>AI 视频段分镜脚本</h2>
               </div>
-              <button class="small-action" data-copy="storyboardTable">复制分镜</button>
+              <button class="small-action" id="copyAllStoryboardBtn" type="button">复制全部分镜</button>
             </div>
             <p class="helper bible-intro">每段对应一次独立 AI 视频生成。智能模式会按总时长均衡拆成 5-8 秒制作段；每段限制为一个连续场景和一个主动作，减少人物漂移与镜头断裂。</p>
             <div class="storyboard-version-list" id="storyboardHistory"></div>
-            <div class="table-wrap" id="storyboardTable"></div>
+            <div class="storyboard-host" id="storyboardTable"></div>
           </article>
 
           <article class="tab-panel" id="tab-history">
@@ -681,17 +681,17 @@
       粉丝向二创工作台示例，不代表官方内容或授权关系。发布前请核对平台规范与 IP 授权边界。
     </footer>
 
-    <script src="./generator.js?v=20260714-recast-workspace"></script>
-    <script src="./workflow-core.js?v=20260714-recast-workspace"></script>
-    <script src="./project-domain.js?v=20260714-recast-workspace"></script>
-    <script src="./episode-planner.js?v=20260714-recast-workspace"></script>
-    <script src="./ui-templates.js?v=20260714-recast-workspace"></script>
-    <script src="./api-client.js?v=20260714-recast-workspace"></script>
-    <script src="./data-store.js?v=20260714-recast-workspace"></script>
-    <script src="./archive-sync.js?v=20260714-recast-workspace"></script>
-    <script src="./app-state.js?v=20260714-recast-workspace"></script>
-    <script src="./ai-operation.js?v=20260714-recast-workspace"></script>
-    <script src="./generation-client.js?v=20260714-recast-workspace"></script>
-    <script src="./app.js?v=20260714-recast-workspace"></script>
+    <script src="./generator.js?v=20260714-storyboard-reader"></script>
+    <script src="./workflow-core.js?v=20260714-storyboard-reader"></script>
+    <script src="./project-domain.js?v=20260714-storyboard-reader"></script>
+    <script src="./episode-planner.js?v=20260714-storyboard-reader"></script>
+    <script src="./ui-templates.js?v=20260714-storyboard-reader"></script>
+    <script src="./api-client.js?v=20260714-storyboard-reader"></script>
+    <script src="./data-store.js?v=20260714-storyboard-reader"></script>
+    <script src="./archive-sync.js?v=20260714-storyboard-reader"></script>
+    <script src="./app-state.js?v=20260714-storyboard-reader"></script>
+    <script src="./ai-operation.js?v=20260714-storyboard-reader"></script>
+    <script src="./generation-client.js?v=20260714-storyboard-reader"></script>
+    <script src="./app.js?v=20260714-storyboard-reader"></script>
   </body>
 </html>

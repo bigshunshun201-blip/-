@@ -8,6 +8,7 @@
   const accessCodeKey = "roco-shortdrama-access-code";
   const maxHistoryItems = 60;
   const apiTimeoutMs = 600_000;
+  let activeStoryboardSegmentIndex = 0;
   const characterFieldIds = ["characterName", "characterRole", "characterTraits", "characterContrast", "characterDesire", "characterWeakness", "characterCatchphrases", "characterMannerism", "characterComedyTrigger", "characterBoundary", "characterSpeechPattern", "characterPressureResponse", "characterLieTell", "characterAddressStyle", "characterForbiddenPhrases", "characterInnerNeed", "characterWound", "characterSecret"];
   const apiClient = window.RocoApiClient.create({ accessCodeKey, timeoutMs: apiTimeoutMs });
   const generationClient = window.RocoGenerationClient.create({
@@ -122,6 +123,7 @@
     const isContinuation = Boolean(state.continuationSource);
     const generateButton = $("#generateBtn");
     const storyboardButton = $("#storyboardBtn");
+    const copyAllStoryboardButton = $("#copyAllStoryboardBtn");
     const continueButton = $("#continueBtn");
     const beatSheetButton = $("#generateBeatSheetBtn");
     const planReadyState = $("#planReadyState");
@@ -139,6 +141,10 @@
     if (storyboardButton) {
       storyboardButton.disabled = isBusy || !hasScript;
       storyboardButton.title = hasScript ? "仅根据当前剧本版本，按所选视频分段模式生成对应分镜" : "请先生成并确认一版剧本";
+    }
+    if (copyAllStoryboardButton) {
+      copyAllStoryboardButton.disabled = isBusy || !hasStoryboard;
+      copyAllStoryboardButton.title = hasStoryboard ? "按视频段顺序复制当前分镜版本" : "当前还没有分镜";
     }
     if (continueButton) {
       continueButton.disabled = isBusy || !hasScript;
@@ -2459,8 +2465,46 @@
 
   function renderStoryboard() {
     refreshCreationActions();
-    $("#storyboardTable").innerHTML = uiTemplates.storyboard(state.storyboard, Boolean(state.script));
+    activeStoryboardSegmentIndex = state.storyboard.length
+      ? Math.max(0, Math.min(activeStoryboardSegmentIndex, state.storyboard.length - 1))
+      : 0;
+    $("#storyboardTable").innerHTML = uiTemplates.storyboard(state.storyboard, Boolean(state.script), activeStoryboardSegmentIndex);
     renderStoryboardHistory();
+  }
+
+  function setActiveStoryboardSegment(index, { focus = false } = {}) {
+    const target = $("#storyboardTable");
+    if (!target || !state.storyboard.length) return;
+    const nextIndex = Math.max(0, Math.min(Number(index) || 0, state.storyboard.length - 1));
+    activeStoryboardSegmentIndex = nextIndex;
+    Array.from(target.querySelectorAll('[data-storyboard-jump]')).forEach((button) => {
+      const isActive = Number(button.dataset.storyboardJump) === nextIndex;
+      button.classList.toggle("is-active", isActive);
+      button.setAttribute("aria-selected", String(isActive));
+      button.tabIndex = isActive ? 0 : -1;
+    });
+    Array.from(target.querySelectorAll('[data-storyboard-detail]')).forEach((detail) => {
+      detail.hidden = Number(detail.dataset.storyboardDetail) !== nextIndex;
+    });
+    const position = target.querySelector('[data-storyboard-position]');
+    if (position) position.textContent = `第 ${nextIndex + 1} / ${state.storyboard.length} 段`;
+    const previous = target.querySelector('[data-storyboard-step="-1"]');
+    const next = target.querySelector('[data-storyboard-step="1"]');
+    if (previous) previous.disabled = nextIndex === 0;
+    if (next) next.disabled = nextIndex === state.storyboard.length - 1;
+    const copy = target.querySelector('[data-copy-storyboard-segment]');
+    if (copy) copy.dataset.copyStoryboardSegment = String(nextIndex);
+    const activeLink = target.querySelector(`[data-storyboard-jump="${nextIndex}"]`);
+    const rail = target.querySelector('.storyboard-segment-rail');
+    if (activeLink && rail) {
+      const linkTop = activeLink.offsetTop;
+      const linkBottom = linkTop + activeLink.offsetHeight;
+      const visibleTop = rail.scrollTop + 48;
+      const visibleBottom = rail.scrollTop + rail.clientHeight;
+      if (linkTop < visibleTop) rail.scrollTop = Math.max(0, linkTop - 48);
+      else if (linkBottom > visibleBottom) rail.scrollTop = linkBottom - rail.clientHeight;
+    }
+    if (focus) activeLink?.focus({ preventScroll: true });
   }
 
   function renderStoryboardHistory() {
@@ -2527,6 +2571,12 @@
     if (!segment) throw new Error("没有找到这个视频段。");
     await navigator.clipboard.writeText(storyboardSegmentText(segment));
     setStatus(`已复制第 ${segment.shot} 段，可直接粘贴到 AI 视频生成工具`);
+  }
+
+  async function copyAllStoryboard() {
+    if (!state.storyboard.length) throw new Error("当前还没有可复制的分镜。");
+    await navigator.clipboard.writeText(state.storyboard.map(storyboardSegmentText).join("\n\n----------------\n\n"));
+    setStatus(`已复制全部 ${state.storyboard.length} 个视频段`);
   }
 
   function updateStoryboardProductionField(index, field, value) {
@@ -3054,6 +3104,7 @@
       const response = await resolveAiJob(initialResponse, "分镜");
       assertActiveAiOperation(operation);
       state.storyboard = normalizeStoryboardResult(response.result);
+      activeStoryboardSegmentIndex = 0;
       updateCurrentHistoryStoryboard(response);
       renderStoryboard();
       renderConsistency();
@@ -3657,6 +3708,13 @@
         reportError("分镜生成", error);
       }
     });
+    $("#copyAllStoryboardBtn").addEventListener("click", async () => {
+      try {
+        await copyAllStoryboard();
+      } catch (error) {
+        reportError("复制全部分镜", error);
+      }
+    });
     $("#storyboardTable").addEventListener("change", (event) => {
       const field = event.target.dataset.shotField;
       const index = Number(event.target.dataset.shotIndex);
@@ -3664,6 +3722,16 @@
       updateStoryboardProductionField(index, field, event.target.value);
     });
     $("#storyboardTable").addEventListener("click", async (event) => {
+      const jump = event.target.closest("[data-storyboard-jump]");
+      if (jump) {
+        setActiveStoryboardSegment(Number(jump.dataset.storyboardJump));
+        return;
+      }
+      const step = event.target.closest("[data-storyboard-step]");
+      if (step) {
+        setActiveStoryboardSegment(activeStoryboardSegmentIndex + Number(step.dataset.storyboardStep), { focus: true });
+        return;
+      }
       const button = event.target.closest("[data-copy-storyboard-segment]");
       if (!button) return;
       try {
@@ -3671,6 +3739,18 @@
       } catch (error) {
         reportError("复制视频段", error);
       }
+    });
+    $("#storyboardTable").addEventListener("keydown", (event) => {
+      const link = event.target.closest("[data-storyboard-jump]");
+      if (!link || !["ArrowDown", "ArrowUp", "ArrowRight", "ArrowLeft", "Home", "End"].includes(event.key)) return;
+      event.preventDefault();
+      const current = Number(link.dataset.storyboardJump);
+      const nextIndex = event.key === "Home"
+        ? 0
+        : event.key === "End"
+          ? state.storyboard.length - 1
+          : current + (["ArrowDown", "ArrowRight"].includes(event.key) ? 1 : -1);
+      setActiveStoryboardSegment(nextIndex, { focus: true });
     });
     $("#storyboardHistory").addEventListener("click", (event) => {
       const button = event.target.closest("[data-storyboard-version]");
