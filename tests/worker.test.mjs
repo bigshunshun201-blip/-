@@ -440,6 +440,25 @@ test("API client aborts requests after the configured timeout", async () => {
   await assert.rejects(client.request("/api/status"), (error) => error.code === "REQUEST_TIMEOUT");
 });
 
+test("API client converts browser fetch failures into a useful network error", async () => {
+  const client = apiClientModule.create({
+    storage: { getItem: () => null },
+    fetchImpl: async () => { throw new TypeError("Failed to fetch"); },
+  });
+  await assert.rejects(
+    client.request("/api/script", { input: {} }),
+    (error) => error.code === "NETWORK_REQUEST_FAILED" && /未能连接到生成服务/.test(error.message),
+  );
+});
+
+test("AI POST responses use a heartbeat stream that remains valid JSON", async () => {
+  assert.equal(__test.shouldHeartbeat(new Request("https://example.com/api/script", { method: "POST" }), new URL("https://example.com/api/script")), true);
+  assert.equal(__test.shouldHeartbeat(new Request("https://example.com/api/status"), new URL("https://example.com/api/status")), false);
+  const response = __test.heartbeatJsonResponse(async () => new Response(JSON.stringify({ ok: true, result: { title: "完成" } })));
+  assert.equal(response.headers.get("x-roco-response-mode"), "heartbeat");
+  assert.deepEqual(JSON.parse(await response.text()), { ok: true, result: { title: "完成" } });
+});
+
 test("local DeepSeek development delegates API routes to the production worker", async () => {
   const source = await readFile(new URL("../server.js", import.meta.url), "utf8");
   assert.match(source, /handleSharedDeepSeekApi/);

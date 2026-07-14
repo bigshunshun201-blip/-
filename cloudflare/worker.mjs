@@ -12,6 +12,7 @@ const RATE_WINDOW_MS = 60_000;
 const MAX_AI_REQUESTS_PER_WINDOW = 12;
 const AI_GENERATION_TIMEOUT_MS = 70_000;
 const AI_REPAIR_TIMEOUT_MS = 50_000;
+const AI_HEARTBEAT_INTERVAL_MS = 10_000;
 const rateBuckets = new Map();
 const fallbackDailyUsage = new Map();
 const AI_PATH_COST = new Map([
@@ -42,6 +43,86 @@ function codedError(message, code) {
   const cause = new Error(message);
   cause.code = code;
   return cause;
+}
+
+function responseForCause(cause) {
+  const code = cause?.code || "SERVER_ERROR";
+  const status = code === "NO_DEEPSEEK_KEY"
+    ? 500
+    : code === "REQUEST_TOO_LARGE"
+      ? 413
+      : code === "INVALID_REQUEST" || code === "INVALID_ARCHIVE_REQUEST" || code === "INVALID_WORKSPACE_KEY"
+        ? 400
+        : code === "ARCHIVE_TOO_LARGE"
+          ? 413
+          : code === "ARCHIVE_VERSION_CONFLICT"
+            ? 409
+            : code === "ARCHIVE_NOT_FOUND"
+              ? 404
+              : code === "ARCHIVE_DB_UNAVAILABLE"
+                ? 503
+                : code === "DAILY_BUDGET_EXCEEDED" || code === "USAGE_GUARD_UNAVAILABLE"
+                  ? 429
+                  : code === "UPSTREAM_TIMEOUT"
+                    ? 504
+                    : code === "CLIENT_ABORTED"
+                      ? 499
+                      : 502;
+  return error(cause?.message || "生成服务暂时不可用", code, status);
+}
+
+function heartbeatJsonResponse(run) {
+  const encoder = new TextEncoder();
+  const heartbeat = `${" ".repeat(1024)}\n`;
+  let canceled = false;
+  let heartbeatId;
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(encoder.encode(heartbeat));
+      heartbeatId = setInterval(() => {
+        if (canceled) return;
+        try {
+          controller.enqueue(encoder.encode(heartbeat));
+        } catch (_) {
+          canceled = true;
+          clearInterval(heartbeatId);
+        }
+      }, AI_HEARTBEAT_INTERVAL_MS);
+
+      void (async () => {
+        let response;
+        try {
+          response = await run();
+        } catch (cause) {
+          response = responseForCause(cause);
+        }
+        try {
+          const body = await response.text();
+          if (!canceled) controller.enqueue(encoder.encode(body));
+        } catch (cause) {
+          if (!canceled) {
+            const fallback = await responseForCause(cause).text();
+            controller.enqueue(encoder.encode(fallback));
+          }
+        } finally {
+          clearInterval(heartbeatId);
+          if (!canceled) controller.close();
+        }
+      })();
+    },
+    cancel() {
+      canceled = true;
+      clearInterval(heartbeatId);
+    },
+  });
+  return new Response(stream, {
+    status: 200,
+    headers: { ...JSON_HEADERS, "x-roco-response-mode": "heartbeat" },
+  });
+}
+
+function shouldHeartbeat(request, url) {
+  return request.method === "POST" && AI_PATH_COST.has(url.pathname);
 }
 
 function bytesToHex(bytes) {
@@ -1576,32 +1657,13 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     try {
-      if (url.pathname.startsWith("/api/")) return await api(request, env, url);
+      if (url.pathname.startsWith("/api/")) {
+        if (shouldHeartbeat(request, url)) return heartbeatJsonResponse(() => api(request, env, url));
+        return await api(request, env, url);
+      }
       return env.ASSETS.fetch(request);
     } catch (cause) {
-      const code = cause?.code || "SERVER_ERROR";
-      const status = code === "NO_DEEPSEEK_KEY"
-        ? 500
-        : code === "REQUEST_TOO_LARGE"
-          ? 413
-          : code === "INVALID_REQUEST" || code === "INVALID_ARCHIVE_REQUEST" || code === "INVALID_WORKSPACE_KEY"
-            ? 400
-            : code === "ARCHIVE_TOO_LARGE"
-              ? 413
-              : code === "ARCHIVE_VERSION_CONFLICT"
-                ? 409
-                : code === "ARCHIVE_NOT_FOUND"
-                  ? 404
-                  : code === "ARCHIVE_DB_UNAVAILABLE"
-                    ? 503
-            : code === "DAILY_BUDGET_EXCEEDED" || code === "USAGE_GUARD_UNAVAILABLE"
-              ? 429
-              : code === "UPSTREAM_TIMEOUT"
-                ? 504
-                : code === "CLIENT_ABORTED"
-                  ? 499
-                : 502;
-      return error(cause?.message || "生成服务暂时不可用", code, status);
+      return responseForCause(cause);
     }
   },
 };
@@ -1628,4 +1690,6 @@ export const __test = {
   reserveDailyBudget,
   releaseDailyBudget,
   dailyUsageStatus,
+  heartbeatJsonResponse,
+  shouldHeartbeat,
 };

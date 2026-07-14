@@ -34,6 +34,12 @@
           timeoutError.code = "REQUEST_TIMEOUT";
           throw timeoutError;
         }
+        if (error instanceof TypeError || /failed to fetch|networkerror|load failed/i.test(String(error?.message || ""))) {
+          const networkError = new Error("未能连接到生成服务。请确认网络正常并刷新页面后重试；若持续出现，请稍后再试。");
+          networkError.code = "NETWORK_REQUEST_FAILED";
+          networkError.cause = error;
+          throw networkError;
+        }
         throw error;
       } finally {
         clearTimeout(timeoutId);
