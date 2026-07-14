@@ -29,15 +29,17 @@
   }
 
   function emptyStudio(input = {}) {
+    const isContinuation = input.creationMode === "continue";
+    const sourceTitle = input.continuationSourceRef?.title || "所选来源剧本";
     return `
       <section class="studio-empty">
         <div class="empty-hero">
           <img class="empty-hero-art" src="./assets/moonlit-wind-tower.png" alt="" aria-hidden="true" />
-          <p class="eyebrow">月牙镇 · 本集创作入口</p>
-          <h3>先搭角色与梗，再确认这集怎么演。</h3>
-          <p>选定本集角色和梗，确认人物选择与 8 个剧情节拍后，AI 才会写正式剧本。</p>
+          <p class="eyebrow">月牙镇 · ${isContinuation ? "续写创作入口" : "本集创作入口"}</p>
+          <h3>${isContinuation ? `先承接《${escapeHtml(sourceTitle)}》，再决定下一集怎么升级。` : "先搭角色与梗，再确认这集怎么演。"}</h3>
+          <p>${isContinuation ? "来源剧本保持只读；确认承接卡、人物选择与 8 个剧情节拍后，再生成独立的下一集剧本。" : "选定本集角色和梗，确认人物选择与 8 个剧情节拍后，AI 才会写正式剧本。"}</p>
           <div class="empty-actions">
-            <button class="primary-action compact-action" data-empty-generate="true">开始本集策划</button>
+            <button class="primary-action compact-action" data-empty-generate="true">${isContinuation ? "开始续写策划" : "开始本集策划"}</button>
             <button class="ghost-action compact-action" data-empty-topics="true">查看选题库</button>
           </div>
         </div>
@@ -209,6 +211,7 @@
                 ${item.pinned ? "<span>已入围</span>" : ""}
               </div>
               <h3>${escapeHtml(item.script?.title || "未命名剧本")}</h3>
+              ${item.sourceRef ? `<p class="history-lineage">续写自第 ${escapeHtml(item.sourceRef.episodeNumber)} 集 v${escapeHtml(item.sourceRef.versionNumber || 1)} · ${escapeHtml(item.sourceRef.title || "来源剧本")}</p>` : ""}
               <p>${escapeHtml(item.script?.synopsis || "")}</p>
               <div class="tagline">${(item.script?.tags || []).slice(0, 5).map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join("")}</div>
             </div>

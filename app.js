@@ -51,10 +51,12 @@
   const validateEpisodePlan = projectDomain.validateEpisodePlan;
   const deriveReviewInsights = projectDomain.deriveReviewInsights;
   const episodePlanner = window.RocoEpisodePlanner;
+  const creationSession = window.RocoCreationSession;
   const uiTemplates = window.RocoUiTemplates;
   const escapeHtml = uiTemplates.escapeHtml;
   const formatItem = uiTemplates.formatItem;
   const renderList = uiTemplates.renderList;
+  const creationFieldIds = ["theme", "roles", "scene", "customScene", "direction", "customDirection", "audience", "customAudience", "duration", "customDuration", "clipMode", "episodeCount", "episodeNumber", "style", "customStyle", "memeSeed", "creativeMixBrief", "continueInstruction", "continuationHook", "continuationOpenQuestions", "continuationCharacterState", "continuationConstraints", "continuationFacts", "continuationNewIdeas"];
   const aiOperations = window.RocoAiOperation.create({
     state,
     newId,
@@ -120,7 +122,8 @@
     const isBusy = Boolean(state.activeAiOperation);
     const hasCompletePlan = episodePlanner.planIsComplete(getInput().episodePlan);
     const hasApprovedBeatSheet = state.beatSheetApproved && state.beatSheet.length === 8;
-    const isContinuation = Boolean(state.continuationSource);
+    const isContinuation = state.creationMode === "continue";
+    const hasContinuationSource = Boolean(state.continuationSource?.script && creationSession.normalizeSourceRef(state.continuationSource));
     const generateButton = $("#generateBtn");
     const storyboardButton = $("#storyboardBtn");
     const copyAllStoryboardButton = $("#copyAllStoryboardBtn");
@@ -130,8 +133,8 @@
     const stage = $(".stage");
 
     if (generateButton) {
-      generateButton.disabled = isBusy || !hasCompletePlan || !hasApprovedBeatSheet;
-      generateButton.textContent = !hasCompletePlan ? "先完成本集策划" : !hasApprovedBeatSheet ? "先确认剧情节拍表" : isContinuation ? "生成下一集剧本" : "生成本集剧本";
+      generateButton.disabled = isBusy || !hasCompletePlan || !hasApprovedBeatSheet || (isContinuation && !hasContinuationSource);
+      generateButton.textContent = isContinuation && !hasContinuationSource ? "先选择续写来源" : !hasCompletePlan ? "先完成本集策划" : !hasApprovedBeatSheet ? "先确认剧情节拍表" : isContinuation ? "生成续写剧本" : "生成新剧本";
       generateButton.title = hasCompletePlan && hasApprovedBeatSheet ? "根据已确认的本集策划和节拍表生成剧本" : "请先完成本集策划，并生成、确认一版剧情节拍表";
     }
     if (planReadyState) {
@@ -148,7 +151,8 @@
     }
     if (continueButton) {
       continueButton.disabled = isBusy || !hasScript;
-      continueButton.title = hasScript ? "承接当前剧本的结尾钩子续写下一集" : "请先生成一版剧本";
+      continueButton.textContent = isContinuation ? "基于本版再续写下一集" : "续写下一集";
+      continueButton.title = hasScript ? "把当前目标剧本设为新的续写来源" : "请先生成一版剧本";
     }
     if (beatSheetButton) {
       beatSheetButton.disabled = isBusy || !hasCompletePlan;
@@ -184,6 +188,8 @@
   }
 
   function resetCurrentCreation() {
+    state.creationMode = "new";
+    state.creationSessions = { new: null, continue: null };
     state.currentEpisodeId = null;
     state.reviewEpisodeId = null;
     state.currentHistoryId = null;
@@ -205,6 +211,7 @@
     state.beatSheetApproved = false;
     state.activeBeatSheetBatchId = null;
     state.continuationSource = null;
+    state.continuationBrief = {};
     setInputValue("episodeNumber", nextEpisodeNumber());
     renderPlanSuggestions();
     renderMemeLab();
@@ -216,6 +223,7 @@
     renderCreativePack();
     renderConsistency();
     renderExample();
+    renderCreationMode();
   }
 
   function refreshToolbarState(activeTab) {
@@ -269,7 +277,10 @@
       },
       aiModel: state.aiModels.script,
       aiModels: { ...state.aiModels },
+      creationMode: state.creationMode,
       continueInstruction: $("#continueInstruction") ? $("#continueInstruction").value.trim() : "",
+      continuationBrief: readContinuationBrief(),
+      continuationSourceRef: creationSession.normalizeSourceRef(state.continuationSource),
       episodePlan: {
         openingHook: $("#planOpeningHook")?.value.trim() || "",
         conflict: $("#planConflict")?.value.trim() || "",
@@ -291,6 +302,96 @@
         approved: state.beatSheetApproved,
       },
     };
+  }
+
+  function readContinuationBrief() {
+    return creationSession.normalizeBrief({
+      requiredHook: $("#continuationHook")?.value,
+      openQuestions: $("#continuationOpenQuestions")?.value,
+      characterState: $("#continuationCharacterState")?.value,
+      constraints: $("#continuationConstraints")?.value,
+      mustPreserve: $("#continuationFacts")?.value,
+      direction: $("#continueInstruction")?.value,
+      newIdeas: $("#continuationNewIdeas")?.value,
+    });
+  }
+
+  function applyContinuationBrief(brief = {}) {
+    const value = creationSession.normalizeBrief(brief);
+    setInputValue("continuationHook", value.requiredHook);
+    setInputValue("continuationOpenQuestions", value.openQuestions);
+    setInputValue("continuationCharacterState", value.characterState);
+    setInputValue("continuationConstraints", value.constraints);
+    setInputValue("continuationFacts", value.mustPreserve);
+    setInputValue("continueInstruction", value.direction);
+    setInputValue("continuationNewIdeas", value.newIdeas);
+    state.continuationBrief = value;
+  }
+
+  function creationFieldsSnapshot() {
+    return Object.fromEntries(creationFieldIds.map((id) => [id, document.getElementById(id)?.value ?? ""]));
+  }
+
+  function captureCreationSession() {
+    return {
+      mode: state.creationMode,
+      fields: creationFieldsSnapshot(),
+      input: getInput(),
+      aiModels: { ...state.aiModels },
+      currentEpisodeId: state.currentEpisodeId,
+      reviewEpisodeId: state.reviewEpisodeId,
+      currentHistoryId: state.currentHistoryId,
+      script: state.script,
+      storyboard: [...state.storyboard],
+      creativePack: state.creativePack,
+      scriptDoctor: state.scriptDoctor,
+      planOptions: state.planOptions.map((item) => ({ ...item, plan: { ...(item.plan || {}) } })),
+      selectedPlanOptionId: state.selectedPlanOptionId,
+      activePlanBatchId: state.activePlanBatchId,
+      activeMemeIds: [...state.activeMemeIds],
+      activeCharacterIds: [...state.activeCharacterIds],
+      creativeMixOptions: state.creativeMixOptions.map((item) => ({ ...item, characterIds: [...(item.characterIds || [])], memeIds: [...(item.memeIds || [])], planPatch: { ...(item.planPatch || {}) } })),
+      selectedCreativeMixId: state.selectedCreativeMixId,
+      activeCreativeMixBatchId: state.activeCreativeMixBatchId,
+      beatSheet: state.beatSheet.map((item) => ({ ...item, assetIds: [...(item.assetIds || [])] })),
+      beatSheetApproved: state.beatSheetApproved,
+      activeBeatSheetBatchId: state.activeBeatSheetBatchId,
+      continuationSource: state.continuationSource,
+      continuationBrief: readContinuationBrief(),
+    };
+  }
+
+  function applyCreationSession(session = {}) {
+    Object.entries(session.fields || {}).forEach(([id, value]) => setInputValue(id, value));
+    if (session.aiModels) restoreAiModels({ aiModels: session.aiModels });
+    state.currentEpisodeId = session.currentEpisodeId || null;
+    state.reviewEpisodeId = session.reviewEpisodeId || state.currentEpisodeId;
+    state.currentHistoryId = session.currentHistoryId || null;
+    state.script = session.script || null;
+    state.storyboard = Array.isArray(session.storyboard) ? session.storyboard : [];
+    state.creativePack = session.creativePack || null;
+    state.scriptDoctor = session.scriptDoctor || null;
+    state.planOptions = Array.isArray(session.planOptions) ? session.planOptions : [];
+    state.selectedPlanOptionId = session.selectedPlanOptionId || null;
+    state.activePlanBatchId = session.activePlanBatchId || null;
+    state.activeMemeIds = Array.isArray(session.activeMemeIds) ? session.activeMemeIds : [];
+    state.activeCharacterIds = Array.isArray(session.activeCharacterIds) ? session.activeCharacterIds : [];
+    state.creativeMixOptions = Array.isArray(session.creativeMixOptions) ? session.creativeMixOptions : [];
+    state.selectedCreativeMixId = session.selectedCreativeMixId || null;
+    state.activeCreativeMixBatchId = session.activeCreativeMixBatchId || null;
+    state.beatSheet = normalizeBeatSheet({ beats: session.beatSheet || [] });
+    state.beatSheetApproved = Boolean(session.beatSheetApproved && state.beatSheet.length === 8);
+    state.activeBeatSheetBatchId = session.activeBeatSheetBatchId || null;
+    state.continuationSource = session.continuationSource || null;
+    applyContinuationBrief(session.continuationBrief || session.input?.continuationBrief || {});
+    renderPlanSuggestions();
+    renderCreativeAssetPicker();
+    renderCreativeMixResults();
+    renderBeatSheet();
+    renderScript();
+    renderStoryboard();
+    renderCreativePack();
+    renderConsistency();
   }
 
   function restoreActiveSelections(input = {}) {
@@ -448,7 +549,7 @@
     if (!target) return;
     target.innerHTML = batches.length ? batches.slice(0, 8).map((batch) => {
       const selected = (batch.mixes || []).find((mix) => mix.id === batch.selectedMixId);
-      return `<div class="plan-history-item"><div><strong>第 ${escapeHtml(batch.episodeNumber || 1)} 集 · ${escapeHtml(batch.theme || "未命名选题")}</strong><span>${escapeHtml(new Date(batch.createdAt).toLocaleString("zh-CN", { hour12: false }))} · ${escapeHtml(selected ? `已采用 ${selected.angle}` : "3 套待筛选")}</span></div><button class="small-action" type="button" data-creative-mix-restore="${escapeHtml(batch.id)}">恢复三案</button></div>`;
+      return `<div class="plan-history-item"><div><strong>${batch.creationMode === "continue" ? "续写 · " : ""}第 ${escapeHtml(batch.episodeNumber || 1)} 集 · ${escapeHtml(batch.theme || "未命名选题")}</strong><span>${escapeHtml(new Date(batch.createdAt).toLocaleString("zh-CN", { hour12: false }))} · ${escapeHtml(selected ? `已采用 ${selected.angle}` : "3 套待筛选")}</span></div><button class="small-action" type="button" data-creative-mix-restore="${escapeHtml(batch.id)}">恢复三案</button></div>`;
     }).join("") : `<p class="helper">每次 AI 生成的三套角色与梗搭配都会保存在当前项目。</p>`;
   }
 
@@ -472,7 +573,9 @@
       state.selectedCreativeMixId = null;
       const batch = {
         id: newId("creative-mix-batch"), createdAt: new Date().toISOString(), episodeNumber: input.episodeNumber,
-        theme: input.theme, model: response.model || "", source: response.source || "", mixes: options.map((item) => ({ ...item, characterIds: [...item.characterIds], memeIds: [...item.memeIds], planPatch: { ...item.planPatch } })), selectedMixId: null,
+        theme: input.theme, model: response.model || "", source: response.source || "", creationMode: state.creationMode,
+        targetEpisodeNumber: input.episodeNumber, sourceRef: creationSession.normalizeSourceRef(state.continuationSource),
+        mixes: options.map((item) => ({ ...item, characterIds: [...item.characterIds], memeIds: [...item.memeIds], planPatch: { ...item.planPatch } })), selectedMixId: null,
       };
       project.creativeMixBatches = [batch, ...(project.creativeMixBatches || [])].slice(0, 30);
       state.activeCreativeMixBatchId = batch.id;
@@ -515,6 +618,10 @@
   function restoreCreativeMixBatch(id) {
     const batch = (currentProject()?.creativeMixBatches || []).find((item) => item.id === id);
     if (!batch) throw new Error("没有找到这批搭配记录。");
+    if ((batch.creationMode || "new") !== state.creationMode) {
+      const source = batch.creationMode === "continue" ? findContinuationSource(batch.sourceRef) : null;
+      switchCreationMode(batch.creationMode || "new", source ? { source } : {});
+    }
     state.creativeMixOptions = (batch.mixes || []).map((item) => ({ ...item, characterIds: [...(item.characterIds || [])], memeIds: [...(item.memeIds || [])], planPatch: { ...(item.planPatch || {}) } }));
     state.activeCreativeMixBatchId = batch.id;
     state.selectedCreativeMixId = batch.selectedMixId || null;
@@ -571,7 +678,9 @@
   }
 
   function plannerContext(topic = state.selectedTopic) {
-    const previousHook = state.script?.hooks?.at(-1);
+    const previousHook = state.creationMode === "continue"
+      ? state.continuationSource?.script?.hooks?.[0]
+      : state.script?.hooks?.at(-1);
     return {
       topic,
       previousHook: previousHook ? formatItem(previousHook) : "",
@@ -632,7 +741,7 @@
         const time = new Date(batch.createdAt).toLocaleString("zh-CN", { hour12: false });
         return `<div class="plan-history-item">
           <div>
-            <strong>第 ${escapeHtml(batch.episodeNumber || 1)} 集 · ${escapeHtml(batch.theme || "未命名选题")}</strong>
+            <strong>${batch.creationMode === "continue" ? "续写 · " : ""}第 ${escapeHtml(batch.episodeNumber || 1)} 集 · ${escapeHtml(batch.theme || "未命名选题")}</strong>
             <span>${escapeHtml(time)} · ${escapeHtml(batch.model || "DeepSeek")} · ${escapeHtml(selected ? `已采用 ${selected.angle}` : "3 套待筛选")}</span>
           </div>
           <button class="small-action" type="button" data-plan-batch-restore="${escapeHtml(batch.id)}">恢复三案</button>
@@ -653,6 +762,9 @@
       theme: input.theme || "未命名选题",
       model: response.model || "",
       source: response.source || "",
+      creationMode: state.creationMode,
+      targetEpisodeNumber: Number(input.episodeNumber || 1),
+      sourceRef: creationSession.normalizeSourceRef(state.continuationSource),
       input: batchInput,
       plans: options.map((option) => ({ ...option, plan: { ...option.plan } })),
       selectedPlanId: null,
@@ -668,6 +780,10 @@
   function restorePlanBatch(id) {
     const batch = (currentProject()?.planBatches || []).find((item) => item.id === id);
     if (!batch) throw new Error("没有找到这批策划记录。");
+    if ((batch.creationMode || "new") !== state.creationMode) {
+      const source = batch.creationMode === "continue" ? findContinuationSource(batch.sourceRef) : null;
+      switchCreationMode(batch.creationMode || "new", source ? { source } : {});
+    }
     Object.entries(batch.input || {}).forEach(([key, value]) => {
       if (!["episodePlan", "episodePlanRef"].includes(key)) setInputValue(key, value);
     });
@@ -687,7 +803,7 @@
       const input = {
         ...getInput(),
         episodePlan: {},
-        previousScript: state.script || null,
+        previousScript: state.creationMode === "continue" ? state.continuationSource?.script || null : null,
       };
       const response = await apiRequest("/api/plans", { input: generationContext(input, "plan") });
       assertActiveAiOperation(operation);
@@ -789,7 +905,7 @@
     if (!target) return;
     target.innerHTML = batches.length ? batches.slice(0, 8).map((batch, index) => `
       <div class="plan-history-item">
-        <div><strong>第 ${escapeHtml(batch.episodeNumber || 1)} 集 · 节拍表 v${batches.length - index}</strong><span>${escapeHtml(new Date(batch.createdAt).toLocaleString("zh-CN", { hour12: false }))} · ${batch.approved ? "已确认" : "未确认"}</span></div>
+        <div><strong>${batch.creationMode === "continue" ? "续写 · " : ""}第 ${escapeHtml(batch.episodeNumber || 1)} 集 · 节拍表 v${batches.length - index}</strong><span>${escapeHtml(new Date(batch.createdAt).toLocaleString("zh-CN", { hour12: false }))} · ${batch.approved ? "已确认" : "未确认"}</span></div>
         <button class="small-action" type="button" data-beat-sheet-restore="${escapeHtml(batch.id)}">恢复</button>
       </div>`).join("") : `<p class="helper">生成过的节拍表会保存在当前项目，方便比较和恢复。</p>`;
   }
@@ -810,6 +926,8 @@
       const batch = {
         id: newId("beat-sheet-batch"), createdAt: new Date().toISOString(), episodeNumber: input.episodeNumber,
         theme: input.theme, model: response.model || "", source: response.source || "", approved: false,
+        creationMode: state.creationMode, targetEpisodeNumber: input.episodeNumber,
+        sourceRef: creationSession.normalizeSourceRef(state.continuationSource),
         beats: beats.map((beat) => ({ ...beat, assetIds: [...beat.assetIds] })),
       };
       project.beatSheetBatches = [batch, ...(project.beatSheetBatches || [])].slice(0, 30);
@@ -838,6 +956,10 @@
   function restoreBeatSheetBatch(id) {
     const batch = (currentProject()?.beatSheetBatches || []).find((item) => item.id === id);
     if (!batch) throw new Error("没有找到这版节拍表。");
+    if ((batch.creationMode || "new") !== state.creationMode) {
+      const source = batch.creationMode === "continue" ? findContinuationSource(batch.sourceRef) : null;
+      switchCreationMode(batch.creationMode || "new", source ? { source } : {});
+    }
     state.beatSheet = normalizeBeatSheet({ beats: batch.beats });
     state.beatSheetApproved = Boolean(batch.approved);
     state.activeBeatSheetBatchId = batch.id;
@@ -1247,6 +1369,196 @@
     return project?.episodes?.find((episode) => episode.id === state.currentEpisodeId) || null;
   }
 
+  function continuationSourceKey(ref) {
+    const value = creationSession.normalizeSourceRef(ref);
+    return value ? `${value.episodeId}::${value.versionId}` : "";
+  }
+
+  function continuationSourceCatalog() {
+    const project = currentProject();
+    return (project?.episodes || [])
+      .slice()
+      .sort((a, b) => Number(a.episodeNumber) - Number(b.episodeNumber))
+      .flatMap((episode) => (episode.versions || []).map((version, index) => ({
+        ref: {
+          projectId: project.id,
+          episodeId: episode.id,
+          versionId: version.id,
+          episodeNumber: Number(episode.episodeNumber),
+          versionNumber: index + 1,
+          title: version.script?.title || `第 ${episode.episodeNumber} 集`,
+          createdAt: version.createdAt || episode.updatedAt || "",
+        },
+        input: version.input || episode.input || {},
+        script: version.script || null,
+        storyboard: Array.isArray(version.storyboard) ? version.storyboard : [],
+      }))).filter((item) => item.script);
+  }
+
+  function findContinuationSource(ref) {
+    const key = continuationSourceKey(ref);
+    return continuationSourceCatalog().find((item) => continuationSourceKey(item.ref) === key) || null;
+  }
+
+  function currentOutputAsContinuationSource() {
+    if (!state.script) return null;
+    const archived = state.currentHistoryId ? window.RocoWorkflowCore.findArchivedVersion(state.projects, state.currentHistoryId) : null;
+    if (archived) {
+      const versionIndex = (archived.episode.versions || []).findIndex((item) => item.id === archived.version.id);
+      return {
+        ref: {
+          projectId: archived.project.id,
+          episodeId: archived.episode.id,
+          versionId: archived.version.id,
+          episodeNumber: archived.episode.episodeNumber,
+          versionNumber: versionIndex + 1,
+          title: archived.version.script?.title || state.script.title || "未命名剧本",
+          createdAt: archived.version.createdAt || "",
+        },
+        input: archived.version.input || getInput(),
+        script: archived.version.script || state.script,
+        storyboard: archived.version.storyboard || state.storyboard,
+      };
+    }
+    const episode = currentProjectEpisode();
+    const version = activeEpisodeVersion(episode);
+    if (!episode || !version) return null;
+    const versionIndex = (episode.versions || []).findIndex((item) => item.id === version.id);
+    return {
+      ref: {
+        projectId: state.currentProjectId,
+        episodeId: episode.id,
+        versionId: version.id,
+        episodeNumber: episode.episodeNumber,
+        versionNumber: versionIndex + 1,
+        title: version.script?.title || state.script.title || "未命名剧本",
+        createdAt: version.createdAt || "",
+      },
+      input: version.input || getInput(),
+      script: version.script || state.script,
+      storyboard: version.storyboard || state.storyboard,
+    };
+  }
+
+  function renderContinuationSource() {
+    const select = $("#continuationSourceSelect");
+    const card = $("#continuationSourceCard");
+    if (!select || !card) return;
+    const catalog = continuationSourceCatalog();
+    select.innerHTML = catalog.length
+      ? catalog.map((item) => `<option value="${escapeHtml(continuationSourceKey(item.ref))}">第 ${escapeHtml(item.ref.episodeNumber)} 集 · v${escapeHtml(item.ref.versionNumber)} · ${escapeHtml(item.ref.title)}</option>`).join("")
+      : `<option value="">当前项目暂无可续写剧本</option>`;
+    select.disabled = !catalog.length;
+    const sourceRef = creationSession.normalizeSourceRef(state.continuationSource);
+    const key = continuationSourceKey(sourceRef);
+    if (catalog.some((item) => continuationSourceKey(item.ref) === key)) select.value = key;
+    const source = state.continuationSource;
+    if (!sourceRef || !source?.script) {
+      card.innerHTML = `<p class="helper">先在当前项目生成或归档一版剧本，再选择续写来源。</p>`;
+      return;
+    }
+    const characterNames = (source.script.characters || []).map((item) => item.name).filter(Boolean).slice(0, 5).join("、") || "未标注";
+    const hook = source.script.hooks?.[0] || source.script.structure?.at?.(-1)?.content || "未提取到结尾钩子";
+    const time = sourceRef.createdAt ? new Date(sourceRef.createdAt).toLocaleString("zh-CN", { hour12: false }) : "时间未知";
+    card.innerHTML = `<div class="continuation-source-meta"><span>第 ${escapeHtml(sourceRef.episodeNumber)} 集</span><span>v${escapeHtml(sourceRef.versionNumber)}</span><span>${escapeHtml(time)}</span></div><h3>${escapeHtml(sourceRef.title)}</h3><p>主要人物：${escapeHtml(characterNames)}</p><p class="continuation-source-hook"><strong>结尾钩子：</strong>${escapeHtml(formatItem(hook))}</p>`;
+  }
+
+  function clearTargetWorkflow() {
+    state.currentEpisodeId = null;
+    state.reviewEpisodeId = null;
+    state.currentHistoryId = null;
+    state.script = null;
+    state.storyboard = [];
+    state.creativePack = null;
+    state.scriptDoctor = null;
+    state.planOptions = [];
+    state.selectedPlanOptionId = null;
+    state.activePlanBatchId = null;
+    state.creativeMixOptions = [];
+    state.selectedCreativeMixId = null;
+    state.activeCreativeMixBatchId = null;
+    state.beatSheet = [];
+    state.beatSheetApproved = false;
+    state.activeBeatSheetBatchId = null;
+    applyEpisodePlan({});
+  }
+
+  function setContinuationSource(source, options = {}) {
+    if (!source?.script || !creationSession.normalizeSourceRef(source)) throw new Error("所选版本没有可续写的剧本。");
+    const oldKey = continuationSourceKey(state.continuationSource);
+    const nextKey = continuationSourceKey(source.ref);
+    if (!options.force && oldKey && oldKey !== nextKey && creationSession.hasSessionWork(captureCreationSession())) {
+      const confirmed = window.confirm("更换续写来源会清空当前续写策划、节拍表、目标剧本和分镜，是否继续？");
+      if (!confirmed) {
+        renderContinuationSource();
+        return false;
+      }
+    }
+    const sourceInput = source.input || {};
+    ["theme", "roles", "scene", "direction", "audience", "duration", "clipMode", "episodeCount", "style", "memeSeed", "creativeMixBrief"].forEach((key) => {
+      if (sourceInput[key] !== undefined) setInputValue(key, sourceInput[key]);
+    });
+    clearTargetWorkflow();
+    state.activeMemeIds = [...(sourceInput.activeMemeIds || [])];
+    state.activeCharacterIds = [...(sourceInput.activeCharacterIds || [])];
+    state.continuationSource = { ref: { ...source.ref }, input: { ...sourceInput }, script: source.script, storyboard: [...(source.storyboard || [])] };
+    applyContinuationBrief(creationSession.deriveBrief(state.continuationSource, currentProject()?.seriesLedger || {}));
+    setInputValue("episodeNumber", Number(source.ref.episodeNumber) + 1);
+    renderPlanSuggestions();
+    renderCreativeAssetPicker();
+    renderCreativeMixResults();
+    renderBeatSheet();
+    renderScript();
+    renderStoryboard();
+    renderCreativePack();
+    renderConsistency();
+    renderContinuationSource();
+    refreshCreationActions();
+    return true;
+  }
+
+  function renderCreationMode() {
+    const isContinuation = state.creationMode === "continue";
+    $("#continuationPanel").hidden = !isContinuation;
+    $$('[data-creation-mode]').forEach((button) => {
+      const active = button.dataset.creationMode === state.creationMode;
+      button.classList.toggle("is-active", active);
+      button.setAttribute("aria-selected", String(active));
+    });
+    const heading = $(".control-panel-head h2");
+    if (heading) heading.textContent = isContinuation ? "下一集续写设定" : "本集创作设定";
+    if (isContinuation) renderContinuationSource();
+    refreshCreationActions();
+  }
+
+  function switchCreationMode(mode, options = {}) {
+    const targetMode = creationSession.normalizeMode(mode);
+    const sourceCandidate = options.source || currentOutputAsContinuationSource();
+    if (targetMode === state.creationMode && !(targetMode === "continue" && options.source)) {
+      renderCreationMode();
+      return;
+    }
+    state.creationSessions[state.creationMode] = captureCreationSession();
+    state.creationMode = targetMode;
+    const saved = state.creationSessions[targetMode];
+    if (saved && !options.source) {
+      applyCreationSession(saved);
+    } else if (targetMode === "new") {
+      applyCreationSession(state.creationSessions.new || {});
+      state.continuationSource = null;
+      state.continuationBrief = {};
+    } else {
+      const base = state.creationSessions.new;
+      if (base) applyCreationSession({ ...base, script: null, storyboard: [], creativePack: null, scriptDoctor: null, currentEpisodeId: null, reviewEpisodeId: null, currentHistoryId: null, planOptions: [], beatSheet: [], beatSheetApproved: false, continuationSource: null, continuationBrief: {} });
+      const source = options.source || sourceCandidate || continuationSourceCatalog().at(-1);
+      if (source) setContinuationSource(source, { force: true });
+      else clearTargetWorkflow();
+    }
+    renderCreationMode();
+    renderAiModelSwitches();
+    saveDraft(false);
+  }
+
   function projectContinuity(project = currentProject(), targetEpisodeNumber = nextEpisodeNumber(project)) {
     return window.RocoWorkflowCore.continuityForTarget(project?.episodes || [], targetEpisodeNumber, 3);
   }
@@ -1269,6 +1581,9 @@
       projectCharacterCards: (project?.characterCards || []).filter((item) => (input.activeCharacterIds || state.activeCharacterIds).includes(item.id)).slice(0, 8),
       projectSeriesLedger: project?.seriesLedger || {},
       projectCanonSources: (project?.canonSources || []).slice(-30),
+      continuationContext: state.creationMode === "continue"
+        ? creationSession.continuationContext(state.continuationSource, readContinuationBrief())
+        : null,
       latestReview,
     };
   }
@@ -1407,10 +1722,10 @@
         <article class="episode-card">
           <div class="episode-number">EP ${escapeHtml(episode.episodeNumber)}</div>
           <div>
-            <div class="history-meta"><span>${escapeHtml(episode.review?.status || "draft")}</span><span>${episode.storyboard?.length || 0} 个视频段</span><span>${(episode.versions || []).length} 个剧本版本</span></div>
+            <div class="history-meta"><span>${escapeHtml(episode.review?.status || "draft")}</span><span>${episode.storyboard?.length || 0} 个视频段</span><span>${(episode.versions || []).length} 个剧本版本</span>${episode.sourceRef ? `<span>续写自第 ${escapeHtml(episode.sourceRef.episodeNumber)} 集 v${escapeHtml(episode.sourceRef.versionNumber || 1)}</span>` : ""}</div>
             <h4>${escapeHtml(episode.script?.title || "待生成剧本")}</h4>
             <p>${escapeHtml(episode.script?.synopsis || "本集还没有完成剧本。")}</p>
-            <div class="episode-versions">${(episode.versions || []).map((version, versionIndex) => `<button class="small-action ${version.id === episode.activeVersionId ? "is-active-version" : ""}" data-project-episode-version="${escapeHtml(episode.id)}" data-project-version-id="${escapeHtml(version.id)}">v${versionIndex + 1}</button>`).join("")}</div>
+            <div class="episode-versions">${(episode.versions || []).map((version, versionIndex) => `<button class="small-action ${version.id === episode.activeVersionId ? "is-active-version" : ""}" data-project-episode-version="${escapeHtml(episode.id)}" data-project-version-id="${escapeHtml(version.id)}" title="${version.sourceRef ? `续写自第 ${escapeHtml(version.sourceRef.episodeNumber)} 集 v${escapeHtml(version.sourceRef.versionNumber || 1)}` : "新建本集"}">v${versionIndex + 1}${version.creationMode === "continue" ? " · 续" : ""}</button>`).join("")}</div>
           </div>
           <div class="episode-actions">
             <button class="small-action" data-project-episode-restore="${escapeHtml(episode.id)}">打开本集</button>
@@ -1548,6 +1863,9 @@
         source: response.source || "",
         model: response.model || "",
         consistency: null,
+        creationMode: state.creationMode,
+        sourceRef: state.creationMode === "continue" ? creationSession.normalizeSourceRef(state.continuationSource) : null,
+        continuationBrief: state.creationMode === "continue" ? readContinuationBrief() : null,
       },
     });
     state.currentEpisodeId = episode.id;
@@ -1572,6 +1890,8 @@
     const episode = project?.episodes?.find((item) => item.id === id);
     if (!episode) throw new Error("没有找到该项目集数。");
     applyEpisodeVersion(episode, versionId || episode.activeVersionId);
+    state.creationSessions[state.creationMode] = captureCreationSession();
+    state.creationMode = episode.creationMode === "continue" ? "continue" : "new";
     Object.entries(episode.input || {}).forEach(([key, value]) => setInputValue(key, value));
     applyEpisodePlan(episode.input?.episodePlan);
     restoreActiveSelections(episode.input);
@@ -1584,7 +1904,8 @@
     state.creativePack = episode.creativePack || null;
     state.scriptDoctor = episode.doctorResult || null;
     state.currentHistoryId = episode.historyId || null;
-    state.continuationSource = null;
+    state.continuationSource = state.creationMode === "continue" ? findContinuationSource(episode.sourceRef) : null;
+    applyContinuationBrief(episode.continuationBrief || {});
     state.activePlanBatchId = episode.input?.episodePlanRef?.batchId || null;
     state.selectedPlanOptionId = episode.input?.episodePlanRef?.planId || null;
     const episodePlanBatch = (project.planBatches || []).find((batch) => batch.id === state.activePlanBatchId);
@@ -1592,6 +1913,7 @@
     project.updatedAt = new Date().toISOString();
     persistProjects();
     renderPlanSuggestions();
+    renderCreationMode();
     renderScript(); renderStoryboard(); renderCreativePack(); renderProject(); renderAssets(); renderConsistency(); renderExample(); saveDraft(false);
     switchTab("script");
     const versionIndex = (episode.versions || []).findIndex((version) => version.id === episode.activeVersionId) + 1;
@@ -1946,40 +2268,28 @@
   function prepareTopicPlanning(index, mode = "new") {
     const topic = state.topics[index];
     if (!topic) throw new Error("没有找到这个选题，请先重新生成选题库。");
-    if (mode === "continue" && !state.script) throw new Error("还没有可续写的剧本，请先生成或恢复上一集。");
-    if (mode === "continue") {
-      state.continuationSource = { script: state.script, storyboard: [...state.storyboard], episodeId: state.currentEpisodeId };
-      setInputValue("episodeNumber", Math.max(Number(getInput().episodeNumber || 0) + 1, nextEpisodeNumber()));
-      state.currentEpisodeId = null;
-      state.reviewEpisodeId = null;
-    }
-    applyTopicToInputs(topic);
-    applyEpisodePlan({});
-    state.planOptions = [];
-    state.selectedPlanOptionId = null;
-    state.activePlanBatchId = null;
-    renderPlanSuggestions();
     if (mode === "new") {
-      state.currentEpisodeId = null;
-      state.reviewEpisodeId = null;
-      state.currentHistoryId = null;
-      state.script = null;
-      state.storyboard = [];
-      state.creativePack = null;
-      renderScript();
-      renderStoryboard();
-      renderCreativePack();
-      renderConsistency();
+      switchCreationMode("new");
+      clearTargetWorkflow();
+      applyTopicToInputs(topic);
     } else {
-      setInputValue(
-        "continueInstruction",
-        [
-          "沿着这个选题继续生成下一集，不要重写上一集。",
-          topicPrompt(topic),
-          "承接当前剧本结尾钩子，升级冲突，保留同一组核心角色。",
-        ].join("\n"),
-      );
+      const source = state.creationMode === "continue" ? state.continuationSource : currentOutputAsContinuationSource();
+      if (!source?.script) throw new Error("还没有可续写的剧本，请先生成或恢复上一集。");
+      if (state.creationMode !== "continue") switchCreationMode("continue", { source });
+      clearTargetWorkflow();
+      state.continuationSource = source;
+      setInputValue("episodeNumber", Number(source.ref.episodeNumber) + 1);
+      setInputValue("theme", topic.title);
+      setInputValue("continuationNewIdeas", topicPrompt(topic));
+      setInputValue("continueInstruction", `${readContinuationBrief().direction || "先兑现上一集钩子，再升级冲突。"}\n引入选题方向：${topic.title}`);
+      renderContinuationSource();
     }
+    applyEpisodePlan({});
+    renderPlanSuggestions();
+    renderScript();
+    renderStoryboard();
+    renderCreativePack();
+    renderConsistency();
     saveDraft(false);
     focusEpisodePlanning();
     setStatus(mode === "continue"
@@ -2322,7 +2632,8 @@
 
   function renderEmptyStudio() {
     const input = getInput();
-    $("#scriptTitle").textContent = "开始一集短剧";
+    $("#scriptEyebrow").textContent = state.creationMode === "continue" ? "续写目标剧本" : "本集剧本";
+    $("#scriptTitle").textContent = state.creationMode === "continue" ? "等待生成续写剧本" : "开始一集短剧";
     $("#scriptOutput").innerHTML = uiTemplates.emptyStudio(input);
   }
 
@@ -2334,6 +2645,7 @@
       renderRecastAvailability();
       return;
     }
+    $("#scriptEyebrow").textContent = state.creationMode === "continue" ? "续写目标剧本" : "本集剧本";
     $("#scriptTitle").textContent = script.title;
     $("#scriptOutput").innerHTML = uiTemplates.script(script);
     renderRecastAvailability();
@@ -2723,6 +3035,7 @@
       projectId: projectId || state.currentProjectId,
       projectName: projectName || currentProject()?.name || "未归档项目",
       episodeNumber: Number(episodeNumber || input.episodeNumber || 1),
+      sourceRef: mode === "continue" ? creationSession.normalizeSourceRef(state.continuationSource) : null,
       pinned: false,
     };
     state.history = [item, ...state.history].slice(0, maxHistoryItems);
@@ -2758,6 +3071,9 @@
       state.currentEpisodeId = null;
       state.reviewEpisodeId = null;
     }
+    state.creationSessions[state.creationMode] = captureCreationSession();
+    const archivedMode = archived?.version?.creationMode || item.mode;
+    state.creationMode = archivedMode === "continue" ? "continue" : "new";
     Object.entries(item.input || {}).forEach(([key, value]) => {
       if (key === "continueInstruction" && keepInstruction) return;
       setInputValue(key, value);
@@ -2770,12 +3086,15 @@
     state.creativePack = item.creativePack || null;
     state.scriptDoctor = archived?.version?.doctorResult || null;
     state.currentHistoryId = item.id || null;
-    state.continuationSource = null;
+    const sourceRef = archived?.version?.sourceRef || item.sourceRef;
+    state.continuationSource = state.creationMode === "continue" ? findContinuationSource(sourceRef) : null;
+    applyContinuationBrief(archived?.version?.continuationBrief || item.input?.continuationBrief || {});
     state.activePlanBatchId = item.input?.episodePlanRef?.batchId || null;
     state.selectedPlanOptionId = item.input?.episodePlanRef?.planId || null;
     const historyPlanBatch = (currentProject()?.planBatches || []).find((batch) => batch.id === state.activePlanBatchId);
     state.planOptions = historyPlanBatch?.plans?.map((option) => ({ ...option, plan: { ...option.plan } })) || [];
     renderPlanSuggestions();
+    renderCreationMode();
     renderProject();
     renderBible();
     renderAssets();
@@ -2791,10 +3110,6 @@
 
   async function continueHistoryItem(index) {
     restoreHistoryItem(index, true);
-    setInputValue(
-      "continueInstruction",
-      `基于已恢复的《${state.script?.title || "上一集"}》继续生成下一集，承接结尾钩子，保留核心角色关系，不要重写上一集。`,
-    );
     continueEpisode();
   }
 
@@ -3020,26 +3335,21 @@
   }
 
   async function runGeneration(mode = "new") {
+    mode = state.creationMode;
     const input = getInput();
     validateEpisodePlan(input);
     if (!state.beatSheetApproved || state.beatSheet.length !== 8) {
       throw new Error("请先生成并确认一版完整的剧情节拍表，再生成正式剧本。");
     }
     const continuationSource = state.continuationSource;
-    if (mode === "continue" && !continuationSource?.script && !state.script) {
-      throw new Error("还没有可续写的剧本，请先生成一集。");
+    if (mode === "continue" && !continuationSource?.script) {
+      throw new Error("请先在续写来源中选择一个有效的剧本版本。");
     }
     const operation = beginAiOperation(mode === "continue" ? "剧本续写" : "剧本生成");
     try {
       setStatus(mode === "continue" ? "AI 续写剧本中..." : "AI 生成剧本中...");
-      if (mode === "continue" && !continuationSource) {
-        const nextNumber = Math.max(Number(input.episodeNumber || 0) + 1, nextEpisodeNumber());
-        input.episodeNumber = nextNumber;
-        setInputValue("episodeNumber", nextNumber);
-        state.currentEpisodeId = null;
-      }
-      const previousScript = mode === "continue" ? continuationSource?.script || state.script : null;
-      const previousStoryboard = mode === "continue" ? continuationSource?.storyboard || state.storyboard : null;
+      const previousScript = mode === "continue" ? continuationSource.script : null;
+      const previousStoryboard = mode === "continue" ? continuationSource.storyboard : null;
       const initialResponse = await apiRequest("/api/script", {
         input: {
           ...generationContext(input, "script"),
@@ -3066,7 +3376,6 @@
         generated: { ...generated, creativePack: state.creativePack },
       });
       state.currentHistoryId = item.id;
-      state.continuationSource = null;
       upsertProjectEpisode({ mode, input, response, generated: { ...generated, creativePack: state.creativePack }, historyId: item.id });
       persistHistory();
       renderScript();
@@ -3119,33 +3428,16 @@
   }
 
   async function generateAll() {
-    await runGeneration(state.continuationSource ? "continue" : "new");
+    await runGeneration(state.creationMode);
   }
 
   function continueEpisode() {
     if (!state.script) throw new Error("请先生成或恢复上一集剧本。");
-    state.continuationSource = {
-      script: state.script,
-      storyboard: [...state.storyboard],
-      episodeId: state.currentEpisodeId,
-    };
-    const nextNumber = Math.max(Number(getInput().episodeNumber || 0) + 1, nextEpisodeNumber());
-    setInputValue("episodeNumber", nextNumber);
-    state.currentEpisodeId = null;
-    state.reviewEpisodeId = null;
-    applyEpisodePlan({});
-    state.planOptions = [];
-    state.selectedPlanOptionId = null;
-    state.activePlanBatchId = null;
-    state.beatSheet = [];
-    state.beatSheetApproved = false;
-    state.activeBeatSheetBatchId = null;
-    renderPlanSuggestions();
-    renderBeatSheet();
-    refreshCreationActions();
-    saveDraft(false);
+    const source = currentOutputAsContinuationSource();
+    if (!source) throw new Error("当前剧本尚未归档，无法建立稳定的续写来源。");
+    switchCreationMode("continue", { source });
     document.querySelector(".episode-plan-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
-    setStatus(`已准备第 ${nextNumber} 集，请先选择角色与梗、确定策划和节拍表，再生成下一集`);
+    setStatus(`已锁定第 ${source.ref.episodeNumber} 集 v${source.ref.versionNumber} 为来源，请先确定下一集策划和节拍表`);
   }
 
   function parseCsv(text) {
@@ -3217,6 +3509,7 @@
   }
 
   async function saveDraft(showStatus = true) {
+    state.creationSessions[state.creationMode] = captureCreationSession();
     const payload = {
       input: getInput(),
       competitorCsv: $("#competitorCsv").value,
@@ -3230,6 +3523,8 @@
       competitors: state.competitors,
       memeIdeas: state.memeIdeas,
       continuationSource: state.continuationSource,
+      creationMode: state.creationMode,
+      creationSessions: state.creationSessions,
       savedAt: new Date().toISOString(),
     };
     try {
@@ -3281,8 +3576,18 @@
       state.currentHistoryId = draft.currentHistoryId || null;
       const activeBatch = (currentProject()?.planBatches || []).find((batch) => batch.id === state.activePlanBatchId);
       state.planOptions = activeBatch?.plans?.map((option) => ({ ...option, plan: { ...option.plan } })) || [];
+      if (draft.creationSessions && typeof draft.creationSessions === "object") {
+        state.creationMode = creationSession.normalizeMode(draft.creationMode);
+        state.creationSessions = {
+          new: draft.creationSessions.new || null,
+          continue: draft.creationSessions.continue || null,
+        };
+        const activeSession = state.creationSessions[state.creationMode];
+        if (activeSession) applyCreationSession(activeSession);
+      }
       renderPlanSuggestions();
       renderMemeLab();
+      renderCreationMode();
       setStatus("已恢复草稿");
     } catch (error) {
       // A malformed legacy draft is ignored; valid project archives remain intact.
@@ -3427,6 +3732,21 @@
   }
 
   function bindEvents() {
+    $$('[data-creation-mode]').forEach((button) => button.addEventListener("click", () => {
+      try { switchCreationMode(button.dataset.creationMode); } catch (error) { reportError("切换创作方式", error); }
+    }));
+    $("#continuationSourceSelect").addEventListener("change", (event) => {
+      try {
+        const source = continuationSourceCatalog().find((item) => continuationSourceKey(item.ref) === event.target.value);
+        if (source && setContinuationSource(source)) saveDraft(false);
+      } catch (error) { reportError("更换续写来源", error); }
+    });
+    ["continuationHook", "continuationOpenQuestions", "continuationCharacterState", "continuationConstraints", "continuationFacts", "continueInstruction", "continuationNewIdeas"].forEach((id) => {
+      document.getElementById(id)?.addEventListener("input", () => {
+        state.continuationBrief = readContinuationBrief();
+        markBeatSheetStale();
+      });
+    });
     document.addEventListener("click", (event) => {
       const modelButton = event.target.closest("[data-ai-model-value]");
       if (modelButton) setAiModel(modelButton.dataset.aiModelScope || "script", modelButton.dataset.aiModelValue);
@@ -3880,7 +4200,7 @@
   }
 
   async function init() {
-    if (!window.RocoStudio || !window.RocoWorkflowCore || !window.RocoProjectDomain || !window.RocoEpisodePlanner || !window.RocoUiTemplates || !window.RocoApiClient || !window.RocoDataStore || !window.RocoArchiveSync || !window.RocoAppState || !window.RocoAiOperation || !window.RocoGenerationClient) {
+    if (!window.RocoStudio || !window.RocoWorkflowCore || !window.RocoProjectDomain || !window.RocoEpisodePlanner || !window.RocoUiTemplates || !window.RocoApiClient || !window.RocoDataStore || !window.RocoArchiveSync || !window.RocoAppState || !window.RocoCreationSession || !window.RocoAiOperation || !window.RocoGenerationClient) {
       setStatus("生成器未加载，请用本地服务打开或刷新缓存", true);
       return;
     }
@@ -3911,6 +4231,7 @@
       renderConsistency();
       renderExample();
       renderCloudArchive();
+      renderCreationMode();
       checkAiStatus();
       if (localStorage.getItem(accessCodeKey)) refreshCloudArchive(false).catch(() => {});
     } catch (error) {

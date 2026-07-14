@@ -15,6 +15,44 @@ const generationClientModule = require("../generation-client.js");
 const projectDomain = require("../project-domain.js");
 const episodePlanner = require("../episode-planner.js");
 const uiTemplates = require("../ui-templates.js");
+const creationSession = require("../creation-session.js");
+
+test("continuation session derives an editable carryover card and stable source reference", () => {
+  assert.equal(creationSession.normalizeSourceRef(null), null);
+  const source = {
+    ref: { projectId: "p1", episodeId: "e1", versionId: "v2", episodeNumber: 1, versionNumber: 2, title: "裂开的徽章" },
+    script: {
+      hooks: ["徽章里传出第二个阿洛的声音"],
+      characters: [{ name: "阿洛", description: "嘴硬但决定留下" }, { name: "迪莫", description: "能力进入冷却" }],
+    },
+  };
+  const brief = creationSession.deriveBrief(source, { openQuestions: ["第二个声音是谁"], abilityStates: ["迪莫三分钟内不能再次传送"], nextObligations: ["下一集开头检查徽章"] });
+  assert.equal(creationSession.normalizeSourceRef(source).versionId, "v2");
+  assert.match(brief.requiredHook, /第二个阿洛/);
+  assert.match(brief.characterState, /迪莫/);
+  assert.match(brief.constraints, /不能再次传送/);
+  assert.equal(creationSession.continuationContext(source, brief).sourceScript, source.script);
+});
+
+test("continuation prompts share the selected source and carryover contract", () => {
+  const input = {
+    creationMode: "continue",
+    theme: "徽章回声",
+    episodeNumber: 2,
+    duration: 60,
+    continuationContext: {
+      sourceRef: { episodeId: "e1", versionId: "v2", episodeNumber: 1, versionNumber: 2 },
+      brief: { requiredHook: "徽章里传出第二个阿洛的声音", mustPreserve: "迪莫仍在冷却" },
+      sourceScript: { title: "裂开的徽章", hooks: ["徽章里传出第二个阿洛的声音"] },
+      sourceStoryboard: [],
+    },
+  };
+  for (const prompt of [__test.plansPrompt(input), __test.beatSheetPrompt(input), __test.scriptPrompt(input), __test.storyboardPrompt({ ...input, script: { title: "续集", hooks: ["新钩子"] } }), __test.continuityPrompt({ ...input, script: { title: "续集" } })]) {
+    assert.match(prompt, /续写承接卡/);
+    assert.match(prompt, /徽章里传出第二个阿洛的声音/);
+    assert.match(prompt, /第一节拍必须/);
+  }
+});
 
 test("storyboard normalizer retains production fields", () => {
   const result = __test.normalizeStoryboard({
@@ -648,6 +686,27 @@ test("project domain appends versions without overwriting an episode", () => {
   assert.equal(second.episode.script.title, "第一版");
 });
 
+test("project schema v6 preserves continuation lineage and migrates v5 projects", () => {
+  const migrated = projectDomain.migrateProjectRecord({
+    schemaVersion: 5,
+    id: "legacy-v5",
+    name: "旧项目",
+    planBatches: [{ id: "plan-1" }],
+    episodes: [{ id: "episode-1", episodeNumber: 1, versions: [{ id: "version-1", script: { title: "第一集" } }], activeVersionId: "version-1" }],
+  });
+  assert.equal(migrated.schemaVersion, 6);
+  assert.equal(migrated.episodes[0].versions[0].creationMode, "new");
+  const sourceRef = { projectId: migrated.id, episodeId: migrated.episodes[0].id, versionId: migrated.episodes[0].versions[0].id, episodeNumber: 1, versionNumber: 1, title: "第一集" };
+  const { version } = projectDomain.upsertEpisodeVersion(migrated, {
+    mode: "continue",
+    input: { episodeNumber: 2 },
+    versionSnapshot: { script: { title: "第二集" }, creationMode: "continue", sourceRef, continuationBrief: { requiredHook: "门后是谁" } },
+  });
+  assert.equal(version.creationMode, "continue");
+  assert.equal(version.sourceRef.versionId, sourceRef.versionId);
+  assert.equal(version.continuationBrief.requiredHook, "门后是谁");
+});
+
 test("episode versions preserve a complete script doctor result", () => {
   const project = projectDomain.createProjectRecord("医生留档");
   const doctorResult = { report: { score: 80 }, revisedScript: { title: "修订稿" }, createdAt: "2026-07-14" };
@@ -751,4 +810,11 @@ test("page loads domain and template modules before app.js", async () => {
   const generationIndex = html.indexOf("generation-client.js");
   const appIndex = html.indexOf("app.js");
   assert.ok(domainIndex > 0 && plannerIndex > domainIndex && templatesIndex > plannerIndex && archiveIndex > templatesIndex && stateIndex > archiveIndex && operationIndex > stateIndex && generationIndex > operationIndex && appIndex > generationIndex);
+});
+
+test("public build includes the continuation session module", async () => {
+  const source = await readFile(new URL("../scripts/build-public.mjs", import.meta.url), "utf8");
+  const html = await readFile(new URL("../index.html", import.meta.url), "utf8");
+  assert.match(source, /"creation-session\.js"/);
+  assert.ok(html.indexOf("creation-session.js") < html.indexOf("app.js?v="));
 });

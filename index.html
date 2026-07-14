@@ -29,7 +29,28 @@
           <p class="eyebrow">本集档案</p>
           <h2>本集创作设定</h2>
           <p>先定世界、人物与冲突，再开始生成。</p>
+          <div class="creation-mode-switch" role="tablist" aria-label="创作方式">
+            <button class="is-active" type="button" role="tab" aria-selected="true" data-creation-mode="new">新建本集</button>
+            <button type="button" role="tab" aria-selected="false" data-creation-mode="continue">续写下一集</button>
+          </div>
         </div>
+        <section class="panel-section continuation-panel" id="continuationPanel" hidden>
+          <div class="section-title"><div><p class="eyebrow">续写来源</p><h2>承接哪一版</h2></div></div>
+          <label>来源剧本版本<select id="continuationSourceSelect"><option value="">当前项目暂无可续写剧本</option></select></label>
+          <article class="continuation-source-card" id="continuationSourceCard">
+            <p class="helper">先在当前项目生成或归档一版剧本，再选择续写来源。</p>
+          </article>
+          <details class="continuation-brief" open>
+            <summary>续写承接卡 <span>可编辑，不额外消耗 AI</span></summary>
+            <label>必须承接的结尾钩子<textarea id="continuationHook" rows="2"></textarea></label>
+            <label>尚未解决的问题<textarea id="continuationOpenQuestions" rows="2"></textarea></label>
+            <label>人物与关系现状<textarea id="continuationCharacterState" rows="3"></textarea></label>
+            <label>能力、道具与代价状态<textarea id="continuationConstraints" rows="3"></textarea></label>
+            <label>必须保留的事实<textarea id="continuationFacts" rows="3"></textarea></label>
+            <label>本集推进方向<textarea id="continueInstruction" rows="3" placeholder="先兑现上一集钩子，再说明这一集要把冲突推向哪里。"></textarea></label>
+            <label>可选的新创意<textarea id="continuationNewIdeas" rows="3" placeholder="可以加入新选题、角色、梗或场景，但不能覆盖上一集已经发生的事实。"></textarea></label>
+          </details>
+        </section>
         <section class="panel-section brief-panel">
           <div class="section-title">
             <h2>创作输入</h2>
@@ -148,10 +169,6 @@
             <div class="meme-lab-results" id="memeLabResults" aria-live="polite"></div>
           </div>
           <select id="aiModel" hidden><option value="deepseek-v4-flash">Flash</option><option value="deepseek-v4-pro">Pro</option></select>
-          <label>
-            续写要求
-            <textarea id="continueInstruction" rows="3" placeholder="例如：接着上一集，揭晓暗影博士为什么让喵喵失忆；情绪更催泪，结尾留下第三集钩子。"></textarea>
-          </label>
         </section>
 
         <section class="panel-section compact creative-mix-panel">
@@ -537,7 +554,7 @@
           <article class="tab-panel active" id="tab-script">
             <div class="result-header">
               <div>
-                <p class="eyebrow">本集剧本</p>
+                <p class="eyebrow" id="scriptEyebrow">本集剧本</p>
                 <h2 id="scriptTitle">等待生成</h2>
               </div>
               <div class="header-actions">
@@ -689,9 +706,10 @@
     <script src="./api-client.js?v=20260714-storyboard-reader"></script>
     <script src="./data-store.js?v=20260714-storyboard-reader"></script>
     <script src="./archive-sync.js?v=20260714-storyboard-reader"></script>
-    <script src="./app-state.js?v=20260714-storyboard-reader"></script>
+    <script src="./app-state.js?v=20260714-continuation-workspace"></script>
+    <script src="./creation-session.js?v=20260714-continuation-workspace"></script>
     <script src="./ai-operation.js?v=20260714-storyboard-reader"></script>
     <script src="./generation-client.js?v=20260714-storyboard-reader"></script>
-    <script src="./app.js?v=20260714-storyboard-reader"></script>
+    <script src="./app.js?v=20260714-continuation-workspace"></script>
   </body>
 </html>

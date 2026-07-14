@@ -150,6 +150,20 @@ button:disabled { cursor: not-allowed; opacity: 0.42; transform: none !important
 .control-panel-head .eyebrow { margin-bottom: 7px; }
 .control-panel-head h2 { color: var(--ink); font-size: 18px; font-weight: 900; }
 .control-panel-head p:last-child { margin: 7px 0 0; color: var(--ink-soft); font-size: 13px; }
+.creation-mode-switch { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; margin-top: 16px; padding: 4px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: rgba(5, 9, 8, 0.5); }
+.creation-mode-switch button { min-height: 36px; border: 0; border-radius: calc(var(--radius-sm) - 2px); color: var(--ink-soft); background: transparent; font: inherit; font-size: 12px; font-weight: 850; cursor: pointer; }
+.creation-mode-switch button.is-active { color: #111712; background: var(--signal); }
+.continuation-panel { border-bottom-color: rgba(199, 226, 118, 0.35); background: rgba(199, 226, 118, 0.035); }
+.continuation-source-card { margin-top: 10px; padding: 13px; border: 1px solid var(--line-strong); border-left: 3px solid var(--signal); border-radius: var(--radius-sm); background: rgba(7, 12, 10, 0.55); }
+.continuation-source-card h3 { margin: 4px 0 7px; font-size: 14px; }
+.continuation-source-card p { margin: 0; color: var(--ink-soft); font-size: 12px; line-height: 1.6; }
+.continuation-source-meta { display: flex; flex-wrap: wrap; gap: 6px; color: var(--ink-faint); font-size: 10px; font-weight: 800; }
+.continuation-source-hook { margin-top: 8px !important; padding-top: 8px; border-top: 1px solid var(--line); color: var(--ink) !important; }
+.continuation-brief { margin-top: 12px; }
+.continuation-brief summary { cursor: pointer; color: var(--ink); font-size: 12px; font-weight: 850; }
+.continuation-brief summary span { margin-left: 6px; color: var(--ink-faint); font-size: 10px; font-weight: 650; }
+.continuation-brief[open] summary { margin-bottom: 10px; }
+.history-lineage { margin: 5px 0 !important; color: var(--signal) !important; font-size: 11px !important; font-weight: 800; }
 
 .panel-section { padding: 18px 20px 20px; border-bottom: 1px solid var(--line); }
 .panel-section:last-child { border-bottom: 0; }

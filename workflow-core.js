@@ -106,6 +106,7 @@
         script: archived.version.script || archived.episode.script || null,
         storyboard: archived.version.storyboard || [],
         creativePack: archived.version.creativePack || null,
+        sourceRef: archived.version.sourceRef || item.sourceRef || null,
       };
     });
   }

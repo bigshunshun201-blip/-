@@ -3,7 +3,7 @@
   if (typeof module === "object" && module.exports) module.exports = api;
   if (root) root.RocoProjectDomain = api;
 })(typeof globalThis !== "undefined" ? globalThis : this, function () {
-  const PROJECT_SCHEMA_VERSION = 5;
+  const PROJECT_SCHEMA_VERSION = 6;
 
   function emptySeriesLedger() {
     return {
@@ -87,6 +87,9 @@
       source: snapshot.source || "",
       model: snapshot.model || "",
       consistency: snapshot.consistency || null,
+      creationMode: snapshot.creationMode === "continue" ? "continue" : "new",
+      sourceRef: snapshot.sourceRef && typeof snapshot.sourceRef === "object" ? { ...snapshot.sourceRef } : null,
+      continuationBrief: snapshot.continuationBrief && typeof snapshot.continuationBrief === "object" ? { ...snapshot.continuationBrief } : null,
       doctorResult,
       doctorReport: doctorResult?.report || snapshot.doctorReport || null,
     };
@@ -113,6 +116,9 @@
     episode.source = version.source || "";
     episode.model = version.model || "";
     episode.consistency = version.consistency || null;
+    episode.creationMode = version.creationMode || "new";
+    episode.sourceRef = version.sourceRef ? { ...version.sourceRef } : null;
+    episode.continuationBrief = version.continuationBrief ? { ...version.continuationBrief } : null;
     episode.doctorResult = version.doctorResult || null;
     episode.doctorReport = version.doctorReport || null;
     return episode;
@@ -134,13 +140,13 @@
   }
 
   function rekeyImportedProject(project) {
-    project.id = newId("project");
+    const projectId = newId("project");
+    const episodeIdMap = new Map((project.episodes || []).map((episode) => [episode.id, newId("episode")]));
+    const versionIdMap = new Map((project.episodes || []).flatMap((episode) => (episode.versions || []).map((version) => [version.id, newId("version")])));
+    project.id = projectId;
     project.episodes = (project.episodes || []).map((episode) => {
-      const versionIdMap = new Map();
       const versions = (episode.versions || []).map((sourceVersion) => {
-        const oldVersionId = sourceVersion.id;
-        const versionId = newId("version");
-        versionIdMap.set(oldVersionId, versionId);
+        const versionId = versionIdMap.get(sourceVersion.id) || newId("version");
         const storyboardIdMap = new Map();
         const storyboardVersions = (sourceVersion.storyboardVersions || []).map((sourceStoryboard) => {
           const storyboard = {
@@ -155,6 +161,12 @@
           ...sourceVersion,
           id: versionId,
           historyId: null,
+          sourceRef: sourceVersion.sourceRef ? {
+            ...sourceVersion.sourceRef,
+            projectId,
+            episodeId: episodeIdMap.get(sourceVersion.sourceRef.episodeId) || sourceVersion.sourceRef.episodeId,
+            versionId: versionIdMap.get(sourceVersion.sourceRef.versionId) || sourceVersion.sourceRef.versionId,
+          } : null,
           storyboardVersions,
           activeStoryboardVersionId: storyboardIdMap.get(sourceVersion.activeStoryboardVersionId)
             || storyboardVersions.at(-1)?.id
@@ -163,7 +175,7 @@
       });
       const normalized = {
         ...episode,
-        id: newId("episode"),
+        id: episodeIdMap.get(episode.id) || newId("episode"),
         historyId: null,
         versions,
         activeVersionId: versionIdMap.get(episode.activeVersionId) || versions.at(-1)?.id || null,
@@ -245,6 +257,22 @@
           : episode.versions,
       }));
       project.schemaVersion = 5;
+    }
+
+    if (project.schemaVersion < 6) {
+      project.planBatches = project.planBatches.map((batch) => ({ ...batch, creationMode: batch.creationMode === "continue" ? "continue" : "new", sourceRef: batch.sourceRef || null }));
+      project.creativeMixBatches = project.creativeMixBatches.map((batch) => ({ ...batch, creationMode: batch.creationMode === "continue" ? "continue" : "new", sourceRef: batch.sourceRef || null }));
+      project.beatSheetBatches = project.beatSheetBatches.map((batch) => ({ ...batch, creationMode: batch.creationMode === "continue" ? "continue" : "new", sourceRef: batch.sourceRef || null }));
+      project.episodes = project.episodes.map((episode) => ({
+        ...episode,
+        versions: Array.isArray(episode.versions) ? episode.versions.map((version) => ({
+          ...version,
+          creationMode: version.creationMode === "continue" ? "continue" : "new",
+          sourceRef: version.sourceRef || null,
+          continuationBrief: version.continuationBrief || null,
+        })) : episode.versions,
+      }));
+      project.schemaVersion = 6;
     }
 
     project.schemaVersion = PROJECT_SCHEMA_VERSION;

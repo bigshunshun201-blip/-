@@ -13,6 +13,7 @@ const files = [
   "data-store.js",
   "archive-sync.js",
   "app-state.js",
+  "creation-session.js",
   "ai-operation.js",
   "generation-client.js",
 ];
