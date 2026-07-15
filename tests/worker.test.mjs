@@ -17,8 +17,23 @@ const episodePlanner = require("../episode-planner.js");
 const uiTemplates = require("../ui-templates.js");
 const creationSession = require("../creation-session.js");
 const episodeBible = require("../episode-bible.js");
+const scriptRevision = require("../script-revision.js");
 
 const completeBible = Object.fromEntries(episodeBible.FIELDS.map((field) => [field, `${field}设定`]));
+
+function editableScript() {
+  return {
+    title: "月牙镇倒着走的路牌",
+    synopsis: "阿洛和迪莫发现月牙镇路牌会故意把说谎的人引向封锁区。两人必须在巡逻队到达前追回地图核心，却发现真正改写方向的是阿洛一直隐瞒的旧徽章，结尾坐标指向聆风塔地下入口。",
+    characters: [{ name: "阿洛", description: "嘴硬但会保护搭档" }, { name: "迪莫", description: "谨慎并主动追问真相" }],
+    structure: Array.from({ length: 5 }, (_, index) => ({ beat: `结构${index + 1}`, beatIds: index < 4 ? [`BEAT-0${index + 1}`] : ["BEAT-05", "BEAT-06", "BEAT-07", "BEAT-08"], content: `具体推进${index + 1}` })),
+    dialogue: Array.from({ length: 8 }, (_, index) => ({ id: `LINE-${String(index + 1).padStart(2, "0")}`, beatIds: [`BEAT-0${index + 1}`], role: index % 2 ? "迪莫" : "阿洛", line: `台词${index + 1}`, intention: "推动行动", subtext: "有所隐瞒" })),
+    rhythm: ["惊讶 -> 紧张 -> 悬疑"], reversals: ["旧徽章才是方向源头"], innovationPoints: ["路牌根据谎言改变方向"],
+    comedyBeats: [{ setup: "阿洛嘴硬", payoff: "路牌当场转向", visualAction: "所有箭头同时指向阿洛" }],
+    visualHighlights: [{ moment: "路牌齐转", verticalComposition: "前景箭头中景人物后景封锁线", effect: "快速转场" }, { moment: "地下入口亮起", verticalComposition: "近景徽章叠加远景塔影", effect: "冷光" }],
+    assetIntegration: { characters: [], memes: [] }, canonDeltas: [], hooks: ["地下入口里有人叫出阿洛旧名"], tags: ["洛克王国世界"],
+  };
+}
 
 test("episode bible fingerprints relevant creation inputs and absorbs selected durable facts", () => {
   const input = {
@@ -388,12 +403,12 @@ test("beat sheet normalizer requires eight causal production beats", () => {
 
 test("UI contains the production workflow controls", async () => {
   const html = await readFile(new URL("../index.html", import.meta.url), "utf8");
-  for (const id of ["clipMode", "creativeMixBrief", "characterPicker", "memePicker", "suggestCreativeMixBtn", "creativeMixHistoryList", "planOpeningHook", "planProtagonistGoal", "planStakes", "planForcedChoice", "planRelationshipShift", "autoPlanBtn", "suggestPlansBtn", "planSuggestions", "planHistoryList", "generateBeatSheetBtn", "beatSheetList", "approveBeatSheetBtn", "beatSheetHistoryList", "planReadyState", "memeLabBtn", "memeInspireBtn", "memeLabResults", "memeLibrary", "addMemeBtn", "generateBibleBtn", "applyBibleTemplateBtn", "generateCharacterBtn", "saveCharacterBtn", "characterLibrary", "storyboardHistory", "checkContinuityBtn", "assetLibrary", "reviewCommentThemes", "exportProjectBtn", "updateSeriesLedgerBtn", "runScriptDoctorBtn", "addCanonSourceBtn", "characterSpeechPattern", "backupCloudNowBtn", "cloudArchiveVersions", "copyWorkspaceKeyBtn", "connectWorkspaceKeyBtn", "openRecastBtn", "recastPanel", "applyRecastBtn"]) {
+  for (const id of ["clipMode", "creativeMixBrief", "characterPicker", "memePicker", "suggestCreativeMixBtn", "creativeMixHistoryList", "planOpeningHook", "planProtagonistGoal", "planStakes", "planForcedChoice", "planRelationshipShift", "autoPlanBtn", "suggestPlansBtn", "planSuggestions", "planHistoryList", "generateBeatSheetBtn", "beatSheetList", "approveBeatSheetBtn", "beatSheetHistoryList", "planReadyState", "memeLabBtn", "memeInspireBtn", "memeLabResults", "memeLibrary", "addMemeBtn", "generateBibleBtn", "applyBibleTemplateBtn", "generateCharacterBtn", "saveCharacterBtn", "characterLibrary", "storyboardHistory", "checkContinuityBtn", "assetLibrary", "reviewCommentThemes", "exportProjectBtn", "updateSeriesLedgerBtn", "runScriptDoctorBtn", "addCanonSourceBtn", "characterSpeechPattern", "backupCloudNowBtn", "cloudArchiveVersions", "copyWorkspaceKeyBtn", "connectWorkspaceKeyBtn", "openRecastBtn", "recastPanel", "applyRecastBtn", "scriptEditorOutput", "saveScriptVersionBtn", "discardScriptDraftBtn", "approveScriptVersionBtn", "scriptVersionList", "scriptVersionDiff", "scriptCanonReviewPanel"]) {
     assert.match(html, new RegExp(`id="${id}"`));
   }
   assert.match(html, /open\.douyin\.com\/platform\/resource\/docs\/openapi\/data-open-service\/tops-data\/hot-video-list/);
   assert.match(html, /data-ai-model-switch/);
-  for (const scope of ["meme", "mix", "plan", "beat", "script", "storyboard", "bible", "character", "continuity", "topics", "ledger", "doctor", "recast"]) {
+  for (const scope of ["meme", "mix", "plan", "beat", "script", "scriptRewrite", "scriptCanonReview", "storyboard", "bible", "character", "continuity", "topics", "ledger", "doctor", "recast"]) {
     assert.match(html, new RegExp(`data-ai-model-scope="${scope}"`));
   }
 });
@@ -662,7 +677,9 @@ test("app state initializes independent model preferences", () => {
   assert.equal(state.aiModels.script, "deepseek-v4-flash");
   state.aiModels.episodeBible = "deepseek-v4-pro";
   assert.equal(state.aiModels.bible, "deepseek-v4-flash");
-  assert.equal(appStateModule.aiModelScopes.length, 14);
+  assert.equal(appStateModule.aiModelScopes.length, 16);
+  state.aiModels.scriptRewrite = "deepseek-v4-pro";
+  assert.equal(state.aiModels.scriptCanonReview, "deepseek-v4-flash");
   assert.equal(state.episodeBible.status, "unprepared");
 });
 
@@ -715,7 +732,57 @@ test("project domain appends versions without overwriting an episode", () => {
   assert.equal(second.episode.script.title, "第一版");
 });
 
-test("project schema v7 preserves continuation lineage and does not fabricate legacy bible snapshots", () => {
+test("script revision keeps a working draft separate and compares structured fields", () => {
+  const original = editableScript();
+  const session = scriptRevision.begin(original, "version-1");
+  session.workingScript.structure[1].content = "迪莫把路牌拔起，地下却传来倒计时";
+  session.dirty = !scriptRevision.same(original, session.workingScript);
+  assert.equal(session.dirty, true);
+  const groups = scriptRevision.structuredDiff(original, session.workingScript);
+  assert.deepEqual(groups.map((group) => group.field), ["structure"]);
+  assert.deepEqual(scriptRevision.rewriteViolations(original, session.workingScript, ["BEAT-02"]), []);
+  session.workingScript.title = "越界改标题";
+  assert.deepEqual(scriptRevision.rewriteViolations(original, session.workingScript, ["BEAT-02"]), ["title"]);
+});
+
+test("episode versions require an approved matching fingerprint before storyboard generation", () => {
+  const project = projectDomain.createProjectRecord("批准测试");
+  const { episode, version } = projectDomain.upsertEpisodeVersion(project, {
+    mode: "new", input: { episodeNumber: 1 },
+    versionSnapshot: { script: editableScript(), revisionSource: "generated" },
+  });
+  assert.equal(projectDomain.versionCanGenerateStoryboard(version), false);
+  const approved = projectDomain.approveEpisodeVersion(episode, version.id, { status: "passed", checkedAt: "2026-07-15", summary: "通过" });
+  assert.equal(projectDomain.versionCanGenerateStoryboard(approved), true);
+  approved.script.title = "批准后被篡改";
+  assert.equal(projectDomain.versionCanGenerateStoryboard(approved), false);
+});
+
+test("worker local rewrite rejects changes outside the selected beat", () => {
+  const original = editableScript();
+  const input = { script: original, rewriteTarget: { beatIds: ["BEAT-02"], instruction: "增强冲突" }, beatSheet: Array.from({ length: 8 }, (_, index) => ({ id: `BEAT-0${index + 1}` })) };
+  const candidate = structuredClone(original);
+  candidate.structure[1].content = "迪莫拔起路牌，地下倒计时立刻启动";
+  candidate.dialogue[1].line = "别解释，地底下在数我们的名字。";
+  const result = __test.normalizeRewriteScript({ script: candidate, changeSummary: "强化第二拍动作和威胁", affectedBeatIds: ["BEAT-02"] }, input);
+  assert.match(result.script.structure[1].content, /倒计时/);
+  const escaped = structuredClone(candidate);
+  escaped.hooks = ["偷偷更换结尾"];
+  assert.throws(() => __test.normalizeRewriteScript({ script: escaped, changeSummary: "越界" }, input), /锁定区域/);
+});
+
+test("canon review normalizer keeps actionable issues and bible suggestions", () => {
+  const reviewed = __test.normalizeScriptCanonReview({ review: {
+    status: "issues", summary: "能力代价没有兑现",
+    issues: [{ category: "能力边界", severity: "高", evidence: "迪莫连续释放三次技能", rule: "每次后需要冷却", recommendation: "让第三次失败并由阿洛补位", beatIds: ["BEAT-06"] }],
+    bibleDeltas: [{ field: "relations", fact: "阿洛开始主动补位", evidence: "第六拍挡在迪莫前", risk: "后续需延续互助关系" }],
+  } });
+  assert.equal(reviewed.review.status, "issues");
+  assert.equal(reviewed.review.issues[0].severity, "高");
+  assert.equal(reviewed.review.bibleDeltas[0].field, "relations");
+});
+
+test("project schema v8 preserves continuation lineage and does not fabricate legacy bible snapshots", () => {
   const migrated = projectDomain.migrateProjectRecord({
     schemaVersion: 6,
     id: "legacy-v6",
@@ -723,11 +790,13 @@ test("project schema v7 preserves continuation lineage and does not fabricate le
     planBatches: [{ id: "plan-1" }],
     episodes: [{ id: "episode-1", episodeNumber: 1, versions: [{ id: "version-1", script: { title: "第一集" } }], activeVersionId: "version-1" }],
   });
-  assert.equal(migrated.schemaVersion, 7);
+  assert.equal(migrated.schemaVersion, 8);
   assert.equal(migrated.episodes[0].versions[0].creationMode, "new");
   assert.equal(migrated.episodes[0].versions[0].generationBibleSnapshot, null);
   assert.equal(migrated.episodes[0].versions[0].episodeBibleSnapshot, null);
   assert.equal(migrated.episodes[0].versions[0].legacyBibleSnapshotMissing, true);
+  assert.equal(migrated.episodes[0].versions[0].approvalStatus, "approved");
+  assert.equal(migrated.episodes[0].versions[0].approvalReview.status, "legacy");
   const sourceRef = { projectId: migrated.id, episodeId: migrated.episodes[0].id, versionId: migrated.episodes[0].versions[0].id, episodeNumber: 1, versionNumber: 1, title: "第一集" };
   const { version } = projectDomain.upsertEpisodeVersion(migrated, {
     mode: "continue",
@@ -861,11 +930,18 @@ test("UI templates escape model content and keep production controls", () => {
   assert.match(storyboardHtml, /生成 <strong>8秒<\/strong>/);
   assert.match(storyboardHtml, /data-storyboard-jump="0"/);
   assert.match(storyboardHtml, /data-storyboard-detail="0"/);
+
+  const editorHtml = uiTemplates.scriptEditor(editableScript(), { lockedBeatIds: ["BEAT-01"] });
+  assert.match(editorHtml, /data-script-field="title"/);
+  assert.match(editorHtml, /data-rewrite-beats="BEAT-02"/);
+  assert.match(editorHtml, /data-beat-lock="BEAT-01" checked/);
+  assert.match(uiTemplates.versionDiff(scriptRevision.structuredDiff(editableScript(), { ...editableScript(), title: "新标题" })), /标题/);
 });
 
 test("page loads domain and template modules before app.js", async () => {
   const html = await readFile(new URL("../index.html", import.meta.url), "utf8");
   const domainIndex = html.indexOf("project-domain.js");
+  const revisionIndex = html.indexOf("script-revision.js");
   const plannerIndex = html.indexOf("episode-planner.js");
   const templatesIndex = html.indexOf("ui-templates.js");
   const archiveIndex = html.indexOf("archive-sync.js");
@@ -874,7 +950,7 @@ test("page loads domain and template modules before app.js", async () => {
   const operationIndex = html.indexOf("ai-operation.js");
   const generationIndex = html.indexOf("generation-client.js");
   const appIndex = html.indexOf("app.js");
-  assert.ok(domainIndex > 0 && plannerIndex > domainIndex && templatesIndex > plannerIndex && archiveIndex > templatesIndex && episodeBibleIndex > archiveIndex && stateIndex > episodeBibleIndex && operationIndex > stateIndex && generationIndex > operationIndex && appIndex > generationIndex);
+  assert.ok(revisionIndex > 0 && domainIndex > revisionIndex && plannerIndex > domainIndex && templatesIndex > plannerIndex && archiveIndex > templatesIndex && episodeBibleIndex > archiveIndex && stateIndex > episodeBibleIndex && operationIndex > stateIndex && generationIndex > operationIndex && appIndex > generationIndex);
 });
 
 test("public build includes the continuation session module", async () => {
@@ -882,5 +958,6 @@ test("public build includes the continuation session module", async () => {
   const html = await readFile(new URL("../index.html", import.meta.url), "utf8");
   assert.match(source, /"creation-session\.js"/);
   assert.match(source, /"episode-bible\.js"/);
+  assert.match(source, /"script-revision\.js"/);
   assert.ok(html.indexOf("creation-session.js") < html.indexOf("app.js?v="));
 });

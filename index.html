@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>洛克王国短剧创作工作台</title>
-    <link rel="stylesheet" href="./styles.css?v=20260714-storyboard-reader" />
+    <link rel="stylesheet" href="./styles.css?v=20260715-script-refinement" />
   </head>
   <body>
     <a class="skip-link" href="#workspace">跳到创作工作区</a>
@@ -592,6 +592,7 @@
                 <h2 id="scriptTitle">等待生成</h2>
               </div>
               <div class="header-actions">
+                <span class="script-version-status" id="scriptVersionStatus">未生成</span>
                 <button class="small-action" id="openRecastBtn" type="button">批量智能换角</button>
                 <button class="small-action" data-copy="scriptOutput">复制剧本</button>
               </div>
@@ -607,7 +608,55 @@
                 <button class="secondary-action" id="applyRecastBtn" type="button">AI 换角并保存新版本</button>
               </div>
             </section>
-            <div class="script-output" id="scriptOutput"></div>
+            <div class="script-workspace-switch" role="tablist" aria-label="剧本工作区">
+              <button class="is-active" type="button" role="tab" aria-selected="true" data-script-view="read">阅读</button>
+              <button type="button" role="tab" aria-selected="false" data-script-view="edit">精修</button>
+              <button type="button" role="tab" aria-selected="false" data-script-view="versions">版本</button>
+            </div>
+            <section class="script-view-pane is-active" data-script-pane="read">
+              <div class="script-output" id="scriptOutput"></div>
+            </section>
+            <section class="script-view-pane" data-script-pane="edit" hidden>
+              <div class="script-editor-toolbar">
+                <div>
+                  <p class="eyebrow">结构化工作稿</p>
+                  <strong id="scriptDraftState">尚未建立工作稿</strong>
+                </div>
+                <label class="revision-note-field">版本说明<input id="scriptRevisionNote" placeholder="例如：加强第三拍冲突和笑点回扣" /></label>
+                <div class="script-editor-actions">
+                  <button class="ghost-action compact-action" id="discardScriptDraftBtn" type="button">放弃工作稿</button>
+                  <button class="small-action" id="saveScriptVersionBtn" type="button">保存为新版本</button>
+                  <button class="primary-action compact-action" id="approveScriptVersionBtn" type="button">复核并批准本版</button>
+                </div>
+              </div>
+              <div class="script-editor-models">
+                <div class="ai-model-line"><span>局部改写</span><div data-ai-model-switch data-ai-model-scope="scriptRewrite" aria-label="剧本局部改写模型"></div></div>
+                <div class="ai-model-line"><span>圣经复核</span><div data-ai-model-switch data-ai-model-scope="scriptCanonReview" aria-label="剧本圣经复核模型"></div></div>
+              </div>
+              <div class="script-editor-output" id="scriptEditorOutput"></div>
+              <section class="rewrite-candidate-panel" id="rewriteCandidatePanel" hidden>
+                <div class="candidate-head"><div><p class="eyebrow">AI 改写候选</p><h3 id="rewriteCandidateTitle">等待审阅</h3></div><span id="rewriteCandidateMeta"></span></div>
+                <div class="version-diff" id="rewriteCandidateDiff"></div>
+                <div class="candidate-actions"><button class="ghost-action" id="discardRewriteCandidateBtn" type="button">放弃候选</button><button class="secondary-action" id="adoptRewriteCandidateBtn" type="button">采用到工作稿</button></div>
+              </section>
+              <section class="canon-review-panel" id="scriptCanonReviewPanel" hidden>
+                <div class="candidate-head"><div><p class="eyebrow">批准前复核</p><h3 id="scriptCanonReviewTitle">圣经一致性检查</h3></div></div>
+                <div id="scriptCanonReviewOutput"></div>
+                <div class="candidate-actions">
+                  <button class="ghost-action" id="applyReviewBibleDeltasBtn" type="button" hidden>采用所选圣经建议</button>
+                  <button class="danger-action" id="forceApproveScriptBtn" type="button" hidden>填写原因并强制批准</button>
+                </div>
+              </section>
+            </section>
+            <section class="script-view-pane" data-script-pane="versions" hidden>
+              <div class="version-compare-toolbar">
+                <label>版本 A<select id="scriptCompareLeft"></select></label>
+                <span>对比</span>
+                <label>版本 B<select id="scriptCompareRight"></select></label>
+              </div>
+              <div class="script-version-list" id="scriptVersionList"></div>
+              <div class="version-diff" id="scriptVersionDiff"></div>
+            </section>
           </article>
 
           <article class="tab-panel" id="tab-storyboard">
@@ -734,6 +783,7 @@
 
     <script src="./generator.js?v=20260714-storyboard-reader"></script>
     <script src="./workflow-core.js?v=20260714-storyboard-reader"></script>
+    <script src="./script-revision.js?v=20260715-script-refinement"></script>
     <script src="./project-domain.js?v=20260714-storyboard-reader"></script>
     <script src="./episode-planner.js?v=20260714-storyboard-reader"></script>
     <script src="./ui-templates.js?v=20260714-storyboard-reader"></script>
@@ -745,6 +795,6 @@
     <script src="./creation-session.js?v=20260714-continuation-workspace"></script>
     <script src="./ai-operation.js?v=20260714-storyboard-reader"></script>
     <script src="./generation-client.js?v=20260714-storyboard-reader"></script>
-    <script src="./app.js?v=20260715-episode-bible"></script>
+    <script src="./app.js?v=20260715-script-refinement"></script>
   </body>
 </html>

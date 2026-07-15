@@ -52,6 +52,7 @@
   const deriveReviewInsights = projectDomain.deriveReviewInsights;
   const episodePlanner = window.RocoEpisodePlanner;
   const creationSession = window.RocoCreationSession;
+  const scriptRevisionDomain = window.RocoScriptRevision;
   const episodeBibleDomain = window.RocoEpisodeBible;
   const episodeBibleFieldIds = {
     characters: "episodeBibleCharacters", abilities: "episodeBibleAbilities", relations: "episodeBibleRelations",
@@ -137,6 +138,10 @@
       && state.episodeBible.confirmedFingerprint === bibleFingerprint;
     const generateButton = $("#generateBtn");
     const storyboardButton = $("#storyboardBtn");
+    const activeVersion = activeEpisodeVersion(currentProjectEpisode());
+    const revisionDirty = Boolean(state.scriptRevisionSession?.dirty);
+    const scriptMatchesVersion = Boolean(activeVersion?.script && projectDomain.scriptFingerprint(state.script) === activeVersion.scriptFingerprint);
+    const canStoryboard = projectDomain.versionCanGenerateStoryboard(activeVersion) && scriptMatchesVersion && !revisionDirty;
     const copyAllStoryboardButton = $("#copyAllStoryboardBtn");
     const continueButton = $("#continueBtn");
     const beatSheetButton = $("#generateBeatSheetBtn");
@@ -153,8 +158,12 @@
       planReadyState.classList.toggle("is-ready", hasCompletePlan && hasApprovedBeatSheet && hasConfirmedEpisodeBible);
     }
     if (storyboardButton) {
-      storyboardButton.disabled = isBusy || !hasScript || Boolean(state.episodeBible?.scriptNeedsRegeneration);
-      storyboardButton.title = state.episodeBible?.scriptNeedsRegeneration ? "本次圣经已修改，请先重新生成剧本版本" : hasScript ? "仅根据当前剧本版本绑定的圣经快照生成对应分镜" : "请先生成并确认一版剧本";
+      storyboardButton.disabled = isBusy || !hasScript || !canStoryboard || Boolean(state.episodeBible?.scriptNeedsRegeneration);
+      storyboardButton.title = state.episodeBible?.scriptNeedsRegeneration
+        ? "本次圣经已修改，请先重新生成剧本版本"
+        : revisionDirty ? "当前工作稿尚未保存和批准"
+          : activeVersion?.approvalStatus !== "approved" ? "请先在剧本精修区完成圣经复核并批准本版"
+            : canStoryboard ? "根据当前已批准剧本及其绑定圣经快照生成分镜" : "当前输出与已批准版本不一致";
     }
     if (copyAllStoryboardButton) {
       copyAllStoryboardButton.disabled = isBusy || !hasStoryboard;
@@ -194,6 +203,15 @@
     }
     const recastButton = $("#openRecastBtn");
     if (recastButton) recastButton.disabled = isBusy || !hasScript || !(currentProject()?.characterCards || []).length;
+    const saveVersionButton = $("#saveScriptVersionBtn");
+    if (saveVersionButton) saveVersionButton.disabled = isBusy || !state.scriptRevisionSession?.workingScript || !revisionDirty;
+    const discardDraftButton = $("#discardScriptDraftBtn");
+    if (discardDraftButton) discardDraftButton.disabled = isBusy || !revisionDirty;
+    const approveVersionButton = $("#approveScriptVersionBtn");
+    if (approveVersionButton) {
+      approveVersionButton.disabled = isBusy || !hasScript || (activeVersion?.approvalStatus === "approved" && !revisionDirty);
+      approveVersionButton.textContent = activeVersion?.approvalStatus === "approved" && !revisionDirty ? "本版已批准" : "复核并批准本版";
+    }
     refreshToolbarState();
   }
 
@@ -219,6 +237,7 @@
     state.storyboard = [];
     state.creativePack = null;
     state.scriptDoctor = null;
+    state.scriptRevisionSession = null;
     state.selectedTopic = null;
     state.planOptions = [];
     state.selectedPlanOptionId = null;
@@ -369,6 +388,7 @@
       storyboard: [...state.storyboard],
       creativePack: state.creativePack,
       scriptDoctor: state.scriptDoctor,
+      scriptRevisionSession: scriptRevisionDomain.createSession(state.scriptRevisionSession || {}),
       planOptions: state.planOptions.map((item) => ({ ...item, plan: { ...(item.plan || {}) } })),
       selectedPlanOptionId: state.selectedPlanOptionId,
       activePlanBatchId: state.activePlanBatchId,
@@ -397,6 +417,9 @@
     state.storyboard = Array.isArray(session.storyboard) ? session.storyboard : [];
     state.creativePack = session.creativePack || null;
     state.scriptDoctor = session.scriptDoctor || null;
+    state.scriptRevisionSession = session.scriptRevisionSession
+      ? scriptRevisionDomain.createSession(session.scriptRevisionSession)
+      : state.script ? scriptRevisionDomain.begin(state.script, activeEpisodeVersion(currentProjectEpisode())?.id || "") : null;
     state.planOptions = Array.isArray(session.planOptions) ? session.planOptions : [];
     state.selectedPlanOptionId = session.selectedPlanOptionId || null;
     state.activePlanBatchId = session.activePlanBatchId || null;
@@ -1707,6 +1730,7 @@
     state.storyboard = [];
     state.creativePack = null;
     state.scriptDoctor = null;
+    state.scriptRevisionSession = null;
     state.planOptions = [];
     state.selectedPlanOptionId = null;
     state.activePlanBatchId = null;
@@ -1791,7 +1815,7 @@
       state.continuationBrief = {};
     } else {
       const base = state.creationSessions.new;
-      if (base) applyCreationSession({ ...base, script: null, storyboard: [], creativePack: null, scriptDoctor: null, currentEpisodeId: null, reviewEpisodeId: null, currentHistoryId: null, planOptions: [], beatSheet: [], beatSheetApproved: false, continuationSource: null, continuationBrief: {} });
+      if (base) applyCreationSession({ ...base, script: null, storyboard: [], creativePack: null, scriptDoctor: null, scriptRevisionSession: null, currentEpisodeId: null, reviewEpisodeId: null, currentHistoryId: null, planOptions: [], beatSheet: [], beatSheetApproved: false, continuationSource: null, continuationBrief: {} });
       const source = options.source || sourceCandidate || continuationSourceCatalog().at(-1);
       if (source) setContinuationSource(source, { force: true });
       else clearTargetWorkflow();
@@ -2124,6 +2148,13 @@
         canonDeltas: episodeBibleDomain.clone(generated.script?.canonDeltas || state.episodeBible?.canonDeltas || []),
         acceptedCanonDeltaIds: [...(state.episodeBible?.acceptedCanonDeltaIds || [])],
         legacyBibleSnapshotMissing: false,
+        parentVersionId: generated.parentVersionId || "",
+        revisionSource: generated.revisionSource || (["doctor", "recast"].includes(mode) ? mode : "generated"),
+        revisionNote: generated.revisionNote || (mode === "continue" ? "AI 续写初稿" : "AI 生成初稿"),
+        scriptFingerprint: projectDomain.scriptFingerprint(generated.script),
+        approvalStatus: generated.approvalStatus === "approved" ? "approved" : "draft",
+        approvedAt: generated.approvedAt || "",
+        approvalReview: generated.approvalReview || null,
       },
     });
     state.currentEpisodeId = episode.id;
@@ -2163,6 +2194,7 @@
     state.scriptDoctor = episode.doctorResult || null;
     state.currentHistoryId = episode.historyId || null;
     const restoredVersion = activeEpisodeVersion(episode);
+    state.scriptRevisionSession = state.script ? scriptRevisionDomain.begin(state.script, restoredVersion?.id || "") : null;
     const restoredBible = restoredVersion?.episodeBibleSnapshot || restoredVersion?.generationBibleSnapshot || null;
     state.episodeBible = episodeBibleDomain.createState({
       draft: restoredBible,
@@ -2473,19 +2505,21 @@
   function applyDoctorRevision() {
     const revisedScript = state.scriptDoctor?.revisedScript;
     if (!revisedScript) throw new Error("当前没有可采用的修订稿。");
-    const input = getInput();
     const response = state.scriptDoctor.response || { source: "script-doctor", model: state.aiModels.doctor };
-    state.script = normalizeScriptResult({ script: revisedScript }).script;
-    state.storyboard = [];
-    state.creativePack = window.RocoStudio.generateCreativePack(state.script, input, state.topics);
-    const item = addHistoryItem({ mode: "doctor", input, response, projectId: state.currentProjectId, projectName: currentProject()?.name, episodeNumber: input.episodeNumber, generated: { script: state.script, storyboard: [], creativePack: state.creativePack } });
-    state.currentHistoryId = item.id;
-    upsertProjectEpisode({ mode: "doctor", input, response, generated: { script: state.script, storyboard: [], creativePack: state.creativePack }, historyId: item.id });
-    state.scriptDoctor = null;
-    persistHistory();
-    renderScript(); renderStoryboard(); renderCreativePack(); renderHistory(); renderConsistency(); saveDraft(false);
+    const session = ensureScriptRevisionSession();
+    session.rewriteCandidate = {
+      script: normalizeScriptResult({ script: revisedScript }).script,
+      changeSummary: state.scriptDoctor.report?.priority || "剧本医生完整修订稿",
+      affectedBeatIds: state.beatSheet.map((item) => item.id),
+      source: response.source,
+      model: response.model,
+      revisionSource: "doctor",
+      createdAt: new Date().toISOString(),
+    };
+    renderScript(); saveDraft(false);
     switchTab("script");
-    setStatus("已采用剧本医生修订稿并新建剧本版本；原稿仍可从版本记录恢复");
+    setScriptView("edit");
+    setStatus("剧本医生修订稿已进入候选区，采用后仍需保存和批准");
   }
 
   function setInputValue(id, value) {
@@ -2902,11 +2936,365 @@
     }));
   }
 
+  function ensureScriptRevisionSession() {
+    if (!state.script) {
+      state.scriptRevisionSession = null;
+      return null;
+    }
+    const activeVersion = activeEpisodeVersion(currentProjectEpisode());
+    if (!state.scriptRevisionSession?.workingScript) {
+      state.scriptRevisionSession = scriptRevisionDomain.begin(state.script, activeVersion?.id || "");
+    }
+    return state.scriptRevisionSession;
+  }
+
+  function setScriptView(view) {
+    const session = ensureScriptRevisionSession();
+    const nextView = ["read", "edit", "versions"].includes(view) ? view : "read";
+    if (session) session.activeView = nextView;
+    $$('[data-script-view]').forEach((button) => {
+      const active = button.dataset.scriptView === nextView;
+      button.classList.toggle("is-active", active);
+      button.setAttribute("aria-selected", String(active));
+    });
+    $$('[data-script-pane]').forEach((pane) => {
+      const active = pane.dataset.scriptPane === nextView;
+      pane.classList.toggle("is-active", active);
+      pane.hidden = !active;
+    });
+    if (nextView === "edit") renderScriptEditor();
+    if (nextView === "versions") renderScriptVersions();
+  }
+
+  function renderScriptVersionStatus() {
+    const target = $("#scriptVersionStatus");
+    if (!target) return;
+    if (!state.script) {
+      target.textContent = "未生成";
+      target.dataset.status = "empty";
+      return;
+    }
+    const session = ensureScriptRevisionSession();
+    const version = activeEpisodeVersion(currentProjectEpisode());
+    if (session?.dirty) {
+      target.textContent = "工作稿未保存";
+      target.dataset.status = "dirty";
+      return;
+    }
+    const reviewStatus = version?.approvalReview?.status;
+    target.textContent = version?.approvalStatus === "approved"
+      ? reviewStatus === "overridden" ? "有风险批准" : reviewStatus === "legacy" ? "历史批准" : "已批准"
+      : "草稿待批准";
+    target.dataset.status = reviewStatus === "overridden" ? "overridden" : version?.approvalStatus === "approved" ? "approved" : "draft";
+  }
+
+  function renderRewriteCandidate() {
+    const panel = $("#rewriteCandidatePanel");
+    const session = state.scriptRevisionSession;
+    const candidate = session?.rewriteCandidate;
+    if (!panel) return;
+    panel.hidden = !candidate;
+    if (!candidate) return;
+    $("#rewriteCandidateTitle").textContent = candidate.changeSummary || "局部改写候选";
+    $("#rewriteCandidateMeta").textContent = `${candidate.model || "DeepSeek"} · ${(candidate.affectedBeatIds || []).join("、")}`;
+    $("#rewriteCandidateDiff").innerHTML = uiTemplates.versionDiff(scriptRevisionDomain.structuredDiff(session.workingScript, candidate.script));
+  }
+
+  function renderScriptCanonReview() {
+    const panel = $("#scriptCanonReviewPanel");
+    const output = $("#scriptCanonReviewOutput");
+    const review = state.scriptRevisionSession?.canonReview;
+    if (!panel || !output) return;
+    panel.hidden = !review;
+    if (!review) return;
+    const issues = review.issues || [];
+    const deltas = review.bibleDeltas || [];
+    $("#scriptCanonReviewTitle").textContent = review.status === "passed" ? "复核通过" : "发现需要处理的连续性问题";
+    output.innerHTML = `<p>${escapeHtml(review.summary || "复核完成")}</p>
+      ${issues.map((item) => `<article class="canon-review-issue"><header><strong data-severity="${escapeHtml(item.severity)}">${escapeHtml(item.severity)} · ${escapeHtml(item.category)}</strong><span>${escapeHtml([...(item.beatIds || []), ...(item.dialogueIds || [])].join("、"))}</span></header><p><b>证据：</b>${escapeHtml(item.evidence)}</p><p><b>违反：</b>${escapeHtml(item.rule)}</p><p><b>建议：</b>${escapeHtml(item.recommendation)}</p></article>`).join("")}
+      ${deltas.length ? `<div class="review-bible-deltas"><h4>可选的本次圣经补充</h4>${deltas.map((item) => `<label class="bible-delta-choice"><input type="checkbox" data-review-bible-delta="${escapeHtml(item.id)}" /><span>${escapeHtml(item.field)}</span><div><strong>${escapeHtml(item.fact)}</strong><p>${escapeHtml(item.risk)}</p></div></label>`).join("")}</div>` : ""}`;
+    $("#applyReviewBibleDeltasBtn").hidden = !deltas.length;
+    $("#forceApproveScriptBtn").hidden = review.status !== "issues";
+  }
+
+  function renderScriptEditor() {
+    const target = $("#scriptEditorOutput");
+    if (!target) return;
+    const session = ensureScriptRevisionSession();
+    if (!session?.workingScript) {
+      target.innerHTML = `<p class="helper">请先生成或恢复一个剧本。</p>`;
+      return;
+    }
+    target.innerHTML = uiTemplates.scriptEditor(session.workingScript, session);
+    $("#scriptDraftState").textContent = session.dirty ? "工作稿有未保存修改" : "工作稿与当前版本一致";
+    if ($("#scriptRevisionNote")) $("#scriptRevisionNote").value = session.revisionNote || "";
+    renderRewriteCandidate();
+    renderScriptCanonReview();
+  }
+
+  function renderScriptVersions() {
+    const episode = currentProjectEpisode();
+    const versions = episode?.versions || [];
+    const activeVersion = activeEpisodeVersion(episode);
+    const session = ensureScriptRevisionSession();
+    if ($("#scriptVersionList")) $("#scriptVersionList").innerHTML = uiTemplates.scriptVersions(versions, activeVersion?.id || "");
+    const options = versions.map((version, index) => `<option value="${escapeHtml(version.id)}">v${index + 1} · ${escapeHtml(version.script?.title || "未命名")}</option>`).join("");
+    const left = $("#scriptCompareLeft");
+    const right = $("#scriptCompareRight");
+    if (!left || !right) return;
+    left.innerHTML = options;
+    right.innerHTML = options;
+    if (!session || !versions.length) {
+      left.disabled = true;
+      right.disabled = true;
+      $("#scriptVersionDiff").innerHTML = `<p class="helper">至少需要一个剧本版本。</p>`;
+      return;
+    }
+    left.disabled = false;
+    right.disabled = false;
+    session.compareLeftId = versions.some((item) => item.id === session.compareLeftId) ? session.compareLeftId : versions.at(-2)?.id || versions.at(-1)?.id || "";
+    session.compareRightId = versions.some((item) => item.id === session.compareRightId) ? session.compareRightId : activeVersion?.id || versions.at(-1)?.id || "";
+    left.value = session.compareLeftId;
+    right.value = session.compareRightId;
+    const leftVersion = versions.find((item) => item.id === session.compareLeftId);
+    const rightVersion = versions.find((item) => item.id === session.compareRightId);
+    $("#scriptVersionDiff").innerHTML = leftVersion && rightVersion
+      ? uiTemplates.versionDiff(scriptRevisionDomain.structuredDiff(leftVersion.script, rightVersion.script))
+      : `<p class="helper">至少需要一个剧本版本。</p>`;
+  }
+
+  function markWorkingScriptChanged(source = "manual") {
+    const session = ensureScriptRevisionSession();
+    if (!session) return;
+    session.workingScript = scriptRevisionDomain.normalizeScript(session.workingScript);
+    session.revisionSource = source;
+    session.canonReview = null;
+    const base = (currentProjectEpisode()?.versions || []).find((item) => item.id === session.baseVersionId);
+    session.dirty = !base || !scriptRevisionDomain.same(base.script, session.workingScript);
+    state.script = session.workingScript;
+    if (session.dirty) state.storyboard = [];
+    renderScriptVersionStatus();
+    refreshCreationActions();
+    renderStoryboard();
+    clearTimeout(markWorkingScriptChanged.saveTimer);
+    markWorkingScriptChanged.saveTimer = setTimeout(() => saveDraft(false), 450);
+  }
+
+  function updateScriptEditorInput(control) {
+    const session = ensureScriptRevisionSession();
+    if (!session) return;
+    if (control.dataset.scriptField) session.workingScript[control.dataset.scriptField] = control.value;
+    if (control.dataset.scriptList) session.workingScript[control.dataset.scriptList] = control.value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
+    const item = control.closest("[data-editor-item]");
+    if (item && control.dataset.itemField) {
+      const collection = item.dataset.editorItem;
+      const index = Number(item.dataset.editorIndex);
+      const value = control.dataset.itemField === "beatIds" ? control.value.split(/[,，、\s]+/).map((entry) => entry.trim()).filter(Boolean) : control.value;
+      if (session.workingScript[collection]?.[index]) session.workingScript[collection][index][control.dataset.itemField] = value;
+    }
+    markWorkingScriptChanged("manual");
+  }
+
+  function addScriptEditorItem(collection) {
+    const session = ensureScriptRevisionSession();
+    const limits = { characters: 5, dialogue: 24, comedyBeats: 3, visualHighlights: 4 };
+    if (!session?.workingScript?.[collection]) return;
+    if (session.workingScript[collection].length >= limits[collection]) throw new Error(`该部分最多允许 ${limits[collection]} 条。`);
+    const defaults = {
+      characters: { name: "新角色", description: "填写性格、目标、关键选择和动作特征" },
+      dialogue: { id: "", beatIds: ["BEAT-01"], role: "角色", line: "新台词", intention: "", subtext: "" },
+      comedyBeats: { setup: "", payoff: "", visualAction: "" },
+      visualHighlights: { moment: "", verticalComposition: "", effect: "" },
+    };
+    session.workingScript[collection].push(defaults[collection]);
+    markWorkingScriptChanged("manual");
+    renderScriptEditor();
+  }
+
+  function removeScriptEditorItem(collection, index) {
+    const session = ensureScriptRevisionSession();
+    if (!session?.workingScript?.[collection]?.[index]) return;
+    session.workingScript[collection].splice(index, 1);
+    markWorkingScriptChanged("manual");
+    renderScriptEditor();
+  }
+
+  async function rewriteScriptBeat(beatKey) {
+    const session = ensureScriptRevisionSession();
+    const beatIds = String(beatKey || "").split("+").filter(Boolean);
+    if (!session?.workingScript || !beatIds.length) throw new Error("没有找到需要改写的节拍。");
+    if (beatIds.some((id) => session.lockedBeatIds.includes(id))) throw new Error("该节拍已锁定，请先解除锁定。");
+    const instruction = String(session.rewriteInstructions[beatKey] || "").trim();
+    if (!instruction) throw new Error("请先填写这一拍具体要怎么改。");
+    const baseVersion = (currentProjectEpisode()?.versions || []).find((item) => item.id === session.baseVersionId) || activeEpisodeVersion(currentProjectEpisode());
+    const operation = beginAiOperation("剧本局部改写");
+    try {
+      setStatus(`AI 正在改写 ${beatIds.join("、")} 及关联台词...`);
+      const response = await apiRequest("/api/rewrite-script", { input: {
+        ...generationContext(getInput(), "scriptRewrite"), script: session.workingScript,
+        scriptVersionId: baseVersion?.id || "", rewriteTarget: { beatIds, instruction },
+        generationBibleSnapshot: baseVersion?.generationBibleSnapshot || state.episodeBible?.generationSnapshot || null,
+        episodeBible: baseVersion?.episodeBibleSnapshot || state.episodeBible?.draft || null,
+      } });
+      assertActiveAiOperation(operation);
+      const candidate = scriptRevisionDomain.normalizeScript(response.result?.script);
+      const violations = scriptRevisionDomain.rewriteViolations(session.workingScript, candidate, beatIds);
+      if (violations.length) throw new Error(`改写候选触及了锁定内容：${violations.join("、")}`);
+      session.rewriteCandidate = { script: candidate, changeSummary: response.result?.changeSummary || "局部改写完成", affectedBeatIds: response.result?.affectedBeatIds || beatIds, source: response.source || "", model: response.model || "", createdAt: new Date().toISOString() };
+      renderRewriteCandidate();
+      saveDraft(false);
+      setStatus(`局部改写候选已生成 ${nowTime()} · ${response.model || "DeepSeek"}${usageSuffix(response)}`);
+    } finally { endAiOperation(operation); }
+  }
+
+  function adoptRewriteCandidate() {
+    const session = ensureScriptRevisionSession();
+    if (!session?.rewriteCandidate?.script) throw new Error("当前没有可采用的改写候选。");
+    const candidate = session.rewriteCandidate;
+    session.workingScript = scriptRevisionDomain.normalizeScript(candidate.script);
+    if (candidate.recastMappings) updateRoleInputsAfterRecast(candidate.recastMappings);
+    session.rewriteCandidate = null;
+    markWorkingScriptChanged(candidate.revisionSource || "ai-rewrite");
+    renderScript();
+    setScriptView("edit");
+    setStatus("AI 改写候选已采用到工作稿，尚未创建正式版本");
+  }
+
+  function discardRewriteCandidate() {
+    if (state.scriptRevisionSession) state.scriptRevisionSession.rewriteCandidate = null;
+    renderRewriteCandidate();
+    saveDraft(false);
+    setStatus("已放弃改写候选，工作稿未改变");
+  }
+
+  function discardWorkingScriptDraft() {
+    const session = ensureScriptRevisionSession();
+    const baseVersion = (currentProjectEpisode()?.versions || []).find((item) => item.id === session?.baseVersionId);
+    if (!session?.dirty || !baseVersion) throw new Error("当前没有可放弃的工作稿修改。");
+    state.script = baseVersion.script;
+    state.storyboard = baseVersion.storyboard || [];
+    state.creativePack = baseVersion.creativePack || window.RocoStudio.generateCreativePack(state.script, getInput(), state.topics);
+    state.scriptRevisionSession = scriptRevisionDomain.begin(baseVersion.script, baseVersion.id);
+    renderScript(); renderStoryboard(); renderCreativePack(); saveDraft(false);
+    setScriptView("edit");
+    setStatus("已放弃未保存修改，并恢复当前基础版本");
+  }
+
+  function saveWorkingScriptVersion(options = {}) {
+    const session = ensureScriptRevisionSession();
+    if (!session?.workingScript) throw new Error("当前没有可保存的工作稿。");
+    const validation = scriptRevisionDomain.validateScript(session.workingScript);
+    if (!validation.valid) throw new Error(`工作稿结构不完整：${validation.issues.join("；")}`);
+    state.script = validation.script;
+    state.storyboard = [];
+    state.creativePack = window.RocoStudio.generateCreativePack(state.script, getInput(), state.topics);
+    upsertProjectEpisode({
+      mode: state.creationMode,
+      input: getInput(),
+      response: { source: options.source || "editor", model: options.model || "" },
+      generated: {
+        script: state.script, storyboard: [], creativePack: state.creativePack,
+        parentVersionId: session.baseVersionId,
+        revisionSource: session.revisionSource || "manual",
+        revisionNote: session.revisionNote || $("#scriptRevisionNote")?.value.trim() || "人工精修版本",
+      },
+      historyId: null,
+    });
+    const version = activeEpisodeVersion(currentProjectEpisode());
+    const review = options.preserveReview ? session.canonReview : null;
+    state.scriptRevisionSession = scriptRevisionDomain.begin(version.script, version.id);
+    state.scriptRevisionSession.canonReview = review;
+    persistProjects();
+    renderScript(); renderStoryboard(); renderCreativePack(); renderHistory();
+    saveDraft(false);
+    if (!options.silent) setStatus("工作稿已保存为新的草稿版本，原版本保持不变");
+    return version;
+  }
+
+  function finalizeScriptApproval(review, responseMeta = {}, overrideReason = "") {
+    let version = activeEpisodeVersion(currentProjectEpisode());
+    const session = ensureScriptRevisionSession();
+    const matches = version?.script && projectDomain.scriptFingerprint(session.workingScript) === version.scriptFingerprint;
+    if (session.dirty || !matches) version = saveWorkingScriptVersion({ silent: true, preserveReview: true, source: responseMeta.source, model: responseMeta.model });
+    const approvalReview = {
+      ...review,
+      status: overrideReason ? "overridden" : "passed",
+      checkedAt: new Date().toISOString(),
+      source: responseMeta.source || "deepseek",
+      model: responseMeta.model || state.aiModels.scriptCanonReview,
+      overrideReason,
+    };
+    const approved = projectDomain.approveEpisodeVersion(currentProjectEpisode(), version.id, approvalReview);
+    if (!approved) throw new Error("剧本版本批准失败，请重新打开该版本后重试。");
+    state.script = approved.script;
+    state.storyboard = approved.storyboard || [];
+    state.scriptRevisionSession = scriptRevisionDomain.begin(approved.script, approved.id);
+    state.scriptRevisionSession.canonReview = approvalReview;
+    persistProjects(); saveDraft(false);
+    renderScript(); renderStoryboard(); renderProject(); renderConsistency();
+    setStatus(overrideReason ? "本版已按人工原因标记为有风险批准，可继续生成分镜" : "本版已通过圣经复核并批准，可以生成对应分镜");
+  }
+
+  async function approveCurrentScript() {
+    const session = ensureScriptRevisionSession();
+    const validation = scriptRevisionDomain.validateScript(session?.workingScript);
+    if (!validation.valid) throw new Error(`批准前请先修正：${validation.issues.join("；")}`);
+    if (!episodeBibleDomain.isComplete(state.episodeBible?.draft) || !["confirmed", "aligned"].includes(state.episodeBible?.status)) {
+      throw new Error("请先确认当前版本对应的本次创作圣经，再执行批准复核。");
+    }
+    const baseVersion = (currentProjectEpisode()?.versions || []).find((item) => item.id === session.baseVersionId) || activeEpisodeVersion(currentProjectEpisode());
+    const operation = beginAiOperation("剧本圣经复核");
+    try {
+      setStatus("AI 正在进行批准前圣经与连续性复核...");
+      const response = await apiRequest("/api/script-canon-review", { input: {
+        ...generationContext(getInput(), "scriptCanonReview"), script: validation.script,
+        scriptVersionId: baseVersion?.id || "", episodeBible: state.episodeBible.draft,
+        generationBibleSnapshot: baseVersion?.generationBibleSnapshot || state.episodeBible?.generationSnapshot || null,
+      } });
+      assertActiveAiOperation(operation);
+      const review = response.result?.review || response.result;
+      session.canonReview = { ...review, source: response.source || "", model: response.model || "", checkedAt: new Date().toISOString() };
+      if (review.status === "passed") {
+        finalizeScriptApproval(review, response);
+      } else {
+        renderScriptCanonReview();
+        setScriptView("edit");
+        saveDraft(false);
+        setStatus(`复核发现 ${review.issues?.length || 0} 个问题，请修改、采用圣经建议或人工强制批准`, true);
+      }
+    } finally { endAiOperation(operation); }
+  }
+
+  function forceApproveCurrentScript() {
+    const review = state.scriptRevisionSession?.canonReview;
+    if (!review || review.status !== "issues") throw new Error("当前没有可强制批准的复核问题。");
+    const reason = window.prompt("请说明为什么接受这些连续性风险。该原因会永久记录在版本中：", "本集有意制造设定疑点，后续集数会解释");
+    if (!String(reason || "").trim()) throw new Error("强制批准必须填写原因。");
+    finalizeScriptApproval(review, { source: review.source, model: review.model }, String(reason).trim());
+  }
+
+  function applyReviewBibleDeltas() {
+    const review = state.scriptRevisionSession?.canonReview;
+    const selectedIds = $$('[data-review-bible-delta]:checked').map((input) => input.dataset.reviewBibleDelta);
+    if (!review?.bibleDeltas?.length || !selectedIds.length) throw new Error("请先选择要采用的圣经建议。");
+    state.episodeBible.draft = episodeBibleDomain.absorbDeltas(state.episodeBible.draft, review.bibleDeltas, selectedIds);
+    state.episodeBible.status = "draft";
+    state.episodeBible.confirmedFingerprint = "";
+    state.scriptRevisionSession.canonReview = null;
+    applyEpisodeBibleToForm(state.episodeBible.draft);
+    renderEpisodeBible(); renderScriptCanonReview(); saveDraft(false);
+    setStatus("圣经建议已加入本次创作圣经，请检查并重新确认后再批准剧本");
+  }
+
   function renderEmptyStudio() {
     const input = getInput();
     $("#scriptEyebrow").textContent = state.creationMode === "continue" ? "续写目标剧本" : "本集剧本";
     $("#scriptTitle").textContent = state.creationMode === "continue" ? "等待生成续写剧本" : "开始一集短剧";
     $("#scriptOutput").innerHTML = uiTemplates.emptyStudio(input);
+    renderScriptVersionStatus();
+    if ($("#scriptEditorOutput")) $("#scriptEditorOutput").innerHTML = `<p class="helper">生成剧本后可在这里进行结构化精修。</p>`;
+    if ($("#scriptVersionList")) $("#scriptVersionList").innerHTML = `<p class="helper">当前集数还没有剧本版本。</p>`;
+    setScriptView("read");
   }
 
   function renderScript() {
@@ -2920,6 +3308,11 @@
     $("#scriptEyebrow").textContent = state.creationMode === "continue" ? "续写目标剧本" : "本集剧本";
     $("#scriptTitle").textContent = script.title;
     $("#scriptOutput").innerHTML = uiTemplates.script(script);
+    ensureScriptRevisionSession();
+    renderScriptVersionStatus();
+    renderScriptEditor();
+    renderScriptVersions();
+    setScriptView(state.scriptRevisionSession?.activeView || "read");
     renderRecastAvailability();
   }
 
@@ -3014,30 +3407,23 @@
       const response = await resolveAiJob(initialResponse, "智能换角");
       assertActiveAiOperation(operation);
       const generated = normalizeScriptResult(response.result);
-      updateRoleInputsAfterRecast(mappings);
-      const versionInput = getInput();
-      state.script = generated.script;
-      state.storyboard = [];
-      state.scriptDoctor = null;
-      state.creativePack = window.RocoStudio.generateCreativePack(state.script, versionInput, state.topics);
-      const item = addHistoryItem({
-        mode: "recast",
-        input: versionInput,
-        response,
-        projectId: state.currentProjectId,
-        projectName: currentProject()?.name,
-        episodeNumber: versionInput.episodeNumber,
-        generated: { ...generated, creativePack: state.creativePack },
-      });
-      state.currentHistoryId = item.id;
-      upsertProjectEpisode({ mode: "recast", input: versionInput, response, generated: { ...generated, creativePack: state.creativePack }, historyId: item.id });
-      persistHistory();
-      renderScript(); renderStoryboard(); renderCreativePack(); renderHistory(); renderConsistency(); renderExample();
+      const session = ensureScriptRevisionSession();
+      session.rewriteCandidate = {
+        script: generated.script,
+        changeSummary: `批量替换 ${mappings.map((item) => item.fromName).join("、")} 并按角色卡重写`,
+        affectedBeatIds: state.beatSheet.map((item) => item.id),
+        source: response.source || "",
+        model: response.model || "",
+        revisionSource: "recast",
+        recastMappings: mappings,
+        createdAt: new Date().toISOString(),
+      };
+      renderScript();
       saveDraft(false);
       $("#recastPanel").hidden = true;
       pulseResult();
-      const versionCount = currentProjectEpisode()?.versions?.length || 1;
-      setStatus(`智能换角完成，已保存为剧本 v${versionCount}；原版本及其分镜仍可在项目档案中恢复。${usageSuffix(response)}`);
+      setScriptView("edit");
+      setStatus(`智能换角候选已生成，采用后再保存为新版本。${usageSuffix(response)}`);
     } finally {
       endAiOperation(operation);
     }
@@ -3364,6 +3750,7 @@
     state.scriptDoctor = archived?.version?.doctorResult || null;
     state.currentHistoryId = item.id || null;
     const historyVersion = archived?.version || item;
+    state.scriptRevisionSession = state.script ? scriptRevisionDomain.begin(state.script, archived?.version?.id || "") : null;
     const historyBible = historyVersion.episodeBibleSnapshot || historyVersion.generationBibleSnapshot || null;
     state.episodeBible = episodeBibleDomain.createState({
       draft: historyBible,
@@ -3680,6 +4067,8 @@
       });
       state.currentHistoryId = item.id;
       upsertProjectEpisode({ mode, input, response, generated: { ...generated, creativePack: state.creativePack }, historyId: item.id });
+      const generatedVersion = activeEpisodeVersion(currentProjectEpisode());
+      state.scriptRevisionSession = scriptRevisionDomain.begin(state.script, generatedVersion?.id || "");
       persistHistory();
       renderScript();
       renderEpisodeBible();
@@ -3703,6 +4092,12 @@
     if (!state.script) {
       throw new Error("请先生成或恢复一个剧本，再生成分镜。");
     }
+    const scriptVersion = activeEpisodeVersion(currentProjectEpisode());
+    if (state.scriptRevisionSession?.dirty) throw new Error("当前工作稿尚未保存和批准，不能生成分镜。");
+    if (!projectDomain.versionCanGenerateStoryboard(scriptVersion)
+      || projectDomain.scriptFingerprint(state.script) !== scriptVersion?.scriptFingerprint) {
+      throw new Error("请先在剧本精修区完成圣经复核并批准当前版本。");
+    }
     const operation = beginAiOperation("分镜生成");
     try {
       const input = getInput();
@@ -3712,6 +4107,8 @@
         input: {
           ...generationContext(input, "storyboard"),
           script,
+          scriptVersionId: scriptVersion.id,
+          episodeBible: scriptVersion.episodeBibleSnapshot || scriptVersion.generationBibleSnapshot || null,
         },
       });
       const response = await resolveAiJob(initialResponse, "分镜");
@@ -3873,6 +4270,7 @@
         state.storyboard = Array.isArray(episode.storyboard) ? episode.storyboard : [];
         state.creativePack = episode.creativePack || null;
         state.scriptDoctor = episode.doctorResult || null;
+        state.scriptRevisionSession = state.script ? scriptRevisionDomain.begin(state.script, draftVersion?.id || "") : null;
         state.episodeBible = episodeBibleDomain.createState({
           draft: draftBible,
           generationSnapshot: draftVersion?.generationBibleSnapshot || null,
@@ -3888,6 +4286,7 @@
         state.script = draft.script || null;
         state.storyboard = Array.isArray(draft.storyboard) ? draft.storyboard : [];
         state.creativePack = draft.creativePack || null;
+        state.scriptRevisionSession = state.script ? scriptRevisionDomain.begin(state.script, "") : null;
       }
       state.currentHistoryId = draft.currentHistoryId || null;
       const activeBatch = (currentProject()?.planBatches || []).find((batch) => batch.id === state.activePlanBatchId);
@@ -4356,6 +4755,77 @@
         }
         reportError("生成", error);
       }
+    });
+    $$("[data-script-view]").forEach((button) => button.addEventListener("click", () => setScriptView(button.dataset.scriptView)));
+    $("#scriptEditorOutput").addEventListener("input", (event) => {
+      const control = event.target;
+      if (control.dataset.rewriteInstruction !== undefined) {
+        const session = ensureScriptRevisionSession();
+        if (session) session.rewriteInstructions[control.dataset.rewriteInstruction] = control.value;
+        saveDraft(false);
+        return;
+      }
+      if (control.matches("[data-script-editor-input]")) updateScriptEditorInput(control);
+    });
+    $("#scriptEditorOutput").addEventListener("change", (event) => {
+      const lock = event.target.closest("[data-beat-lock]");
+      if (!lock) return;
+      const session = ensureScriptRevisionSession();
+      const beatIds = lock.dataset.beatLock.split("+").filter(Boolean);
+      session.lockedBeatIds = lock.checked
+        ? [...new Set([...session.lockedBeatIds, ...beatIds])]
+        : session.lockedBeatIds.filter((id) => !beatIds.includes(id));
+      renderScriptEditor(); saveDraft(false);
+    });
+    $("#scriptEditorOutput").addEventListener("click", async (event) => {
+      const add = event.target.closest("[data-editor-add]");
+      const remove = event.target.closest("[data-editor-remove]");
+      const rewrite = event.target.closest("[data-rewrite-beats]");
+      try {
+        if (add) addScriptEditorItem(add.dataset.editorAdd);
+        if (remove) removeScriptEditorItem(remove.dataset.editorRemove, Number(remove.dataset.editorIndex));
+        if (rewrite) await rewriteScriptBeat(rewrite.dataset.rewriteBeats);
+      } catch (error) { reportError("剧本精修", error); }
+    });
+    $("#scriptRevisionNote").addEventListener("input", (event) => {
+      const session = ensureScriptRevisionSession();
+      if (session) session.revisionNote = event.target.value;
+      saveDraft(false);
+    });
+    $("#saveScriptVersionBtn").addEventListener("click", () => {
+      try { saveWorkingScriptVersion(); } catch (error) { reportError("保存剧本版本", error); }
+    });
+    $("#discardScriptDraftBtn").addEventListener("click", () => {
+      try { discardWorkingScriptDraft(); } catch (error) { reportError("放弃工作稿", error); }
+    });
+    $("#approveScriptVersionBtn").addEventListener("click", async () => {
+      try { await approveCurrentScript(); } catch (error) { reportError("批准剧本", error); }
+    });
+    $("#adoptRewriteCandidateBtn").addEventListener("click", () => {
+      try { adoptRewriteCandidate(); } catch (error) { reportError("采用改写候选", error); }
+    });
+    $("#discardRewriteCandidateBtn").addEventListener("click", discardRewriteCandidate);
+    $("#forceApproveScriptBtn").addEventListener("click", () => {
+      try { forceApproveCurrentScript(); } catch (error) { reportError("强制批准", error); }
+    });
+    $("#applyReviewBibleDeltasBtn").addEventListener("click", () => {
+      try { applyReviewBibleDeltas(); } catch (error) { reportError("采用圣经建议", error); }
+    });
+    ["scriptCompareLeft", "scriptCompareRight"].forEach((id) => $("#" + id).addEventListener("change", (event) => {
+      const session = ensureScriptRevisionSession();
+      if (id === "scriptCompareLeft") session.compareLeftId = event.target.value;
+      else session.compareRightId = event.target.value;
+      renderScriptVersions(); saveDraft(false);
+    }));
+    $("#scriptVersionList").addEventListener("click", (event) => {
+      const button = event.target.closest("[data-script-version-restore]");
+      if (!button) return;
+      try {
+        if (state.scriptRevisionSession?.dirty) throw new Error("当前工作稿有未保存修改，请先保存为新版本或点击“放弃工作稿”。");
+        restoreProjectEpisode(state.currentEpisodeId, button.dataset.scriptVersionRestore);
+        setScriptView("read");
+        setStatus("已恢复所选剧本版本；其批准状态与分镜绑定同时恢复");
+      } catch (error) { reportError("恢复剧本版本", error); }
     });
     $("#storyboardBtn").addEventListener("click", async () => {
       try {

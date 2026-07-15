@@ -6,6 +6,7 @@ const files = [
   "app.js",
   "generator.js",
   "workflow-core.js",
+  "script-revision.js",
   "project-domain.js",
   "episode-bible.js",
   "episode-planner.js",

@@ -3,7 +3,32 @@
   if (typeof module === "object" && module.exports) module.exports = api;
   if (root) root.RocoProjectDomain = api;
 })(typeof globalThis !== "undefined" ? globalThis : this, function () {
-  const PROJECT_SCHEMA_VERSION = 7;
+  const PROJECT_SCHEMA_VERSION = 8;
+
+  function scriptFingerprint(script) {
+    const source = JSON.stringify(script || null);
+    let hash = 2166136261;
+    for (let index = 0; index < source.length; index += 1) {
+      hash ^= source.charCodeAt(index);
+      hash = Math.imul(hash, 16777619);
+    }
+    return `script-${(hash >>> 0).toString(16).padStart(8, "0")}`;
+  }
+
+  function normalizeApprovalReview(review = null) {
+    if (!review || typeof review !== "object") return null;
+    const allowedStatuses = new Set(["passed", "issues", "overridden", "legacy"]);
+    return {
+      status: allowedStatuses.has(review.status) ? review.status : "issues",
+      checkedAt: String(review.checkedAt || ""),
+      source: String(review.source || ""),
+      model: String(review.model || ""),
+      summary: String(review.summary || ""),
+      issues: Array.isArray(review.issues) ? review.issues.map((item) => ({ ...item })) : [],
+      bibleDeltas: Array.isArray(review.bibleDeltas) ? review.bibleDeltas.map((item) => ({ ...item })) : [],
+      overrideReason: String(review.overrideReason || ""),
+    };
+  }
 
   function emptySeriesLedger() {
     return {
@@ -96,6 +121,15 @@
       canonDeltas: Array.isArray(snapshot.canonDeltas) ? snapshot.canonDeltas.map((item) => ({ ...item })) : [],
       acceptedCanonDeltaIds: normalizeIdList(snapshot.acceptedCanonDeltaIds),
       legacyBibleSnapshotMissing: Boolean(snapshot.legacyBibleSnapshotMissing),
+      parentVersionId: String(snapshot.parentVersionId || ""),
+      revisionSource: ["generated", "manual", "ai-rewrite", "doctor", "recast"].includes(snapshot.revisionSource)
+        ? snapshot.revisionSource
+        : "generated",
+      revisionNote: String(snapshot.revisionNote || ""),
+      scriptFingerprint: String(snapshot.scriptFingerprint || scriptFingerprint(snapshot.script)),
+      approvalStatus: snapshot.approvalStatus === "approved" ? "approved" : "draft",
+      approvedAt: String(snapshot.approvedAt || ""),
+      approvalReview: normalizeApprovalReview(snapshot.approvalReview),
       doctorResult,
       doctorReport: doctorResult?.report || snapshot.doctorReport || null,
     };
@@ -131,6 +165,13 @@
     episode.canonDeltas = Array.isArray(version.canonDeltas) ? version.canonDeltas.map((item) => ({ ...item })) : [];
     episode.acceptedCanonDeltaIds = normalizeIdList(version.acceptedCanonDeltaIds);
     episode.legacyBibleSnapshotMissing = Boolean(version.legacyBibleSnapshotMissing);
+    episode.parentVersionId = version.parentVersionId || "";
+    episode.revisionSource = version.revisionSource || "generated";
+    episode.revisionNote = version.revisionNote || "";
+    episode.scriptFingerprint = version.scriptFingerprint || scriptFingerprint(version.script);
+    episode.approvalStatus = version.approvalStatus || "draft";
+    episode.approvedAt = version.approvedAt || "";
+    episode.approvalReview = normalizeApprovalReview(version.approvalReview);
     episode.doctorResult = version.doctorResult || null;
     episode.doctorReport = version.doctorReport || null;
     return episode;
@@ -303,6 +344,32 @@
       project.schemaVersion = 7;
     }
 
+    if (project.schemaVersion < 8) {
+      project.episodes = project.episodes.map((episode) => ({
+        ...episode,
+        versions: Array.isArray(episode.versions) ? episode.versions.map((version) => ({
+          ...version,
+          parentVersionId: "",
+          revisionSource: "generated",
+          revisionNote: "升级前保存的历史剧本",
+          scriptFingerprint: scriptFingerprint(version.script),
+          approvalStatus: version.script ? "approved" : "draft",
+          approvedAt: version.script ? (version.createdAt || episode.updatedAt || "") : "",
+          approvalReview: version.script ? {
+            status: "legacy",
+            checkedAt: version.createdAt || episode.updatedAt || "",
+            source: "migration",
+            model: "",
+            summary: "该版本在批准流程上线前创建，保留原有可用状态。",
+            issues: [],
+            bibleDeltas: [],
+            overrideReason: "",
+          } : null,
+        })) : episode.versions,
+      }));
+      project.schemaVersion = 8;
+    }
+
     project.schemaVersion = PROJECT_SCHEMA_VERSION;
     return normalizeProjectEpisodes(project);
   }
@@ -409,8 +476,28 @@
     return storyboardVersion;
   }
 
+  function approveEpisodeVersion(episode, versionId, review = {}) {
+    const version = (episode?.versions || []).find((item) => item.id === versionId);
+    if (!version || !version.script) return null;
+    const normalizedReview = normalizeApprovalReview(review);
+    if (!normalizedReview || !["passed", "overridden", "legacy"].includes(normalizedReview.status)) return null;
+    version.approvalStatus = "approved";
+    version.approvedAt = normalizedReview.checkedAt || new Date().toISOString();
+    version.approvalReview = normalizedReview;
+    version.scriptFingerprint = scriptFingerprint(version.script);
+    applyEpisodeVersion(episode, version.id);
+    episode.updatedAt = new Date().toISOString();
+    return version;
+  }
+
+  function versionCanGenerateStoryboard(version) {
+    return Boolean(version?.script && version.approvalStatus === "approved" && version.scriptFingerprint === scriptFingerprint(version.script));
+  }
+
   return {
     PROJECT_SCHEMA_VERSION,
+    scriptFingerprint,
+    normalizeApprovalReview,
     emptySeriesLedger,
     newId,
     createProjectRecord,
@@ -427,5 +514,7 @@
     upsertEpisodeVersion,
     updateActiveStoryboard,
     applyStoryboardVersion,
+    approveEpisodeVersion,
+    versionCanGenerateStoryboard,
   };
 });

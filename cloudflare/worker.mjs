@@ -23,6 +23,8 @@ const rateBuckets = new Map();
 const fallbackDailyUsage = new Map();
 const AI_PATH_COST = new Map([
   ["/api/script", 1],
+  ["/api/rewrite-script", 1],
+  ["/api/script-canon-review", 1],
   ["/api/storyboard", 1],
   ["/api/bible", 1],
   ["/api/episode-bible", 1],
@@ -438,6 +440,12 @@ function normalizeInput(input = {}) {
       sourceEpisodeBible: continuation.sourceEpisodeBible && typeof continuation.sourceEpisodeBible === "object" ? continuation.sourceEpisodeBible : null,
     } : null,
     script: input.script || null,
+    scriptVersionId: String(input.scriptVersionId || "").trim(),
+    rewriteTarget: input.rewriteTarget && typeof input.rewriteTarget === "object" ? {
+      beatIds: normalizeIdList(input.rewriteTarget.beatIds, 8),
+      instruction: String(input.rewriteTarget.instruction || "").trim(),
+    } : null,
+    generationBibleSnapshot: input.generationBibleSnapshot && typeof input.generationBibleSnapshot === "object" ? input.generationBibleSnapshot : null,
     recastMappings: (Array.isArray(input.recastMappings) ? input.recastMappings : []).slice(0, 5).map((item) => ({
       fromName: String(item?.fromName || "").trim(),
       targetCharacterId: String(item?.targetCharacterId || "").trim(),
@@ -738,6 +746,59 @@ ${bibleContext(payload)}
 ${stringify(payload.script, 22000)}
 
 返回结构：{"script":{"title":"","synopsis":"","characters":[],"structure":[],"dialogue":[],"rhythm":[],"reversals":[],"innovationPoints":[],"comedyBeats":[],"visualHighlights":[],"assetIntegration":{"characters":[],"memes":[]},"canonDeltas":[],"hooks":[],"tags":[]}}`;
+}
+
+function rewriteScriptPrompt(input) {
+  const payload = normalizeInput(input);
+  const targetBeatIds = payload.rewriteTarget?.beatIds || [];
+  return `你是中文竖屏短剧的精修编剧。只对指定剧情节拍及其关联台词做局部改写，只输出严格 JSON，不要 Markdown 或解释。
+
+目标节拍：${targetBeatIds.join("、")}
+改写要求：${compact(payload.rewriteTarget?.instruction, "增强冲突、画面动作和台词表现力，同时保持原有因果")}
+
+硬约束：
+1. 只能修改 structure 中 beatIds 与目标节拍相交的 content，以及 dialogue 中 beatIds 与目标节拍相交的台词内容。
+2. 允许在目标节拍内增删台词，但保留未删除台词原有 id；新增台词 id 使用 LINE-REV-加两位数字。
+3. 标题、梗概、人物、非目标结构、非目标台词、情绪节奏、反转、创新机制、笑点、视觉爆点、素材绑定、结尾钩子和标签必须原样返回。
+4. 不得突破本次圣经中的能力、人物关系和世界规则，不得改变续写来源已经发生的事实。
+5. 改写要形成可拍动作、视觉变化和明确台词意图，不能只替换形容词。
+6. 返回完整 script 对象，字段不能缺失；另返回 changeSummary 和 affectedBeatIds。
+
+项目与本次圣经：
+${bibleContext(payload)}
+${continuationPromptContext(payload, 7000)}
+
+当前完整剧本：
+${stringify(payload.script, 24000)}
+
+返回结构：
+{"script":{"title":"","synopsis":"","characters":[],"structure":[],"dialogue":[],"rhythm":[],"reversals":[],"innovationPoints":[],"comedyBeats":[],"visualHighlights":[],"assetIntegration":{"characters":[],"memes":[]},"canonDeltas":[],"hooks":[],"tags":[]},"changeSummary":"具体说明改了什么和为什么","affectedBeatIds":["BEAT-01"]}`;
+}
+
+function scriptCanonReviewPrompt(input) {
+  const payload = normalizeInput(input);
+  return `你是连续短剧的设定与连续性总编。复核待批准剧本是否与系列总圣经、本次创作圣经、来源集和连载台账一致。只输出严格 JSON，不要 Markdown 或解释。
+
+检查范围：
+1. 角色性格、目标、口头习惯和行为底线是否跑偏。
+2. 精灵能力是否突破能力边界、代价、冷却或已记录状态。
+3. 人物关系、已知事实、道具归属和反派动机是否矛盾。
+4. 续写第一段是否实际承接来源结尾钩子，不能只复述上一集。
+5. 结尾是否形成下一集可执行的新悬念，并遵守钩子规则。
+6. generationBibleSnapshot 是生成时不可变依据；episodeBible 是当前校准快照。不得为了迁就剧本而自动改写长期设定。
+
+判定规则：没有实质冲突时 status 返回 passed；有任何需要修正的冲突时返回 issues。每个问题必须引用剧本证据、违反的规则和可执行修改建议。只有确实应成为长期事实的内容才能放入 bibleDeltas。
+
+项目资料：
+${bibleContext(payload)}
+生成时圣经快照：${stringify(payload.generationBibleSnapshot || {}, 8500)}
+${continuationPromptContext(payload, 9000)}
+
+待批准剧本：
+${stringify(payload.script, 24000)}
+
+返回结构：
+{"review":{"status":"passed或issues","summary":"复核结论","issues":[{"id":"REVIEW-01","category":"角色性格|能力边界|人物关系|连续性|道具状态|结尾钩子|世界规则","severity":"高|中|低","evidence":"剧本中的具体证据","rule":"冲突的圣经或来源事实","recommendation":"如何修改剧本","beatIds":["BEAT-01"],"dialogueIds":["LINE-01"]}],"bibleDeltas":[{"id":"CANON-REVIEW-01","field":"characters|abilities|relations|antagonist|worldRules|mainConflict|hookRules","fact":"建议补入本次圣经的长期事实","evidence":"剧本依据","risk":"对后续的限制"}]}}`;
 }
 
 function storyboardPrompt(input, options = {}) {
@@ -1182,6 +1243,7 @@ function normalizeScript(result, input = {}) {
   const source = result?.script || result;
   if (!source || typeof source !== "object") throw validationError("剧本", ["缺少 script 对象"]);
   const sourceDialogue = Array.isArray(source.dialogue) ? source.dialogue : [];
+  const usedDialogueIds = new Set();
   const validBeatIds = payload.beatSheet.length === 8 ? payload.beatSheet.map((beat, index) => textValue(beat?.id) || `BEAT-${String(index + 1).padStart(2, "0")}`) : [];
   const script = {
     title: textValue(source.title),
@@ -1191,7 +1253,13 @@ function normalizeScript(result, input = {}) {
     dialogue: sourceDialogue.map((item, index) => {
       const supplied = normalizeIdList(item?.beatIds, 8).filter((id) => !validBeatIds.length || validBeatIds.includes(id));
       const fallback = validBeatIds.length ? [validBeatIds[Math.min(validBeatIds.length - 1, Math.floor(index * validBeatIds.length / Math.max(1, sourceDialogue.length)))]] : [];
-      return { id: `LINE-${String(index + 1).padStart(2, "0")}`, beatIds: supplied.length ? supplied : fallback, role: textValue(item?.role), line: textValue(item?.line), intention: textValue(item?.intention), subtext: textValue(item?.subtext) };
+      const requestedId = textValue(item?.id);
+      let id = /^LINE-[A-Z0-9-]+$/i.test(requestedId) && !usedDialogueIds.has(requestedId)
+        ? requestedId
+        : `LINE-${String(index + 1).padStart(2, "0")}`;
+      while (usedDialogueIds.has(id)) id = `LINE-${String(index + 1).padStart(2, "0")}-${usedDialogueIds.size + 1}`;
+      usedDialogueIds.add(id);
+      return { id, beatIds: supplied.length ? supplied : fallback, role: textValue(item?.role), line: textValue(item?.line), intention: textValue(item?.intention), subtext: textValue(item?.subtext) };
     }),
     rhythm: normalizeTextList(source.rhythm, 3),
     reversals: normalizeTextList(source.reversals, 3),
@@ -1247,6 +1315,89 @@ function normalizeScript(result, input = {}) {
   if (missingMemeAssets.length || script.assetIntegration.memes.some((item) => !item.name || !item.triggerRole || !item.setup || !item.payoff || !item.plotEffect)) issues.push("已选梗必须逐个说明触发角色、铺垫、回扣和剧情后果；自然产生的其他笑点无需写入梗库绑定");
   if (issues.length) throw validationError("剧本", issues);
   return { script };
+}
+
+function stableJson(value) {
+  if (Array.isArray(value)) return value.map(stableJson);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(Object.keys(value).sort().map((key) => [key, stableJson(value[key])]));
+}
+
+function sameJson(left, right) {
+  return JSON.stringify(stableJson(left)) === JSON.stringify(stableJson(right));
+}
+
+function itemTouchesBeats(item, beatIds) {
+  return normalizeIdList(item?.beatIds, 8).some((id) => beatIds.includes(id));
+}
+
+function rewriteScopeViolations(original, candidate, targetBeatIds) {
+  const violations = [];
+  const lockedFields = ["title", "synopsis", "characters", "rhythm", "reversals", "innovationPoints", "comedyBeats", "visualHighlights", "assetIntegration", "hooks", "tags"];
+  lockedFields.forEach((field) => {
+    if (!sameJson(original[field], candidate[field])) violations.push(field);
+  });
+  const structureCount = Math.max(original.structure.length, candidate.structure.length);
+  for (let index = 0; index < structureCount; index += 1) {
+    const before = original.structure[index];
+    const after = candidate.structure[index];
+    if (!itemTouchesBeats(before || after, targetBeatIds) && !sameJson(before, after)) violations.push(`structure:${index + 1}`);
+  }
+  const beforeLines = new Map(original.dialogue.map((item) => [item.id, item]));
+  const afterLines = new Map(candidate.dialogue.map((item) => [item.id, item]));
+  [...new Set([...beforeLines.keys(), ...afterLines.keys()])].forEach((id) => {
+    const before = beforeLines.get(id);
+    const after = afterLines.get(id);
+    if (!itemTouchesBeats(before || after, targetBeatIds) && !sameJson(before, after)) violations.push(`dialogue:${id}`);
+  });
+  return [...new Set(violations)];
+}
+
+function normalizeRewriteScript(result, input = {}) {
+  const payload = normalizeInput(input);
+  const targetBeatIds = payload.rewriteTarget?.beatIds || [];
+  if (!payload.script || !targetBeatIds.length) throw validationError("局部改写", ["缺少当前剧本或目标节拍"]);
+  const original = normalizeScript({ script: payload.script }, payload).script;
+  const candidate = normalizeScript({ script: result?.script || result }, payload).script;
+  const violations = rewriteScopeViolations(original, candidate, targetBeatIds);
+  if (violations.length) throw validationError("局部改写", [`模型改动了锁定区域：${violations.join("、")}`]);
+  const changeSummary = textValue(result?.changeSummary);
+  if (!changeSummary) throw validationError("局部改写", ["缺少修改摘要"]);
+  return {
+    script: candidate,
+    changeSummary,
+    affectedBeatIds: normalizeIdList(result?.affectedBeatIds, 8).filter((id) => targetBeatIds.includes(id)).length
+      ? normalizeIdList(result?.affectedBeatIds, 8).filter((id) => targetBeatIds.includes(id))
+      : targetBeatIds,
+  };
+}
+
+function normalizeScriptCanonReview(result) {
+  const source = result?.review || result;
+  if (!source || typeof source !== "object") throw validationError("圣经复核", ["缺少 review 对象"]);
+  const issues = (Array.isArray(source.issues) ? source.issues : []).slice(0, 12).map((item, index) => ({
+    id: textValue(item?.id) || `REVIEW-${String(index + 1).padStart(2, "0")}`,
+    category: textValue(item?.category) || "连续性",
+    severity: ["高", "中", "低"].includes(textValue(item?.severity)) ? textValue(item?.severity) : "中",
+    evidence: textValue(item?.evidence),
+    rule: textValue(item?.rule),
+    recommendation: textValue(item?.recommendation),
+    beatIds: normalizeIdList(item?.beatIds, 8),
+    dialogueIds: normalizeIdList(item?.dialogueIds, 12),
+  })).filter((item) => item.evidence && item.rule && item.recommendation);
+  const bibleDeltas = (Array.isArray(source.bibleDeltas) ? source.bibleDeltas : []).slice(0, 8).map((item, index) => ({
+    id: textValue(item?.id) || `CANON-REVIEW-${String(index + 1).padStart(2, "0")}`,
+    field: BIBLE_FIELDS.includes(textValue(item?.field)) ? textValue(item?.field) : "",
+    fact: textValue(item?.fact),
+    evidence: textValue(item?.evidence),
+    risk: textValue(item?.risk) || "采用后会成为本剧本版本的长期约束。",
+  })).filter((item) => item.field && item.fact && item.evidence);
+  const requestedStatus = textValue(source.status);
+  const status = issues.length || requestedStatus === "issues" ? "issues" : "passed";
+  const summary = textValue(source.summary);
+  if (!summary) throw validationError("圣经复核", ["缺少复核结论"]);
+  if (status === "issues" && !issues.length) throw validationError("圣经复核", ["判定存在问题但没有提供可执行问题明细"]);
+  return { review: { status, summary, issues, bibleDeltas } };
 }
 
 function normalizeRecastScript(result, input = {}) {
@@ -1797,6 +1948,12 @@ async function api(request, env, url) {
   if (url.pathname === "/api/storyboard" && !input.script && !input.previousScript) {
     return error("请先生成或恢复一个剧本，再生成分镜", "SCRIPT_REQUIRED", 400);
   }
+  if (url.pathname === "/api/rewrite-script" && (!input.script || !Array.isArray(input.rewriteTarget?.beatIds) || !input.rewriteTarget.beatIds.length)) {
+    return error("请提供当前剧本、目标节拍和改写要求", "REWRITE_TARGET_REQUIRED", 400);
+  }
+  if (url.pathname === "/api/script-canon-review" && (!input.script || !input.episodeBible)) {
+    return error("请提供待批准剧本及其本次创作圣经", "CANON_REVIEW_CONTEXT_REQUIRED", 400);
+  }
   if (["/api/storyboard", "/api/generate"].includes(url.pathname)) {
     const plannedCount = storyboardSegmentPlan(input.duration, input.clipMode).segments.length;
     if (plannedCount > 24) return error("当前分段会产生超过 24 个视频段，请改用智能/8秒/10秒模式或缩短总时长。", "TOO_MANY_SEGMENTS", 400);
@@ -1814,6 +1971,18 @@ async function api(request, env, url) {
   if (url.pathname === "/api/script") {
     const raw = await askDeepSeek(env, input, scriptPrompt(input), SCRIPT_OUTPUT_TOKENS, usageMeter);
     const result = await normalizeWithRepair(env, input, raw, (value) => normalizeScript(value, input), SCRIPT_OUTPUT_TOKENS, usageMeter, "script");
+    return success(result);
+  }
+
+  if (url.pathname === "/api/rewrite-script") {
+    const raw = await askDeepSeek(env, input, rewriteScriptPrompt(input), SCRIPT_OUTPUT_TOKENS, usageMeter, { temperature: 0.55 });
+    const result = await normalizeWithRepair(env, input, raw, (value) => normalizeRewriteScript(value, input), SCRIPT_OUTPUT_TOKENS, usageMeter, "rewrite-script");
+    return success(result);
+  }
+
+  if (url.pathname === "/api/script-canon-review") {
+    const raw = await askDeepSeek(env, input, scriptCanonReviewPrompt(input), 3600, usageMeter, { temperature: 0.2 });
+    const result = await normalizeWithRepair(env, input, raw, normalizeScriptCanonReview, 3600, usageMeter, "script-canon-review");
     return success(result);
   }
 
@@ -1937,6 +2106,8 @@ export default {
 export const __test = {
   normalizeInput,
   normalizeScript,
+  normalizeRewriteScript,
+  normalizeScriptCanonReview,
   storyboardSegmentPlan,
   storyboardOutputTokens,
   storyboardSegmentChunks,
@@ -1953,6 +2124,8 @@ export const __test = {
   normalizeCreativeMixes,
   normalizeBeatSheet,
   scriptPrompt,
+  rewriteScriptPrompt,
+  scriptCanonReviewPrompt,
   plansPrompt,
   beatSheetPrompt,
   storyboardPrompt,

@@ -89,6 +89,84 @@
     `;
   }
 
+  function scriptEditor(scriptValue, options = {}) {
+    const script = scriptValue || {};
+    const locked = new Set(options.lockedBeatIds || []);
+    const instructionMap = options.rewriteInstructions || {};
+    const listValue = (items) => (items || []).join("\n");
+    return `
+      <div class="script-editor-section script-editor-basics">
+        <label>标题<input data-script-editor-input data-script-field="title" value="${escapeHtml(script.title || "")}" /></label>
+        <label class="editor-wide">故事梗概<textarea data-script-editor-input data-script-field="synopsis" rows="5">${escapeHtml(script.synopsis || "")}</textarea></label>
+      </div>
+      <section class="script-editor-section">
+        <div class="editor-section-head"><div><span>01</span><h3>人物设定</h3></div><button class="small-action" type="button" data-editor-add="characters">添加角色</button></div>
+        <div class="editor-rows">${(script.characters || []).map((item, index) => `
+          <div class="editor-row character-editor-row" data-editor-item="characters" data-editor-index="${index}">
+            <input data-script-editor-input data-item-field="name" value="${escapeHtml(item.name)}" aria-label="角色名" />
+            <textarea data-script-editor-input data-item-field="description" rows="3" aria-label="角色设定">${escapeHtml(item.description)}</textarea>
+            <button class="storyboard-icon-button" type="button" data-editor-remove="characters" data-editor-index="${index}" aria-label="删除角色" title="删除角色">×</button>
+          </div>`).join("")}</div>
+      </section>
+      <section class="script-editor-section">
+        <div class="editor-section-head"><div><span>02</span><h3>剧情结构与局部改写</h3></div><small>锁定的节拍不会发送局部改写</small></div>
+        <div class="structure-editor-list">${(script.structure || []).map((item, index) => {
+          const beatIds = item.beatIds || [];
+          const key = beatIds.join("+");
+          const isLocked = beatIds.some((id) => locked.has(id));
+          return `<article class="structure-editor-item ${isLocked ? "is-locked" : ""}" data-editor-item="structure" data-editor-index="${index}">
+            <div class="structure-editor-head"><div><span>${escapeHtml(beatIds.join(" · "))}</span><input data-script-editor-input data-item-field="beat" value="${escapeHtml(item.beat)}" aria-label="结构名称" /></div><label class="lock-control"><input type="checkbox" data-beat-lock="${escapeHtml(key)}" ${isLocked ? "checked" : ""} />锁定</label></div>
+            <textarea data-script-editor-input data-item-field="content" rows="5" aria-label="剧情内容">${escapeHtml(item.content)}</textarea>
+            <div class="rewrite-command"><input data-rewrite-instruction="${escapeHtml(key)}" value="${escapeHtml(instructionMap[key] || "")}" placeholder="告诉 AI 这一拍具体要加强什么" ${isLocked ? "disabled" : ""}/><button class="secondary-action compact-action" type="button" data-rewrite-beats="${escapeHtml(key)}" ${isLocked ? "disabled" : ""}>AI 改写本拍与关联台词</button></div>
+          </article>`;
+        }).join("")}</div>
+      </section>
+      <section class="script-editor-section">
+        <div class="editor-section-head"><div><span>03</span><h3>台词</h3></div><button class="small-action" type="button" data-editor-add="dialogue">添加台词</button></div>
+        <div class="dialogue-editor-list">${(script.dialogue || []).map((item, index) => `
+          <article class="dialogue-editor-item" data-editor-item="dialogue" data-editor-index="${index}">
+            <div class="dialogue-editor-meta"><code>${escapeHtml(item.id)}</code><input data-script-editor-input data-item-field="beatIds" value="${escapeHtml((item.beatIds || []).join(","))}" aria-label="关联节拍" /><button class="storyboard-icon-button" type="button" data-editor-remove="dialogue" data-editor-index="${index}" aria-label="删除台词" title="删除台词">×</button></div>
+            <div class="dialogue-editor-grid"><input data-script-editor-input data-item-field="role" value="${escapeHtml(item.role)}" aria-label="说话角色" /><textarea data-script-editor-input data-item-field="line" rows="2" aria-label="台词">${escapeHtml(item.line)}</textarea><input data-script-editor-input data-item-field="intention" value="${escapeHtml(item.intention || "")}" placeholder="台词意图" /><input data-script-editor-input data-item-field="subtext" value="${escapeHtml(item.subtext || "")}" placeholder="潜台词" /></div>
+          </article>`).join("")}</div>
+      </section>
+      <section class="script-editor-section editor-text-lists">
+        <div class="editor-section-head"><div><span>04</span><h3>节奏、反转与钩子</h3></div><small>每行一条</small></div>
+        <label>情绪节奏<textarea data-script-editor-input data-script-list="rhythm" rows="3">${escapeHtml(listValue(script.rhythm))}</textarea></label>
+        <label>反转点<textarea data-script-editor-input data-script-list="reversals" rows="3">${escapeHtml(listValue(script.reversals))}</textarea></label>
+        <label>创新机制<textarea data-script-editor-input data-script-list="innovationPoints" rows="3">${escapeHtml(listValue(script.innovationPoints))}</textarea></label>
+        <label>爆点与结尾钩子<textarea data-script-editor-input data-script-list="hooks" rows="3">${escapeHtml(listValue(script.hooks))}</textarea></label>
+        <label>话题标签<textarea data-script-editor-input data-script-list="tags" rows="2">${escapeHtml(listValue(script.tags))}</textarea></label>
+      </section>
+      <section class="script-editor-section">
+        <div class="editor-section-head"><div><span>05</span><h3>笑点设计</h3></div><button class="small-action" type="button" data-editor-add="comedyBeats">添加笑点</button></div>
+        <div class="editor-rows">${(script.comedyBeats || []).map((item, index) => `<div class="editor-row triple-editor-row" data-editor-item="comedyBeats" data-editor-index="${index}"><textarea data-script-editor-input data-item-field="setup" rows="2" placeholder="铺垫">${escapeHtml(item.setup)}</textarea><textarea data-script-editor-input data-item-field="payoff" rows="2" placeholder="误导或回扣">${escapeHtml(item.payoff)}</textarea><textarea data-script-editor-input data-item-field="visualAction" rows="2" placeholder="静音可懂的动作">${escapeHtml(item.visualAction)}</textarea><button class="storyboard-icon-button" type="button" data-editor-remove="comedyBeats" data-editor-index="${index}" aria-label="删除笑点">×</button></div>`).join("")}</div>
+      </section>
+      <section class="script-editor-section">
+        <div class="editor-section-head"><div><span>06</span><h3>视觉爆点</h3></div><button class="small-action" type="button" data-editor-add="visualHighlights">添加画面</button></div>
+        <div class="editor-rows">${(script.visualHighlights || []).map((item, index) => `<div class="editor-row triple-editor-row" data-editor-item="visualHighlights" data-editor-index="${index}"><textarea data-script-editor-input data-item-field="moment" rows="2" placeholder="发生时刻">${escapeHtml(item.moment)}</textarea><textarea data-script-editor-input data-item-field="verticalComposition" rows="2" placeholder="9:16 构图">${escapeHtml(item.verticalComposition)}</textarea><textarea data-script-editor-input data-item-field="effect" rows="2" placeholder="画面效果">${escapeHtml(item.effect)}</textarea><button class="storyboard-icon-button" type="button" data-editor-remove="visualHighlights" data-editor-index="${index}" aria-label="删除画面">×</button></div>`).join("")}</div>
+      </section>`;
+  }
+
+  function diffText(value) {
+    if (value == null) return "无";
+    if (typeof value === "string") return value;
+    return formatItem(value) || JSON.stringify(value, null, 2);
+  }
+
+  function versionDiff(groups = []) {
+    if (!groups.length) return `<p class="helper">两个版本没有结构化差异。</p>`;
+    return groups.map((group) => `<section class="diff-group"><h3>${escapeHtml(group.label)}<span>${group.changes.length}</span></h3>${group.changes.map((change) => `<article class="diff-item is-${escapeHtml(change.type)}"><strong>${escapeHtml(change.key)}</strong><div class="diff-columns"><div><span>之前</span><p>${escapeHtml(diffText(change.before))}</p></div><div><span>之后</span><p>${escapeHtml(diffText(change.after))}</p></div></div></article>`).join("")}</section>`).join("");
+  }
+
+  function scriptVersions(versions = [], activeId = "") {
+    if (!versions.length) return `<p class="helper">当前集数还没有剧本版本。</p>`;
+    return versions.map((version, index) => {
+      const reviewStatus = version.approvalReview?.status;
+      const status = version.approvalStatus === "approved" ? (reviewStatus === "overridden" ? "风险批准" : reviewStatus === "legacy" ? "历史批准" : "已批准") : "草稿";
+      return `<button class="script-version-row ${version.id === activeId ? "is-active-version" : ""}" type="button" data-script-version-restore="${escapeHtml(version.id)}"><span>v${index + 1}</span><div><strong>${escapeHtml(version.script?.title || "未命名剧本")}</strong><small>${escapeHtml(version.revisionNote || version.revisionSource || "生成版本")}</small></div><em data-status="${escapeHtml(reviewStatus || "draft")}">${escapeHtml(status)}</em></button>`;
+    }).join("");
+  }
+
   function table(rows = [], columns = []) {
     if (!rows.length) return `<p class="helper">暂无数据。</p>`;
     return `
@@ -228,5 +306,5 @@
     }).join("");
   }
 
-  return { escapeHtml, formatItem, renderList, emptyStudio, script, table, storyboard, history };
+  return { escapeHtml, formatItem, renderList, emptyStudio, script, scriptEditor, versionDiff, scriptVersions, table, storyboard, history };
 });
