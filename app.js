@@ -52,6 +52,13 @@
   const deriveReviewInsights = projectDomain.deriveReviewInsights;
   const episodePlanner = window.RocoEpisodePlanner;
   const creationSession = window.RocoCreationSession;
+  const episodeBibleDomain = window.RocoEpisodeBible;
+  const episodeBibleFieldIds = {
+    characters: "episodeBibleCharacters", abilities: "episodeBibleAbilities", relations: "episodeBibleRelations",
+    antagonist: "episodeBibleAntagonist", worldRules: "episodeBibleWorldRules", mainConflict: "episodeBibleMainConflict",
+    hookRules: "episodeBibleHookRules",
+  };
+  let suppressEpisodeBibleInvalidation = false;
   const uiTemplates = window.RocoUiTemplates;
   const escapeHtml = uiTemplates.escapeHtml;
   const formatItem = uiTemplates.formatItem;
@@ -124,6 +131,10 @@
     const hasApprovedBeatSheet = state.beatSheetApproved && state.beatSheet.length === 8;
     const isContinuation = state.creationMode === "continue";
     const hasContinuationSource = Boolean(state.continuationSource?.script && creationSession.normalizeSourceRef(state.continuationSource));
+    const bibleFingerprint = currentEpisodeBibleFingerprint();
+    const hasConfirmedEpisodeBible = episodeBibleDomain.isComplete(state.episodeBible?.draft)
+      && ["confirmed", "aligned"].includes(state.episodeBible?.status)
+      && state.episodeBible.confirmedFingerprint === bibleFingerprint;
     const generateButton = $("#generateBtn");
     const storyboardButton = $("#storyboardBtn");
     const copyAllStoryboardButton = $("#copyAllStoryboardBtn");
@@ -133,17 +144,17 @@
     const stage = $(".stage");
 
     if (generateButton) {
-      generateButton.disabled = isBusy || !hasCompletePlan || !hasApprovedBeatSheet || (isContinuation && !hasContinuationSource);
-      generateButton.textContent = isContinuation && !hasContinuationSource ? "先选择续写来源" : !hasCompletePlan ? "先完成本集策划" : !hasApprovedBeatSheet ? "先确认剧情节拍表" : isContinuation ? "生成续写剧本" : "生成新剧本";
-      generateButton.title = hasCompletePlan && hasApprovedBeatSheet ? "根据已确认的本集策划和节拍表生成剧本" : "请先完成本集策划，并生成、确认一版剧情节拍表";
+      generateButton.disabled = isBusy || !hasCompletePlan || !hasApprovedBeatSheet || !hasConfirmedEpisodeBible || (isContinuation && !hasContinuationSource);
+      generateButton.textContent = isContinuation && !hasContinuationSource ? "先选择续写来源" : !hasCompletePlan ? "先完成本集策划" : !hasApprovedBeatSheet ? "先确认剧情节拍表" : !hasConfirmedEpisodeBible ? (state.episodeBible?.status === "stale" ? "本次圣经过期，请重新确认" : "先确认本次创作圣经") : state.episodeBible?.scriptNeedsRegeneration ? "重新生成剧本新版本" : isContinuation ? "生成续写剧本" : "生成新剧本";
+      generateButton.title = hasConfirmedEpisodeBible ? "根据已确认的本集策划、节拍表和本次创作圣经生成剧本" : "请先准备并确认本次创作圣经";
     }
     if (planReadyState) {
-      planReadyState.textContent = !hasCompletePlan ? "请先完整填写或采用一套本集策划" : !hasApprovedBeatSheet ? "策划已完成，请生成并确认剧情节拍表" : "策划和节拍表已就绪，可以生成剧本";
-      planReadyState.classList.toggle("is-ready", hasCompletePlan && hasApprovedBeatSheet);
+      planReadyState.textContent = !hasCompletePlan ? "请先完整填写或采用一套本集策划" : !hasApprovedBeatSheet ? "策划已完成，请生成并确认剧情节拍表" : !hasConfirmedEpisodeBible ? "节拍表已确认，请准备本次创作圣经" : "策划、节拍表和本次圣经已就绪";
+      planReadyState.classList.toggle("is-ready", hasCompletePlan && hasApprovedBeatSheet && hasConfirmedEpisodeBible);
     }
     if (storyboardButton) {
-      storyboardButton.disabled = isBusy || !hasScript;
-      storyboardButton.title = hasScript ? "仅根据当前剧本版本，按所选视频分段模式生成对应分镜" : "请先生成并确认一版剧本";
+      storyboardButton.disabled = isBusy || !hasScript || Boolean(state.episodeBible?.scriptNeedsRegeneration);
+      storyboardButton.title = state.episodeBible?.scriptNeedsRegeneration ? "本次圣经已修改，请先重新生成剧本版本" : hasScript ? "仅根据当前剧本版本绑定的圣经快照生成对应分镜" : "请先生成并确认一版剧本";
     }
     if (copyAllStoryboardButton) {
       copyAllStoryboardButton.disabled = isBusy || !hasStoryboard;
@@ -158,6 +169,17 @@
       beatSheetButton.disabled = isBusy || !hasCompletePlan;
       beatSheetButton.title = hasCompletePlan ? "根据本集策划和已选角色/梗生成 8 个因果节拍" : "请先完成本集策划";
     }
+    const episodeBibleReady = hasCompletePlan && hasApprovedBeatSheet && (!isContinuation || hasContinuationSource);
+    const generateEpisodeBibleButton = $("#generateEpisodeBibleBtn");
+    if (generateEpisodeBibleButton) generateEpisodeBibleButton.disabled = isBusy || !episodeBibleReady;
+    const confirmEpisodeBibleButton = $("#confirmEpisodeBibleBtn");
+    if (confirmEpisodeBibleButton) confirmEpisodeBibleButton.disabled = isBusy || !episodeBibleReady || !episodeBibleDomain.isComplete(state.episodeBible?.draft);
+    const restoreProjectBibleButton = $("#restoreProjectBibleBtn");
+    if (restoreProjectBibleButton) restoreProjectBibleButton.disabled = isBusy || !currentProject();
+    const syncEpisodeBibleButton = $("#syncEpisodeBibleBtn");
+    if (syncEpisodeBibleButton) syncEpisodeBibleButton.disabled = isBusy || !hasConfirmedEpisodeBible;
+    const applyCanonDeltasButton = $("#applyCanonDeltasBtn");
+    if (applyCanonDeltasButton) applyCanonDeltasButton.disabled = isBusy || !state.episodeBible?.canonDeltas?.length;
     ["checkContinuityBtn", "regenerateTopicsBtn", "suggestPlansBtn", "autoPlanBtn", "approveBeatSheetBtn", "suggestCreativeMixBtn", "generateBibleBtn", "generateCharacterBtn", "applyBibleTemplateBtn", "memeLabBtn", "memeInspireBtn", "projectSelect", "newProjectBtn", "importProjectBtn", "applyRecastBtn"].forEach((id) => {
       const control = document.getElementById(id);
       if (control) control.disabled = isBusy;
@@ -212,12 +234,14 @@
     state.activeBeatSheetBatchId = null;
     state.continuationSource = null;
     state.continuationBrief = {};
+    state.episodeBible = episodeBibleDomain.createState();
     setInputValue("episodeNumber", nextEpisodeNumber());
     renderPlanSuggestions();
     renderMemeLab();
     renderCreativeAssetPicker();
     renderCreativeMixResults();
     renderBeatSheet();
+    renderEpisodeBible();
     renderScript();
     renderStoryboard();
     renderCreativePack();
@@ -229,7 +253,7 @@
   function refreshToolbarState(activeTab) {
     const tabLabels = {
       project: "项目",
-      bible: "短剧圣经",
+      bible: "系列总圣经",
       characters: "角色库",
       consistency: "一致性检查",
       assets: "资产库",
@@ -358,10 +382,12 @@
       activeBeatSheetBatchId: state.activeBeatSheetBatchId,
       continuationSource: state.continuationSource,
       continuationBrief: readContinuationBrief(),
+      episodeBible: episodeBibleDomain.clone(state.episodeBible),
     };
   }
 
   function applyCreationSession(session = {}) {
+    suppressEpisodeBibleInvalidation = true;
     Object.entries(session.fields || {}).forEach(([id, value]) => setInputValue(id, value));
     if (session.aiModels) restoreAiModels({ aiModels: session.aiModels });
     state.currentEpisodeId = session.currentEpisodeId || null;
@@ -384,10 +410,13 @@
     state.activeBeatSheetBatchId = session.activeBeatSheetBatchId || null;
     state.continuationSource = session.continuationSource || null;
     applyContinuationBrief(session.continuationBrief || session.input?.continuationBrief || {});
+    state.episodeBible = episodeBibleDomain.createState(session.episodeBible || {});
+    suppressEpisodeBibleInvalidation = false;
     renderPlanSuggestions();
     renderCreativeAssetPicker();
     renderCreativeMixResults();
     renderBeatSheet();
+    renderEpisodeBible();
     renderScript();
     renderStoryboard();
     renderCreativePack();
@@ -429,10 +458,209 @@
   }
 
   function markBeatSheetStale() {
+    markEpisodeBibleStale();
     if (!state.beatSheet.length) return;
     state.beatSheetApproved = false;
     renderBeatSheet();
     refreshCreationActions();
+  }
+
+  function currentEpisodeBibleFingerprint() {
+    if (!episodeBibleDomain) return "";
+    try { return episodeBibleDomain.creationFingerprint(getInput()); } catch { return ""; }
+  }
+
+  function readEpisodeBibleForm() {
+    return episodeBibleDomain.normalizeBible(Object.fromEntries(Object.entries(episodeBibleFieldIds).map(([field, id]) => [field, document.getElementById(id)?.value || ""])));
+  }
+
+  function writeEpisodeBibleForm(bible) {
+    const value = episodeBibleDomain.normalizeBible(bible || {});
+    suppressEpisodeBibleInvalidation = true;
+    Object.entries(episodeBibleFieldIds).forEach(([field, id]) => setInputValue(id, value[field]));
+    suppressEpisodeBibleInvalidation = false;
+  }
+
+  function activeVersionBibleSnapshot() {
+    const version = activeEpisodeVersion(currentProjectEpisode());
+    return version?.episodeBibleSnapshot || version?.generationBibleSnapshot || null;
+  }
+
+  function episodeBibleForCurrentOperation() {
+    if (state.script) return activeVersionBibleSnapshot() || state.episodeBible?.draft || null;
+    return state.episodeBible?.draft || null;
+  }
+
+  function markEpisodeBibleStale(options = {}) {
+    if (suppressEpisodeBibleInvalidation || !state.episodeBible) return;
+    const hasDraft = episodeBibleDomain.isComplete(state.episodeBible.draft);
+    if (!hasDraft && state.episodeBible.status === "unprepared") return;
+    state.episodeBible.status = hasDraft ? "stale" : "unprepared";
+    if (state.script || options.bibleEdited) state.episodeBible.scriptNeedsRegeneration = Boolean(state.script);
+    const panel = $("#episodeBiblePanel");
+    if (panel) panel.open = true;
+    renderEpisodeBible({ syncFields: !options.bibleEdited });
+  }
+
+  function updateEpisodeBibleDraftFromForm() {
+    state.episodeBible.draft = readEpisodeBibleForm();
+    if (suppressEpisodeBibleInvalidation) return;
+    if (state.script || ["confirmed", "aligned", "stale"].includes(state.episodeBible.status)) {
+      markEpisodeBibleStale({ bibleEdited: true });
+    } else {
+      state.episodeBible.status = episodeBibleDomain.isComplete(state.episodeBible.draft) ? "draft" : "unprepared";
+      renderEpisodeBible({ syncFields: false });
+    }
+  }
+
+  function episodeBibleStatusView() {
+    if (state.episodeBible?.legacySnapshotMissing && !state.episodeBible?.draft) return { label: "历史快照缺失", className: "is-stale" };
+    const views = {
+      unprepared: { label: "未准备", className: "is-unprepared" },
+      draft: { label: "草稿待确认", className: "is-draft" },
+      confirmed: { label: "已确认", className: "is-confirmed" },
+      stale: { label: "内容已过期", className: "is-stale" },
+      aligned: { label: "已与剧本对齐", className: "is-aligned" },
+    };
+    return views[state.episodeBible?.status] || views.unprepared;
+  }
+
+  function renderCanonDeltas() {
+    const panel = $("#canonDeltaPanel");
+    const target = $("#canonDeltaList");
+    if (!panel || !target) return;
+    const deltas = episodeBibleDomain.normalizeDeltas(state.episodeBible?.canonDeltas);
+    const pending = state.episodeBible?.status !== "aligned" && deltas.length;
+    panel.hidden = !pending;
+    target.innerHTML = deltas.map((delta) => `<label class="canon-delta-item"><input type="checkbox" data-canon-delta-id="${escapeHtml(delta.id)}" ${state.episodeBible.acceptedCanonDeltaIds.includes(delta.id) ? "checked" : ""}><span><b>${escapeHtml(delta.field)} · ${escapeHtml(delta.fact)}</b>依据：${escapeHtml(delta.evidence)}<small>风险：${escapeHtml(delta.risk)}</small></span></label>`).join("");
+  }
+
+  function renderEpisodeBible(options = {}) {
+    const bibleState = state.episodeBible || episodeBibleDomain.createState();
+    state.episodeBible = bibleState;
+    if (options.syncFields !== false) writeEpisodeBibleForm(bibleState.draft || {});
+    const status = episodeBibleStatusView();
+    const badge = $("#episodeBibleStatus");
+    if (badge) {
+      badge.textContent = status.label;
+      badge.className = `episode-bible-status ${status.className}`;
+    }
+    const currentFingerprint = currentEpisodeBibleFingerprint();
+    const completePlan = episodePlanner.planIsComplete(getInput().episodePlan);
+    const readyForDraft = completePlan && state.beatSheetApproved && state.beatSheet.length === 8 && (state.creationMode !== "continue" || Boolean(state.continuationSource?.script));
+    const hint = $("#episodeBibleHint");
+    if (hint) hint.textContent = bibleState.legacySnapshotMissing && !bibleState.draft
+      ? "这个旧剧本版本没有保存生成时圣经。历史记录不会用当前系列总圣经伪造；如需重写，请先恢复系列总圣经或让 AI 起草本次版本。"
+      : bibleState.scriptNeedsRegeneration
+        ? "本次圣经已在剧本生成后修改。确认后请重新生成剧本，新结果会保存为新版本。"
+        : bibleState.status === "stale"
+          ? "创作输入、策划或节拍表已经变化，请检查并重新确认本次圣经。"
+          : bibleState.status === "aligned"
+            ? "当前剧本、分镜与此圣经快照一致。长期设定只有主动同步后才进入系列总圣经。"
+            : "七项内容确认后才能生成正式剧本。AI 起草会读取系列总圣经、策划、节拍表和续写来源。";
+    const generate = $("#generateEpisodeBibleBtn");
+    if (generate) generate.disabled = Boolean(state.activeAiOperation) || !readyForDraft;
+    const confirm = $("#confirmEpisodeBibleBtn");
+    if (confirm) confirm.disabled = Boolean(state.activeAiOperation) || !readyForDraft || !episodeBibleDomain.isComplete(bibleState.draft);
+    const sync = $("#syncEpisodeBibleBtn");
+    if (sync) sync.disabled = Boolean(state.activeAiOperation) || !["confirmed", "aligned"].includes(bibleState.status) || bibleState.confirmedFingerprint !== currentFingerprint;
+    const panel = $("#episodeBiblePanel");
+    if (panel && (["unprepared", "draft", "stale"].includes(bibleState.status) || (bibleState.status !== "aligned" && bibleState.canonDeltas.length))) panel.open = true;
+    renderCanonDeltas();
+    refreshCreationActions();
+  }
+
+  async function generateEpisodeBibleDraft() {
+    const input = getInput();
+    validateEpisodePlan(input);
+    if (!state.beatSheetApproved || state.beatSheet.length !== 8) throw new Error("请先确认完整的剧情节拍表。 ");
+    if (state.creationMode === "continue" && !state.continuationSource?.script) throw new Error("请先选择续写来源。 ");
+    const operation = beginAiOperation("本次创作圣经");
+    try {
+      setStatus("AI 正在根据当前策划起草本次创作圣经...");
+      const initialResponse = await apiRequest("/api/episode-bible", { input: generationContext(input, "episodeBible") });
+      const response = await resolveAiJob(initialResponse, "本次创作圣经");
+      assertActiveAiOperation(operation);
+      state.episodeBible = episodeBibleDomain.createState({
+        draft: response.result?.bible || response.result,
+        status: "draft",
+        generatedForFingerprint: currentEpisodeBibleFingerprint(),
+      });
+      renderEpisodeBible();
+      saveDraft(false);
+      setStatus(`本次创作圣经草稿已生成 ${nowTime()} · ${response.model || "model"}${usageSuffix(response)}，请检查后确认`);
+    } finally {
+      endAiOperation(operation);
+    }
+  }
+
+  function restoreProjectBibleToEpisode() {
+    state.episodeBible = episodeBibleDomain.createState({
+      draft: currentProject()?.bible || defaultBible,
+      status: "draft",
+      generatedForFingerprint: currentEpisodeBibleFingerprint(),
+      scriptNeedsRegeneration: Boolean(state.script),
+    });
+    renderEpisodeBible();
+    saveDraft(false);
+    setStatus("已将系列总圣经恢复为本次草稿，请按本集内容修改后确认");
+  }
+
+  function confirmEpisodeBible() {
+    const input = getInput();
+    validateEpisodePlan(input);
+    if (!state.beatSheetApproved || state.beatSheet.length !== 8) throw new Error("请先确认剧情节拍表。 ");
+    const draft = episodeBibleDomain.normalizeBible(readEpisodeBibleForm(), { requireComplete: true });
+    const currentFingerprint = currentEpisodeBibleFingerprint();
+    const generationSnapshot = activeEpisodeVersion(currentProjectEpisode())?.generationBibleSnapshot;
+    state.episodeBible.draft = draft;
+    state.episodeBible.status = "confirmed";
+    state.episodeBible.confirmedFingerprint = currentFingerprint;
+    state.episodeBible.generatedForFingerprint = currentFingerprint;
+    state.episodeBible.legacySnapshotMissing = false;
+    state.episodeBible.scriptNeedsRegeneration = Boolean(state.script && (!generationSnapshot || episodeBibleDomain.bibleFingerprint(generationSnapshot) !== episodeBibleDomain.bibleFingerprint(draft)));
+    const panel = $("#episodeBiblePanel");
+    if (panel) panel.open = false;
+    renderEpisodeBible();
+    saveDraft(false);
+    setStatus(state.episodeBible.scriptNeedsRegeneration ? "本次圣经已确认，请重新生成剧本新版本" : "本次创作圣经已确认，可以生成正式剧本");
+  }
+
+  function syncEpisodeBibleToProject() {
+    if (!window.confirm("确定把本次创作圣经同步为系列总圣经？这会影响之后的新剧本，但不会改写历史版本。")) return;
+    const project = currentProject();
+    if (!project) throw new Error("请先选择内容项目。 ");
+    project.bible = episodeBibleDomain.normalizeBible(state.episodeBible.draft, { requireComplete: true });
+    project.updatedAt = new Date().toISOString();
+    persistProjects();
+    renderBible();
+    setStatus("已同步到系列总圣经，历史剧本绑定快照未改变");
+  }
+
+  function persistEpisodeBibleCalibration() {
+    const project = currentProject();
+    const episode = currentProjectEpisode();
+    const version = activeEpisodeVersion(episode);
+    if (!project || !episode || !version) return;
+    version.episodeBibleSnapshot = episodeBibleDomain.clone(state.episodeBible.draft);
+    version.canonDeltas = episodeBibleDomain.clone(state.episodeBible.canonDeltas);
+    version.acceptedCanonDeltaIds = [...state.episodeBible.acceptedCanonDeltaIds];
+    applyEpisodeVersion(episode, version.id);
+    project.updatedAt = episode.updatedAt = new Date().toISOString();
+    persistProjects();
+    renderProject();
+  }
+
+  function applyCanonDeltas() {
+    const selectedIds = $$('[data-canon-delta-id]:checked').map((input) => input.dataset.canonDeltaId);
+    state.episodeBible.draft = episodeBibleDomain.absorbDeltas(state.episodeBible.draft, state.episodeBible.canonDeltas, selectedIds);
+    state.episodeBible.acceptedCanonDeltaIds = selectedIds;
+    state.episodeBible.status = "aligned";
+    state.episodeBible.scriptNeedsRegeneration = false;
+    persistEpisodeBibleCalibration();
+    renderEpisodeBible();
+    saveDraft(false);
+    setStatus(selectedIds.length ? `已吸收 ${selectedIds.length} 条长期设定到当前剧本版本` : "已完成校准，本次新增内容均按单集事件处理");
   }
 
   function syncActiveAssetsToInputs() {
@@ -922,6 +1150,7 @@
       if (beats.length !== 8) throw new Error("AI 没有返回 8 个完整剧情节拍，请重新生成。");
       state.beatSheet = beats;
       state.beatSheetApproved = false;
+      markEpisodeBibleStale();
       const project = currentProject();
       const batch = {
         id: newId("beat-sheet-batch"), createdAt: new Date().toISOString(), episodeNumber: input.episodeNumber,
@@ -963,6 +1192,7 @@
     state.beatSheet = normalizeBeatSheet({ beats: batch.beats });
     state.beatSheetApproved = Boolean(batch.approved);
     state.activeBeatSheetBatchId = batch.id;
+    markEpisodeBibleStale();
     renderBeatSheet();
     refreshCreationActions();
     saveDraft(false);
@@ -1392,6 +1622,8 @@
         input: version.input || episode.input || {},
         script: version.script || null,
         storyboard: Array.isArray(version.storyboard) ? version.storyboard : [],
+        generationBibleSnapshot: version.generationBibleSnapshot || null,
+        episodeBibleSnapshot: version.episodeBibleSnapshot || null,
       }))).filter((item) => item.script);
   }
 
@@ -1418,6 +1650,8 @@
         input: archived.version.input || getInput(),
         script: archived.version.script || state.script,
         storyboard: archived.version.storyboard || state.storyboard,
+        generationBibleSnapshot: archived.version.generationBibleSnapshot || null,
+        episodeBibleSnapshot: archived.version.episodeBibleSnapshot || null,
       };
     }
     const episode = currentProjectEpisode();
@@ -1437,6 +1671,8 @@
       input: version.input || getInput(),
       script: version.script || state.script,
       storyboard: version.storyboard || state.storyboard,
+      generationBibleSnapshot: version.generationBibleSnapshot || null,
+      episodeBibleSnapshot: version.episodeBibleSnapshot || null,
     };
   }
 
@@ -1480,6 +1716,7 @@
     state.beatSheet = [];
     state.beatSheetApproved = false;
     state.activeBeatSheetBatchId = null;
+    state.episodeBible = episodeBibleDomain.createState();
     applyEpisodePlan({});
   }
 
@@ -1501,13 +1738,18 @@
     clearTargetWorkflow();
     state.activeMemeIds = [...(sourceInput.activeMemeIds || [])];
     state.activeCharacterIds = [...(sourceInput.activeCharacterIds || [])];
-    state.continuationSource = { ref: { ...source.ref }, input: { ...sourceInput }, script: source.script, storyboard: [...(source.storyboard || [])] };
+    state.continuationSource = {
+      ref: { ...source.ref }, input: { ...sourceInput }, script: source.script, storyboard: [...(source.storyboard || [])],
+      generationBibleSnapshot: source.generationBibleSnapshot || null,
+      episodeBibleSnapshot: source.episodeBibleSnapshot || null,
+    };
     applyContinuationBrief(creationSession.deriveBrief(state.continuationSource, currentProject()?.seriesLedger || {}));
     setInputValue("episodeNumber", Number(source.ref.episodeNumber) + 1);
     renderPlanSuggestions();
     renderCreativeAssetPicker();
     renderCreativeMixResults();
     renderBeatSheet();
+    renderEpisodeBible();
     renderScript();
     renderStoryboard();
     renderCreativePack();
@@ -1565,6 +1807,14 @@
 
   function generationContext(input, modelScope = "script") {
     const project = currentProject();
+    const continuation = state.creationMode === "continue"
+      ? creationSession.continuationContext(state.continuationSource, readContinuationBrief())
+      : null;
+    if (continuation) {
+      continuation.sourceEpisodeBible = state.continuationSource?.episodeBibleSnapshot
+        || state.continuationSource?.generationBibleSnapshot
+        || null;
+    }
     const latestReview = (project?.episodes || [])
       .filter((episode) => episode.review?.status === "reviewed" || episode.review?.status === "published")
       .sort((a, b) => String(b.review?.updatedAt || "").localeCompare(String(a.review?.updatedAt || "")))[0]?.review || null;
@@ -1575,15 +1825,17 @@
       projectName: project?.name || "未命名短剧项目",
       projectLogline: project?.logline || "",
       projectBible: project?.bible || defaultBible,
+      episodeBible: ["script", "episodeBible", "plan", "beat", "mix"].includes(modelScope)
+        ? state.episodeBible?.draft || null
+        : episodeBibleForCurrentOperation(),
+      sourceEpisodeBible: state.continuationSource?.episodeBibleSnapshot || state.continuationSource?.generationBibleSnapshot || null,
       projectContinuity: projectContinuity(project, input.episodeNumber),
       projectAssets: (project?.assets || []).slice(-24),
       projectMemes: (project?.memes || []).filter((item) => (input.activeMemeIds || state.activeMemeIds).includes(item.id)).slice(0, 6),
       projectCharacterCards: (project?.characterCards || []).filter((item) => (input.activeCharacterIds || state.activeCharacterIds).includes(item.id)).slice(0, 8),
       projectSeriesLedger: project?.seriesLedger || {},
       projectCanonSources: (project?.canonSources || []).slice(-30),
-      continuationContext: state.creationMode === "continue"
-        ? creationSession.continuationContext(state.continuationSource, readContinuationBrief())
-        : null,
+      continuationContext: continuation,
       latestReview,
     };
   }
@@ -1638,7 +1890,7 @@
 
   async function applyBibleDraft(bible, sourceLabel) {
     const keys = ["characters", "abilities", "relations", "antagonist", "worldRules", "mainConflict", "hookRules"];
-    if (!bible || keys.some((key) => !String(bible[key] || "").trim())) throw new Error("短剧圣经草案不完整，请重新生成。");
+    if (!bible || keys.some((key) => !String(bible[key] || "").trim())) throw new Error("系列总圣经草案不完整，请重新生成。");
     const project = currentProject();
     project.bible = Object.fromEntries(keys.map((key) => [key, String(bible[key]).trim()]));
     project.updatedAt = new Date().toISOString();
@@ -1649,14 +1901,14 @@
   }
 
   async function generateBibleDraft() {
-    const operation = beginAiOperation("短剧圣经起草");
+    const operation = beginAiOperation("系列总圣经起草");
     try {
-      setStatus("DeepSeek 正在根据当前角色、场景和系列方向起草短剧圣经...");
+      setStatus("DeepSeek 正在根据当前角色、场景和系列方向起草系列总圣经...");
       const initialResponse = await apiRequest("/api/bible", { input: generationContext(getInput(), "bible") });
-      const response = await resolveAiJob(initialResponse, "短剧圣经");
+      const response = await resolveAiJob(initialResponse, "系列总圣经");
       assertActiveAiOperation(operation);
-      await applyBibleDraft(response.result?.bible, "DeepSeek 短剧圣经草案");
-      setStatus(`短剧圣经已生成并保存 ${nowTime()} · ${response.model || "model"}${usageSuffix(response)}`);
+      await applyBibleDraft(response.result?.bible, "DeepSeek 系列总圣经草案");
+      setStatus(`系列总圣经已生成并保存 ${nowTime()} · ${response.model || "model"}${usageSuffix(response)}`);
     } finally {
       endAiOperation(operation);
     }
@@ -1767,7 +2019,7 @@
     project.updatedAt = new Date().toISOString();
     persistProjects();
     renderProject();
-    setStatus("短剧圣经已保存，后续剧本和分镜将引用它");
+    setStatus("系列总圣经已保存，后续本次圣经会以它为长期底稿");
   }
 
   function createProject() {
@@ -1866,6 +2118,12 @@
         creationMode: state.creationMode,
         sourceRef: state.creationMode === "continue" ? creationSession.normalizeSourceRef(state.continuationSource) : null,
         continuationBrief: state.creationMode === "continue" ? readContinuationBrief() : null,
+        generationBibleSnapshot: episodeBibleDomain.clone(["doctor", "recast"].includes(mode) ? episodeBibleForCurrentOperation() : state.episodeBible?.generationSnapshot || state.episodeBible?.draft),
+        episodeBibleSnapshot: episodeBibleDomain.clone(state.episodeBible?.draft),
+        bibleFingerprint: state.episodeBible?.confirmedFingerprint || "",
+        canonDeltas: episodeBibleDomain.clone(generated.script?.canonDeltas || state.episodeBible?.canonDeltas || []),
+        acceptedCanonDeltaIds: [...(state.episodeBible?.acceptedCanonDeltaIds || [])],
+        legacyBibleSnapshotMissing: false,
       },
     });
     state.currentEpisodeId = episode.id;
@@ -1904,6 +2162,19 @@
     state.creativePack = episode.creativePack || null;
     state.scriptDoctor = episode.doctorResult || null;
     state.currentHistoryId = episode.historyId || null;
+    const restoredVersion = activeEpisodeVersion(episode);
+    const restoredBible = restoredVersion?.episodeBibleSnapshot || restoredVersion?.generationBibleSnapshot || null;
+    state.episodeBible = episodeBibleDomain.createState({
+      draft: restoredBible,
+      generationSnapshot: restoredVersion?.generationBibleSnapshot || null,
+      status: restoredBible ? "aligned" : "unprepared",
+      confirmedFingerprint: restoredVersion?.bibleFingerprint || "",
+      generatedForFingerprint: restoredVersion?.bibleFingerprint || "",
+      canonDeltas: restoredVersion?.canonDeltas || [],
+      acceptedCanonDeltaIds: restoredVersion?.acceptedCanonDeltaIds || [],
+      scriptNeedsRegeneration: false,
+      legacySnapshotMissing: Boolean(restoredVersion?.legacyBibleSnapshotMissing && !restoredBible),
+    });
     state.continuationSource = state.creationMode === "continue" ? findContinuationSource(episode.sourceRef) : null;
     applyContinuationBrief(episode.continuationBrief || {});
     state.activePlanBatchId = episode.input?.episodePlanRef?.batchId || null;
@@ -1914,7 +2185,7 @@
     persistProjects();
     renderPlanSuggestions();
     renderCreationMode();
-    renderScript(); renderStoryboard(); renderCreativePack(); renderProject(); renderAssets(); renderConsistency(); renderExample(); saveDraft(false);
+    renderEpisodeBible(); renderScript(); renderStoryboard(); renderCreativePack(); renderProject(); renderAssets(); renderConsistency(); renderExample(); saveDraft(false);
     switchTab("script");
     const versionIndex = (episode.versions || []).findIndex((version) => version.id === episode.activeVersionId) + 1;
     setStatus(`已打开第 ${episode.episodeNumber} 集 v${versionIndex}：${episode.script?.title || "待生成"}`);
@@ -2589,6 +2860,7 @@
     script.visualHighlights = Array.isArray(script.visualHighlights) ? script.visualHighlights : [];
     script.hooks = Array.isArray(script.hooks) ? script.hooks : [];
     script.tags = Array.isArray(script.tags) ? script.tags : [];
+    script.canonDeltas = episodeBibleDomain.normalizeDeltas(script.canonDeltas || result?.canonDeltas || []);
     return { script, storyboard: [], creativePack: null };
   }
 
@@ -3036,6 +3308,11 @@
       projectName: projectName || currentProject()?.name || "未归档项目",
       episodeNumber: Number(episodeNumber || input.episodeNumber || 1),
       sourceRef: mode === "continue" ? creationSession.normalizeSourceRef(state.continuationSource) : null,
+      generationBibleSnapshot: episodeBibleDomain.clone(state.episodeBible?.generationSnapshot || state.episodeBible?.draft),
+      episodeBibleSnapshot: episodeBibleDomain.clone(state.episodeBible?.draft),
+      bibleFingerprint: state.episodeBible?.confirmedFingerprint || "",
+      canonDeltas: episodeBibleDomain.clone(generated.script?.canonDeltas || []),
+      acceptedCanonDeltaIds: [],
       pinned: false,
     };
     state.history = [item, ...state.history].slice(0, maxHistoryItems);
@@ -3086,6 +3363,18 @@
     state.creativePack = item.creativePack || null;
     state.scriptDoctor = archived?.version?.doctorResult || null;
     state.currentHistoryId = item.id || null;
+    const historyVersion = archived?.version || item;
+    const historyBible = historyVersion.episodeBibleSnapshot || historyVersion.generationBibleSnapshot || null;
+    state.episodeBible = episodeBibleDomain.createState({
+      draft: historyBible,
+      generationSnapshot: historyVersion.generationBibleSnapshot || null,
+      status: historyBible ? "aligned" : "unprepared",
+      confirmedFingerprint: historyVersion.bibleFingerprint || "",
+      generatedForFingerprint: historyVersion.bibleFingerprint || "",
+      canonDeltas: historyVersion.canonDeltas || [],
+      acceptedCanonDeltaIds: historyVersion.acceptedCanonDeltaIds || [],
+      legacySnapshotMissing: Boolean(state.script && !historyBible),
+    });
     const sourceRef = archived?.version?.sourceRef || item.sourceRef;
     state.continuationSource = state.creationMode === "continue" ? findContinuationSource(sourceRef) : null;
     applyContinuationBrief(archived?.version?.continuationBrief || item.input?.continuationBrief || {});
@@ -3097,6 +3386,7 @@
     renderCreationMode();
     renderProject();
     renderBible();
+    renderEpisodeBible();
     renderAssets();
     renderScript();
     renderStoryboard();
@@ -3341,6 +3631,13 @@
     if (!state.beatSheetApproved || state.beatSheet.length !== 8) {
       throw new Error("请先生成并确认一版完整的剧情节拍表，再生成正式剧本。");
     }
+    const bibleFingerprint = currentEpisodeBibleFingerprint();
+    if (!["confirmed", "aligned"].includes(state.episodeBible?.status)
+      || state.episodeBible?.confirmedFingerprint !== bibleFingerprint
+      || !episodeBibleDomain.isComplete(state.episodeBible?.draft)) {
+      throw new Error("请先检查并确认与当前策划一致的本次创作圣经。 ");
+    }
+    const confirmedBibleSnapshot = episodeBibleDomain.clone(state.episodeBible.draft);
     const continuationSource = state.continuationSource;
     if (mode === "continue" && !continuationSource?.script) {
       throw new Error("请先在续写来源中选择一个有效的剧本版本。");
@@ -3353,6 +3650,7 @@
       const initialResponse = await apiRequest("/api/script", {
         input: {
           ...generationContext(input, "script"),
+          episodeBible: confirmedBibleSnapshot,
           mode,
           competitorInsights: state.analysis ? state.analysis.summary : "",
           previousScript,
@@ -3366,6 +3664,11 @@
       state.storyboard = [];
       state.scriptDoctor = null;
       state.creativePack = window.RocoStudio.generateCreativePack(state.script, input, state.topics);
+      state.episodeBible.generationSnapshot = confirmedBibleSnapshot;
+      state.episodeBible.canonDeltas = episodeBibleDomain.normalizeDeltas(state.script.canonDeltas);
+      state.episodeBible.acceptedCanonDeltaIds = [];
+      state.episodeBible.status = state.episodeBible.canonDeltas.length ? "confirmed" : "aligned";
+      state.episodeBible.scriptNeedsRegeneration = false;
       const item = addHistoryItem({
         mode,
         input,
@@ -3379,6 +3682,7 @@
       upsertProjectEpisode({ mode, input, response, generated: { ...generated, creativePack: state.creativePack }, historyId: item.id });
       persistHistory();
       renderScript();
+      renderEpisodeBible();
       renderStoryboard();
       renderCreativePack();
       renderHistory();
@@ -3563,10 +3867,22 @@
       const episode = currentProjectEpisode();
       if (episode) {
         applyEpisodeVersion(episode, episode.activeVersionId);
+        const draftVersion = activeEpisodeVersion(episode);
+        const draftBible = draftVersion?.episodeBibleSnapshot || draftVersion?.generationBibleSnapshot || null;
         state.script = episode.script || null;
         state.storyboard = Array.isArray(episode.storyboard) ? episode.storyboard : [];
         state.creativePack = episode.creativePack || null;
         state.scriptDoctor = episode.doctorResult || null;
+        state.episodeBible = episodeBibleDomain.createState({
+          draft: draftBible,
+          generationSnapshot: draftVersion?.generationBibleSnapshot || null,
+          status: draftBible ? "aligned" : "unprepared",
+          confirmedFingerprint: draftVersion?.bibleFingerprint || "",
+          generatedForFingerprint: draftVersion?.bibleFingerprint || "",
+          canonDeltas: draftVersion?.canonDeltas || [],
+          acceptedCanonDeltaIds: draftVersion?.acceptedCanonDeltaIds || [],
+          legacySnapshotMissing: Boolean(draftVersion?.legacyBibleSnapshotMissing && !draftBible),
+        });
       } else {
         // Older drafts embedded content directly; keep this one-time migration fallback.
         state.script = draft.script || null;
@@ -3836,16 +4152,32 @@
         const label = $("#bibleTemplate").selectedOptions[0]?.textContent || "系列模板";
         await applyBibleDraft(bibleTemplate($("#bibleTemplate").value), `${label}模板`);
       } catch (error) {
-        reportError("套用短剧圣经模板", error);
+        reportError("套用系列总圣经模板", error);
       }
     });
     $("#generateBibleBtn").addEventListener("click", async () => {
       try {
         await generateBibleDraft();
       } catch (error) {
-        reportError("短剧圣经生成", error);
+        reportError("系列总圣经生成", error);
       }
     });
+    $("#generateEpisodeBibleBtn").addEventListener("click", async () => {
+      try { await generateEpisodeBibleDraft(); } catch (error) { reportError("本次创作圣经生成", error); }
+    });
+    $("#restoreProjectBibleBtn").addEventListener("click", () => {
+      try { restoreProjectBibleToEpisode(); } catch (error) { reportError("恢复系列总圣经", error); }
+    });
+    $("#confirmEpisodeBibleBtn").addEventListener("click", () => {
+      try { confirmEpisodeBible(); } catch (error) { reportError("确认本次创作圣经", error); }
+    });
+    $("#syncEpisodeBibleBtn").addEventListener("click", () => {
+      try { syncEpisodeBibleToProject(); } catch (error) { reportError("同步系列总圣经", error); }
+    });
+    $("#applyCanonDeltasBtn").addEventListener("click", () => {
+      try { applyCanonDeltas(); } catch (error) { reportError("本次圣经校准", error); }
+    });
+    Object.values(episodeBibleFieldIds).forEach((id) => document.getElementById(id)?.addEventListener("input", updateEpisodeBibleDraftFromForm));
     $("#generateCharacterBtn").addEventListener("click", async () => {
       try { await generateCharacterDraft(); } catch (error) { reportError("角色卡生成", error); }
     });
@@ -3901,6 +4233,14 @@
     $("#creativeMixBrief").addEventListener("input", () => {
       markBeatSheetStale();
       saveDraft(false);
+    });
+    ["theme", "roles", "scene", "customScene", "direction", "customDirection", "audience", "customAudience", "duration", "customDuration", "episodeNumber", "style", "customStyle", "memeSeed"].forEach((id) => {
+      const control = document.getElementById(id);
+      if (!control) return;
+      control.addEventListener(control.tagName === "SELECT" ? "change" : "input", () => {
+        markBeatSheetStale();
+        saveDraft(false);
+      });
     });
     $("#autoPlanBtn").addEventListener("click", () => autoFillEpisodePlan());
     $("#suggestPlansBtn").addEventListener("click", async () => {
@@ -4200,7 +4540,7 @@
   }
 
   async function init() {
-    if (!window.RocoStudio || !window.RocoWorkflowCore || !window.RocoProjectDomain || !window.RocoEpisodePlanner || !window.RocoUiTemplates || !window.RocoApiClient || !window.RocoDataStore || !window.RocoArchiveSync || !window.RocoAppState || !window.RocoCreationSession || !window.RocoAiOperation || !window.RocoGenerationClient) {
+    if (!window.RocoStudio || !window.RocoWorkflowCore || !window.RocoProjectDomain || !window.RocoEpisodePlanner || !window.RocoEpisodeBible || !window.RocoUiTemplates || !window.RocoApiClient || !window.RocoDataStore || !window.RocoArchiveSync || !window.RocoAppState || !window.RocoCreationSession || !window.RocoAiOperation || !window.RocoGenerationClient) {
       setStatus("生成器未加载，请用本地服务打开或刷新缓存", true);
       return;
     }
@@ -4227,6 +4567,7 @@
       renderCreativeMixResults();
       renderCreativeMixHistory();
       renderBeatSheet();
+      renderEpisodeBible();
       renderAssets();
       renderConsistency();
       renderExample();

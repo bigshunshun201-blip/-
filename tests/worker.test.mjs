@@ -16,6 +16,26 @@ const projectDomain = require("../project-domain.js");
 const episodePlanner = require("../episode-planner.js");
 const uiTemplates = require("../ui-templates.js");
 const creationSession = require("../creation-session.js");
+const episodeBible = require("../episode-bible.js");
+
+const completeBible = Object.fromEntries(episodeBible.FIELDS.map((field) => [field, `${field}设定`]));
+
+test("episode bible fingerprints relevant creation inputs and absorbs selected durable facts", () => {
+  const input = {
+    creationMode: "new", theme: "月牙镇错序任务", roles: "阿洛、迪莫", scene: "月牙镇",
+    activeCharacterIds: ["c2", "c1"], activeMemeIds: ["m1"],
+    episodePlan: { openingHook: "路牌倒着跑", conflict: "必须追回地图" },
+    beatSheet: [{ id: "BEAT-01", action: "追路牌", assetIds: ["m1", "c1"] }],
+  };
+  const reordered = structuredClone(input);
+  reordered.activeCharacterIds.reverse();
+  reordered.beatSheet[0].assetIds.reverse();
+  assert.equal(episodeBible.creationFingerprint(input), episodeBible.creationFingerprint(reordered));
+  assert.notEqual(episodeBible.creationFingerprint(input), episodeBible.creationFingerprint({ ...input, theme: "风暴眼任务" }));
+  const deltas = [{ id: "CANON-01", field: "relations", fact: "阿洛欠迪莫一次公开道歉", evidence: "结尾阿洛承诺下一次不再隐瞒", risk: "后续需兑现" }];
+  assert.match(episodeBible.absorbDeltas(completeBible, deltas, ["CANON-01"]).relations, /公开道歉/);
+  assert.doesNotMatch(episodeBible.absorbDeltas(completeBible, deltas, []).relations, /公开道歉/);
+});
 
 test("continuation session derives an editable carryover card and stable source reference", () => {
   assert.equal(creationSession.normalizeSourceRef(null), null);
@@ -165,10 +185,12 @@ test("script normalizer rejects incomplete output and missing requested roles", 
       innovationPoints: ["契约裂纹充当测谎机关", "徽章坐标反向指路"],
       comedyBeats: [{ setup: "阿洛嘴硬", payoff: "契约立刻裂开", visualAction: "裂纹追着阿洛移动" }, { setup: "迪莫装镇定", payoff: "尾巴先躲开", visualAction: "尾巴缩到路牌后" }],
       visualHighlights: Array.from({ length: 3 }, (_, index) => ({ moment: `画面${index + 1}`, verticalComposition: "前中后景分层", effect: "明暗反转" })),
+      canonDeltas: [{ id: "CANON-01", field: "relations", fact: "阿洛欠迪莫一次公开解释", evidence: "结尾主动承诺", risk: "下一集需要兑现" }, { field: "invalid", fact: "无效", evidence: "无效" }],
       hooks: ["坐标指向聆风塔"], tags: ["洛克王国世界", "短剧"],
     },
   };
   assert.equal(__test.normalizeScript(valid, { roles: "阿洛：调查者；迪莫：搭档" }).script.dialogue.length, 6);
+  assert.deepEqual(__test.normalizeScript(valid).script.canonDeltas.map((item) => item.id), ["CANON-01"]);
   assert.equal(__test.normalizeScript(valid, { roles: "阿洛：调查者；反差：越怕越逞强；底线：不牺牲伙伴\n迪莫：搭档；动作习惯：紧张时后退" }).script.characters.length, 2);
   const verboseMetadata = structuredClone(valid);
   verboseMetadata.script.rhythm = ["紧张", "反转", "悬念", "释然"];
@@ -485,7 +507,7 @@ test("topic selection prepares planning without directly generating a script", a
   assert.match(source, /applyEpisodePlan\(\{\}\)/);
 });
 
-test("script generation stays gated until the episode plan and beat sheet are approved", async () => {
+test("script generation stays gated until the episode plan, beat sheet, and episode bible are confirmed", async () => {
   const html = await readFile(new URL("../index.html", import.meta.url), "utf8");
   const source = await readFile(new URL("../app.js", import.meta.url), "utf8");
   assert.match(html, /id="generateBtn" disabled>先完成本集策划/);
@@ -493,6 +515,9 @@ test("script generation stays gated until the episode plan and beat sheet are ap
   assert.match(source, /episodePlanner\.planIsComplete\(getInput\(\)\.episodePlan\)/);
   assert.match(source, /generateButton\.disabled = isBusy \|\| !hasCompletePlan \|\| !hasApprovedBeatSheet/);
   assert.match(source, /state\.beatSheetApproved && state\.beatSheet\.length === 8/);
+  assert.match(source, /!hasConfirmedEpisodeBible/);
+  assert.match(source, /confirmedFingerprint === bibleFingerprint/);
+  assert.ok(html.indexOf("id=\"episodeBiblePanel\"") < html.indexOf("id=\"generateBtn\""));
 });
 
 test("daily budget weights Pro requests and blocks requests over the limit", async () => {
@@ -500,6 +525,7 @@ test("daily budget weights Pro requests and blocks requests over the limit", asy
   assert.equal(__test.requestUnits("/api/script", "deepseek-v4-flash"), 1);
   assert.equal(__test.requestUnits("/api/plans", "deepseek-v4-flash"), 1);
   assert.equal(__test.requestUnits("/api/bible", "deepseek-v4-flash"), 1);
+  assert.equal(__test.requestUnits("/api/episode-bible", "deepseek-v4-flash"), 1);
   assert.equal(__test.requestUnits("/api/recast-script", "deepseek-v4-flash"), 1);
   assert.equal(__test.requestUnits("/api/meme-lab", "deepseek-v4-flash"), 1);
   assert.equal(__test.requestUnits("/api/character-card", "deepseek-v4-pro"), 3);
@@ -634,7 +660,10 @@ test("app state initializes independent model preferences", () => {
   const state = appStateModule.createState();
   state.aiModels.plan = "deepseek-v4-pro";
   assert.equal(state.aiModels.script, "deepseek-v4-flash");
-  assert.equal(appStateModule.aiModelScopes.length, 13);
+  state.aiModels.episodeBible = "deepseek-v4-pro";
+  assert.equal(state.aiModels.bible, "deepseek-v4-flash");
+  assert.equal(appStateModule.aiModelScopes.length, 14);
+  assert.equal(state.episodeBible.status, "unprepared");
 });
 
 test("generation client resolves asynchronous provider jobs", async () => {
@@ -686,16 +715,19 @@ test("project domain appends versions without overwriting an episode", () => {
   assert.equal(second.episode.script.title, "第一版");
 });
 
-test("project schema v6 preserves continuation lineage and migrates v5 projects", () => {
+test("project schema v7 preserves continuation lineage and does not fabricate legacy bible snapshots", () => {
   const migrated = projectDomain.migrateProjectRecord({
-    schemaVersion: 5,
-    id: "legacy-v5",
+    schemaVersion: 6,
+    id: "legacy-v6",
     name: "旧项目",
     planBatches: [{ id: "plan-1" }],
     episodes: [{ id: "episode-1", episodeNumber: 1, versions: [{ id: "version-1", script: { title: "第一集" } }], activeVersionId: "version-1" }],
   });
-  assert.equal(migrated.schemaVersion, 6);
+  assert.equal(migrated.schemaVersion, 7);
   assert.equal(migrated.episodes[0].versions[0].creationMode, "new");
+  assert.equal(migrated.episodes[0].versions[0].generationBibleSnapshot, null);
+  assert.equal(migrated.episodes[0].versions[0].episodeBibleSnapshot, null);
+  assert.equal(migrated.episodes[0].versions[0].legacyBibleSnapshotMissing, true);
   const sourceRef = { projectId: migrated.id, episodeId: migrated.episodes[0].id, versionId: migrated.episodes[0].versions[0].id, episodeNumber: 1, versionNumber: 1, title: "第一集" };
   const { version } = projectDomain.upsertEpisodeVersion(migrated, {
     mode: "continue",
@@ -705,6 +737,38 @@ test("project schema v6 preserves continuation lineage and migrates v5 projects"
   assert.equal(version.creationMode, "continue");
   assert.equal(version.sourceRef.versionId, sourceRef.versionId);
   assert.equal(version.continuationBrief.requiredHook, "门后是谁");
+});
+
+test("episode versions preserve immutable generation bible and calibrated episode bible", () => {
+  const project = projectDomain.createProjectRecord("圣经快照测试");
+  const calibrated = { ...completeBible, relations: "阿洛与迪莫已从互疑变为暂时合作" };
+  const { episode, version } = projectDomain.upsertEpisodeVersion(project, {
+    mode: "new",
+    input: { episodeNumber: 1 },
+    versionSnapshot: {
+      script: { title: "错序路牌" }, generationBibleSnapshot: completeBible, episodeBibleSnapshot: calibrated,
+      bibleFingerprint: "bible-123", canonDeltas: [{ id: "CANON-01", field: "relations", fact: "暂时合作", evidence: "握手" }],
+      acceptedCanonDeltaIds: ["CANON-01"],
+    },
+  });
+  assert.equal(version.generationBibleSnapshot.relations, "relations设定");
+  assert.match(version.episodeBibleSnapshot.relations, /暂时合作/);
+  projectDomain.applyEpisodeVersion(episode, version.id);
+  assert.equal(episode.bibleFingerprint, "bible-123");
+  assert.deepEqual(episode.acceptedCanonDeltaIds, ["CANON-01"]);
+});
+
+test("episode bible prompt uses series, current, and selected continuation source canon", () => {
+  const prompt = __test.episodeBiblePrompt({
+    creationMode: "continue", projectBible: completeBible, episodeBible: { ...completeBible, characters: "当前草稿" },
+    sourceEpisodeBible: { ...completeBible, characters: "来源版本角色设定" },
+    continuationContext: { sourceRef: { episodeId: "e1", versionId: "v1" }, brief: { requiredHook: "路牌开口" }, sourceScript: { title: "第一集" }, sourceEpisodeBible: { ...completeBible, characters: "来源版本角色设定" } },
+    episodePlan: { openingHook: "路牌开口" }, beatSheet: Array.from({ length: 8 }, (_, index) => ({ id: `BEAT-0${index + 1}` })),
+  });
+  assert.match(prompt, /系列总圣经/);
+  assert.match(prompt, /本次创作圣经/);
+  assert.match(prompt, /来源版本角色设定/);
+  assert.match(prompt, /路牌开口/);
 });
 
 test("episode versions preserve a complete script doctor result", () => {
@@ -806,15 +870,17 @@ test("page loads domain and template modules before app.js", async () => {
   const templatesIndex = html.indexOf("ui-templates.js");
   const archiveIndex = html.indexOf("archive-sync.js");
   const stateIndex = html.indexOf("app-state.js");
+  const episodeBibleIndex = html.indexOf("episode-bible.js");
   const operationIndex = html.indexOf("ai-operation.js");
   const generationIndex = html.indexOf("generation-client.js");
   const appIndex = html.indexOf("app.js");
-  assert.ok(domainIndex > 0 && plannerIndex > domainIndex && templatesIndex > plannerIndex && archiveIndex > templatesIndex && stateIndex > archiveIndex && operationIndex > stateIndex && generationIndex > operationIndex && appIndex > generationIndex);
+  assert.ok(domainIndex > 0 && plannerIndex > domainIndex && templatesIndex > plannerIndex && archiveIndex > templatesIndex && episodeBibleIndex > archiveIndex && stateIndex > episodeBibleIndex && operationIndex > stateIndex && generationIndex > operationIndex && appIndex > generationIndex);
 });
 
 test("public build includes the continuation session module", async () => {
   const source = await readFile(new URL("../scripts/build-public.mjs", import.meta.url), "utf8");
   const html = await readFile(new URL("../index.html", import.meta.url), "utf8");
   assert.match(source, /"creation-session\.js"/);
+  assert.match(source, /"episode-bible\.js"/);
   assert.ok(html.indexOf("creation-session.js") < html.indexOf("app.js?v="));
 });

@@ -6,6 +6,7 @@ const JSON_HEADERS = {
 };
 
 const ALLOWED_MODELS = new Set(["deepseek-v4-flash", "deepseek-v4-pro"]);
+const BIBLE_FIELDS = ["characters", "abilities", "relations", "antagonist", "worldRules", "mainConflict", "hookRules"];
 const MAX_INPUT_BYTES = 120_000;
 const MAX_ARCHIVE_BYTES = 2_000_000;
 const RATE_WINDOW_MS = 60_000;
@@ -24,6 +25,7 @@ const AI_PATH_COST = new Map([
   ["/api/script", 1],
   ["/api/storyboard", 1],
   ["/api/bible", 1],
+  ["/api/episode-bible", 1],
   ["/api/character-card", 1],
   ["/api/meme-lab", 1],
   ["/api/plans", 1],
@@ -433,6 +435,7 @@ function normalizeInput(input = {}) {
       brief: continuation.brief && typeof continuation.brief === "object" ? continuation.brief : {},
       sourceScript: continuation.sourceScript || input.previousScript || null,
       sourceStoryboard: Array.isArray(continuation.sourceStoryboard) ? continuation.sourceStoryboard : [],
+      sourceEpisodeBible: continuation.sourceEpisodeBible && typeof continuation.sourceEpisodeBible === "object" ? continuation.sourceEpisodeBible : null,
     } : null,
     script: input.script || null,
     recastMappings: (Array.isArray(input.recastMappings) ? input.recastMappings : []).slice(0, 5).map((item) => ({
@@ -442,6 +445,8 @@ function normalizeInput(input = {}) {
     projectName: String(input.projectName || "").trim(),
     projectLogline: String(input.projectLogline || "").trim(),
     projectBible: input.projectBible && typeof input.projectBible === "object" ? input.projectBible : {},
+    episodeBible: input.episodeBible && typeof input.episodeBible === "object" ? input.episodeBible : null,
+    sourceEpisodeBible: input.sourceEpisodeBible && typeof input.sourceEpisodeBible === "object" ? input.sourceEpisodeBible : null,
     projectContinuity: Array.isArray(input.projectContinuity) ? input.projectContinuity.slice(-3) : [],
     projectSeriesLedger: input.projectSeriesLedger && typeof input.projectSeriesLedger === "object" ? input.projectSeriesLedger : {},
     projectCanonSources: Array.isArray(input.projectCanonSources) ? input.projectCanonSources.slice(-30) : [],
@@ -533,6 +538,8 @@ function creativeInputSummary(payload) {
     projectCanonSources,
     projectEpisodes,
     continuationContext,
+    episodeBible,
+    sourceEpisodeBible,
     ...creativeInput
   } = payload;
   return stringify(creativeInput, 4800);
@@ -591,8 +598,11 @@ function bibleContext(payload) {
 项目：${compact(payload.projectName, "未命名短剧项目")}
 系列一句话主线：${compact(payload.projectLogline, "未填写")}
 
-短剧圣经（高优先级事实，发生冲突时必须以此为准，不得无理由改写）：
+系列总圣经（长期底稿，发生冲突时不得无理由推翻）：
 ${stringify(canonical, 8500)}
+
+本次创作圣经（当前剧本版本的直接生成约束；与系列总圣经有细化差异时，以本次创作圣经为准，但不得无铺垫改写长期事实）：
+${payload.episodeBible ? stringify(payload.episodeBible, 8500) : "尚未提供；只能用于策划或起草本次圣经，不得生成正式剧本。"}
 
 已完成集数连续性摘要（只能承接和推进，不能推翻已发生的关键事实）：
 ${continuity}
@@ -622,6 +632,7 @@ function continuationPromptContext(payload, scriptLimit = 9000) {
   return `
 续写来源引用：${stringify(context.sourceRef || {}, 1200)}
 续写承接卡（高优先级）：${stringify(context.brief || {}, 5000)}
+来源剧本绑定的本次圣经（只继承来源版本真实保存的快照；为空代表旧版本未保存，不得用当前系列总圣经伪造）：${context.sourceEpisodeBible || payload.sourceEpisodeBible ? stringify(context.sourceEpisodeBible || payload.sourceEpisodeBible, 7000) : "历史快照缺失"}
 来源剧本（只用于承接，不得复述或改写上一集）：${stringify(context.sourceScript || payload.previousScript || {}, scriptLimit)}
 续写硬规则：第一节拍必须对来源结尾钩子采取行动或给出阶段兑现；保留人物与关系现状、能力代价、道具归属和必须保留事实；新增选题、角色、梗或场景只能在完成承接后升级冲突；结尾必须产生一个新的、下一集可直接执行的悬念。`;
 }
@@ -645,15 +656,17 @@ function scriptPrompt(input) {
 4. 前 3 秒必须抛出强信息钩子；中段每 8-12 秒至少一次信息变化；结尾留下一集能直接承接的问题。
 5. 台词必须口语化、短句、可拍摄。热梗素材：${compact(payload.memeSeed, "未提供；使用原创的平台化口语，不得冒充实时热梗")}。热梗必须转化为动作、道具、世界规则或误会机制，不能只把流行句塞进台词。
 6. 必须使用下列用户指定角色名，不能擅自替换：${names.length ? names.join("、") : "未指定，可根据主题自创 2-4 名角色"}。角色库不是白名单，在总角色数 2-5 人的范围内，可以按剧情需要加入未入库的临时角色。
-7. 必须遵守短剧圣经的性格、能力边界、角色关系、反派动机、世界规则和钩子规则；不得用失忆、突然升级、复活或新能力偷换已建立事实。
-8. 本集为第 ${payload.episodeNumber || 1} 集。它应推进系列主线矛盾，但只解决本集问题，不能终结整个项目主线。
-9. 必须严格执行本集策划：开头钩子、核心冲突、反转信息、结尾悬念、时长与目标情绪都要在标题、结构、台词和钩子中可见；不要写成完整闭环故事。
-10. 至少制造 2 次意外的概念碰撞，例如“精灵能力限制 + 当代生活困境”或“开放世界机关 + 社交误会”；因果必须成立，不能为了怪而怪。
-11. 至少设计 2 个笑点，使用“铺垫 -> 误导 -> 回扣”或可静音看懂的视觉笑点；至少 3 个竖屏强画面，主体动作和前后景变化要明确。
-12. 除非本集输入明确要求，不得重复使用失忆、万能黑衣人、契约突然失效、无代价升级等通用套路。反转必须来自本集已出现的规则、道具或人物选择。
-13. 本集角色若有结构化角色卡，必须让鲜明特质通过选择和动作表现；每名核心角色最多自然使用 1 次口头禅，并在后文用动作、道具或语义反转完成回扣，禁止机械重复。
-14. 必须按已确认的 8 个剧情节拍展开，不得跳过、调换或另起因果；structure 中用 beatIds 标明每一段落实了哪些节拍。
-15. 必须执行“角色与梗融合要求”。每张已选角色卡都要有不可替代的戏剧任务和关键选择；每个已选梗都要绑定触发角色，形成铺垫、回扣和剧情后果，并在 assetIntegration 中逐项说明。assetIntegration 只记录本集明确选中的角色卡和梗；自创角色、临时角色和自然产生的笑点不要伪造 assetId。
+7. 本次创作圣经是当前版本的直接约束。角色、能力、关系、反派、世界规则、主线和钩子都必须与其一致。
+8. 剧本完成后仅提取会影响后续集数的新增长期事实为 canonDeltas；普通动作、单集胜负和已写入本次圣经的事实不要重复上报。
+9. 必须遵守系列与本次圣经的性格、能力边界、角色关系、反派动机、世界规则和钩子规则；不得用失忆、突然升级、复活或新能力偷换已建立事实。
+10. 本集为第 ${payload.episodeNumber || 1} 集。它应推进系列主线矛盾，但只解决本集问题，不能终结整个项目主线。
+11. 必须严格执行本集策划：开头钩子、核心冲突、反转信息、结尾悬念、时长与目标情绪都要在标题、结构、台词和钩子中可见；不要写成完整闭环故事。
+12. 至少制造 2 次意外的概念碰撞，例如“精灵能力限制 + 当代生活困境”或“开放世界机关 + 社交误会”；因果必须成立，不能为了怪而怪。
+13. 至少设计 2 个笑点，使用“铺垫 -> 误导 -> 回扣”或可静音看懂的视觉笑点；至少 3 个竖屏强画面，主体动作和前后景变化要明确。
+14. 除非本集输入明确要求，不得重复使用失忆、万能黑衣人、契约突然失效、无代价升级等通用套路。反转必须来自本集已出现的规则、道具或人物选择。
+15. 本集角色若有结构化角色卡，必须让鲜明特质通过选择和动作表现；每名核心角色最多自然使用 1 次口头禅，并在后文用动作、道具或语义反转完成回扣，禁止机械重复。
+16. 必须按已确认的 8 个剧情节拍展开，不得跳过、调换或另起因果；structure 中用 beatIds 标明每一段落实了哪些节拍。
+17. 必须执行“角色与梗融合要求”。每张已选角色卡都要有不可替代的戏剧任务和关键选择；每个已选梗都要绑定触发角色，形成铺垫、回扣和剧情后果，并在 assetIntegration 中逐项说明。assetIntegration 只记录本集明确选中的角色卡和梗；自创角色、临时角色和自然产生的笑点不要伪造 assetId。
 
 项目连续性资料：${canon}
 
@@ -688,11 +701,12 @@ function scriptPrompt(input) {
       "characters":[{"assetId":"仅填写已选角色卡id","name":"角色名","storyFunction":"不可替代的本集戏剧任务","choice":"本集关键选择"}],
       "memes":[{"assetId":"仅填写已选梗id","name":"梗名","triggerRole":"触发角色","setup":"铺垫","payoff":"回扣","plotEffect":"如何改变人物行动或剧情结果"}]
     },
+    "canonDeltas": [{"id":"CANON-01","field":"characters|abilities|relations|antagonist|worldRules|mainConflict|hookRules","fact":"建议补入本次圣经的长期事实","evidence":"该事实在剧本中的具体依据","risk":"若长期保留可能产生的限制或冲突"}],
     "hooks": ["爆点或结尾钩子"],
     "tags": ["话题标签"]
   }
 }
-限制：characters 2-5 个；structure 固定 5 段并覆盖 BEAT-01 至 BEAT-08；根据本集 ${payload.duration} 秒时长，dialogue 应为 ${dialogueMinimum}-${dialogueMaximum} 句，每句都要有 intention 和 subtext，避免用长独白凑字数；innovationPoints 1-3 条；comedyBeats 1-3 条；visualHighlights 2-4 条；rhythm、reversals、hooks、tags 各不超过 3 条。`;
+限制：characters 2-5 个；structure 固定 5 段并覆盖 BEAT-01 至 BEAT-08；根据本集 ${payload.duration} 秒时长，dialogue 应为 ${dialogueMinimum}-${dialogueMaximum} 句，每句都要有 intention 和 subtext，避免用长独白凑字数；innovationPoints 1-3 条；comedyBeats 1-3 条；visualHighlights 2-4 条；canonDeltas 允许 0-8 条；rhythm、reversals、hooks、tags 各不超过 3 条。`;
 }
 
 function recastPrompt(input) {
@@ -723,7 +737,7 @@ ${bibleContext(payload)}
 原剧本：
 ${stringify(payload.script, 22000)}
 
-返回结构：{"script":{"title":"","synopsis":"","characters":[],"structure":[],"dialogue":[],"rhythm":[],"reversals":[],"innovationPoints":[],"comedyBeats":[],"visualHighlights":[],"assetIntegration":{"characters":[],"memes":[]},"hooks":[],"tags":[]}}`;
+返回结构：{"script":{"title":"","synopsis":"","characters":[],"structure":[],"dialogue":[],"rhythm":[],"reversals":[],"innovationPoints":[],"comedyBeats":[],"visualHighlights":[],"assetIntegration":{"characters":[],"memes":[]},"canonDeltas":[],"hooks":[],"tags":[]}}`;
 }
 
 function storyboardPrompt(input, options = {}) {
@@ -879,6 +893,32 @@ function biblePrompt(input) {
     "hookRules":"前3秒、中段、AI视频段衔接与结尾钩子规则"
   }
 }`;
+}
+
+function episodeBiblePrompt(input) {
+  const payload = normalizeInput(input);
+  return `你是连续短剧的单集统筹编剧。请为当前这一版剧本起草“本次创作圣经”，只输出严格 JSON，不要 Markdown、解释或代码围栏。
+
+这不是重写系列总圣经，也不是提前写完整剧本。它是生成当前剧本时必须遵守的可编辑设定快照。
+
+要求：
+1. 七项都必须具体对应当前主题、角色、场景、本集策划和8段节拍，不能复制泛用占位句。
+2. 角色只写本集实际需要约束的人物：稳定性格、当前欲望、弱点、语言/动作特征、绝不能做的事。
+3. 能力只写本集可能调用的效果、代价、冷却、道具状态和不可突破边界。
+4. 关系写明本集开场状态、允许发生的变化，以及本集不能提前跨越的关系阶段。
+5. 世界规则和反派必须能在画面中通过行动、道具或环境变化体现。
+6. 主线矛盾要写清本集推进什么、不能解决什么；钩子规则必须约束第一段承接/兑现、反转和新的可执行结尾悬念。
+7. 续写时优先继承来源版本保存的本次圣经、承接卡和来源剧本事实；历史快照缺失时明确保守处理，不得补造来源设定。
+8. 可以把系列总圣经细化到当前一集，但不能无铺垫推翻角色底线、能力代价、关系状态、道具归属或手游设定来源边界。
+
+项目与系列资料：${bibleContext(payload)}
+当前创作输入：${creativeInputSummary(payload)}
+本集策划：${stringify(payload.episodePlan || {}, 4000)}
+已确认节拍：${stringify(payload.beatSheet || [], 8500)}
+${continuationPromptContext(payload, 8000)}
+
+返回结构：
+{"bible":{"characters":"本集角色约束","abilities":"本集能力边界","relations":"本集关系起点与可变范围","antagonist":"本集反派目标、手段和底线","worldRules":"本集生效的场景、任务、道具与世界规则","mainConflict":"本集如何推进主线以及不能提前解决的内容","hookRules":"开头承接、反转与结尾新悬念规则"}}`;
 }
 
 function characterCardPrompt(input) {
@@ -1162,6 +1202,13 @@ function normalizeScript(result, input = {}) {
       characters: (Array.isArray(source.assetIntegration?.characters) ? source.assetIntegration.characters : []).map((item) => ({ assetId: textValue(item?.assetId), name: textValue(item?.name), storyFunction: textValue(item?.storyFunction), choice: textValue(item?.choice) })),
       memes: (Array.isArray(source.assetIntegration?.memes) ? source.assetIntegration.memes : []).map((item) => ({ assetId: textValue(item?.assetId), name: textValue(item?.name), triggerRole: textValue(item?.triggerRole), setup: textValue(item?.setup), payoff: textValue(item?.payoff), plotEffect: textValue(item?.plotEffect) })),
     },
+    canonDeltas: (Array.isArray(source.canonDeltas) ? source.canonDeltas : []).slice(0, 8).map((item, index) => ({
+      id: textValue(item?.id) || `CANON-${String(index + 1).padStart(2, "0")}`,
+      field: BIBLE_FIELDS.includes(textValue(item?.field)) ? textValue(item?.field) : "",
+      fact: textValue(item?.fact || item?.suggestedFact),
+      evidence: textValue(item?.evidence),
+      risk: textValue(item?.risk) || "需确认是否会限制后续剧情。",
+    })).filter((item) => item.field && item.fact && item.evidence),
     hooks: normalizeTextList(source.hooks, 3),
     tags: normalizeTextList(source.tags, 3),
   };
@@ -1743,6 +1790,10 @@ async function api(request, env, url) {
   if (["/api/script", "/api/generate"].includes(url.pathname) && (!Array.isArray(input.beatSheet) || input.beatSheet.length !== 8)) {
     return error("请先生成并确认完整的8节拍表，再生成正式剧本", "BEAT_SHEET_REQUIRED", 400);
   }
+  if (["/api/script", "/api/generate"].includes(url.pathname)
+    && (!input.episodeBible || BIBLE_FIELDS.some((field) => !textValue(input.episodeBible[field])))) {
+    return error("请先准备并确认完整的本次创作圣经，再生成正式剧本", "EPISODE_BIBLE_REQUIRED", 400);
+  }
   if (url.pathname === "/api/storyboard" && !input.script && !input.previousScript) {
     return error("请先生成或恢复一个剧本，再生成分镜", "SCRIPT_REQUIRED", 400);
   }
@@ -1796,6 +1847,15 @@ async function api(request, env, url) {
 
   if (url.pathname === "/api/bible") {
     const result = normalizeBible(await askDeepSeek(env, input, biblePrompt(input), 2400, usageMeter));
+    return success(result);
+  }
+
+  if (url.pathname === "/api/episode-bible") {
+    const requiredPlanKeys = ["openingHook", "conflict", "protagonistGoal", "stakes", "forcedChoice", "reversal", "relationshipShift", "endingSuspense", "targetEmotion"];
+    if (requiredPlanKeys.some((key) => !textValue(input.episodePlan?.[key])) || !Array.isArray(input.beatSheet) || input.beatSheet.length !== 8) {
+      return error("请先完成本集策划并确认完整的8节拍表", "EPISODE_BIBLE_CONTEXT_REQUIRED", 400);
+    }
+    const result = normalizeBible(await askDeepSeek(env, input, episodeBiblePrompt(input), 2600, usageMeter));
     return success(result);
   }
 
@@ -1897,6 +1957,7 @@ export const __test = {
   beatSheetPrompt,
   storyboardPrompt,
   continuityPrompt,
+  episodeBiblePrompt,
   extractJson,
   creativeInputSummary,
   requestUnits,

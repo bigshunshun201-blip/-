@@ -210,7 +210,7 @@
           <div class="plan-starter">
             <div>
               <strong>先确定本集结构，再生成剧本</strong>
-              <span>快速填充免费；DeepSeek 会结合短剧圣经和前集实时创作（Flash 1 单位 / Pro 3 单位）</span>
+              <span>快速填充免费；DeepSeek 会结合系列总圣经和前集实时创作（Flash 1 单位 / Pro 3 单位）</span>
             </div>
             <div class="ai-model-line"><span>策划模型</span><div data-ai-model-switch data-ai-model-scope="plan" aria-label="策划生成模型"></div></div>
             <div class="plan-starter-actions">
@@ -251,6 +251,40 @@
               <div class="plan-history-list" id="beatSheetHistoryList"></div>
             </details>
           </div>
+          <details class="episode-bible-panel" id="episodeBiblePanel" open>
+            <summary>
+              <span><strong>本次创作圣经</strong><small>只约束当前剧本版本，不会自动改写系列设定</small></span>
+              <em class="episode-bible-status is-unprepared" id="episodeBibleStatus">未准备</em>
+            </summary>
+            <div class="episode-bible-body">
+              <p class="helper" id="episodeBibleHint">完成并确认节拍表后，可让 AI 根据当前创作资料起草；七项确认后才能生成正式剧本。</p>
+              <div class="episode-bible-toolbar">
+                <div class="ai-model-line"><span>起草模型</span><div data-ai-model-switch data-ai-model-scope="episodeBible" aria-label="本次创作圣经生成模型"></div></div>
+                <div class="episode-bible-actions">
+                  <button class="secondary-action" id="generateEpisodeBibleBtn" type="button">AI 起草本次圣经</button>
+                  <button class="ghost-action" id="restoreProjectBibleBtn" type="button">恢复系列总圣经</button>
+                </div>
+              </div>
+              <div class="episode-bible-grid">
+                <label>角色设定<textarea id="episodeBibleCharacters" rows="4" placeholder="本次出场人物的性格、欲望、弱点、口头禅和行为底线"></textarea></label>
+                <label>精灵能力边界<textarea id="episodeBibleAbilities" rows="4" placeholder="本次会使用的能力、代价、冷却和绝不能突破的边界"></textarea></label>
+                <label>角色关系<textarea id="episodeBibleRelations" rows="3" placeholder="开场关系状态，以及本集允许推进到哪里"></textarea></label>
+                <label>反派与动机<textarea id="episodeBibleAntagonist" rows="3" placeholder="本集反派目标、手段、底线与可见行动"></textarea></label>
+                <label>世界规则<textarea id="episodeBibleWorldRules" rows="3" placeholder="本集涉及的场景、任务、道具和世界机制"></textarea></label>
+                <label>主线矛盾<textarea id="episodeBibleMainConflict" rows="3" placeholder="本集如何推进系列主线，又有哪些问题不能提前解决"></textarea></label>
+                <label class="episode-bible-wide">钩子规则<textarea id="episodeBibleHookRules" rows="3" placeholder="开头兑现、反转和结尾新悬念必须遵守的规则"></textarea></label>
+              </div>
+              <div class="episode-bible-confirm-row">
+                <button class="primary-action" id="confirmEpisodeBibleBtn" type="button">确认当前版本</button>
+                <button class="ghost-action" id="syncEpisodeBibleBtn" type="button">同步到系列总圣经</button>
+              </div>
+              <section class="canon-delta-panel" id="canonDeltaPanel" hidden>
+                <div><strong>剧本新增长期设定</strong><span>勾选要保留到本次圣经的事实，未选项视为仅在本集成立。</span></div>
+                <div class="canon-delta-list" id="canonDeltaList"></div>
+                <button class="secondary-action" id="applyCanonDeltasBtn" type="button">按选择完成校准</button>
+              </section>
+            </div>
+          </details>
           <div class="action-stack episode-actions-stack" aria-label="创作动作">
             <p class="plan-ready-state" id="planReadyState" role="status">请先完整填写或采用一套本集策划</p>
             <div class="ai-model-line"><span>剧本模型</span><div data-ai-model-switch data-ai-model-scope="script" aria-label="剧本生成模型"></div></div>
@@ -303,7 +337,7 @@
               <button class="tab" data-tab="example">流程示例</button>
             </div>
             <div class="tab-group" data-workspace-tabs="world" aria-label="设定工作区">
-              <button class="tab" data-tab="bible">短剧圣经</button>
+              <button class="tab" data-tab="bible">系列总圣经</button>
               <button class="tab" data-tab="characters">角色库</button>
               <button class="tab" data-tab="assets">梗与资产</button>
             </div>
@@ -417,22 +451,22 @@
             <div class="result-header">
               <div>
                 <p class="eyebrow">连续剧底稿</p>
-                <h2>短剧圣经</h2>
+                <h2>系列总圣经</h2>
               </div>
-              <button class="small-action" id="saveBibleBtn">保存短剧圣经</button>
+              <button class="small-action" id="saveBibleBtn">保存系列总圣经</button>
             </div>
-            <p class="helper bible-intro">这里定义不可随意改写的角色、能力与世界规则。每次剧本和分镜生成都会引用当前项目的圣经与已完成集数摘要。</p>
+            <p class="helper bible-intro">这里保存整个系列长期有效的角色、能力与世界规则。每次创作会基于它形成一份可编辑的“本次创作圣经”，不会自动反向覆盖这里。</p>
             <div class="bible-starter">
               <div>
                 <strong>没有完整想法也可以开始</strong>
                 <span>选择一个系列骨架免费填充，或让 DeepSeek 根据左侧当前主题、角色和场景起草。</span>
               </div>
-              <select id="bibleTemplate" aria-label="短剧圣经方向模板">
+              <select id="bibleTemplate" aria-label="系列总圣经方向模板">
                 <option value="comedy">轻喜冒险</option>
                 <option value="mystery">羁绊悬疑</option>
                 <option value="ensemble">热血群像</option>
               </select>
-              <div data-ai-model-switch data-ai-model-scope="bible" aria-label="短剧圣经生成模型"></div>
+              <div data-ai-model-switch data-ai-model-scope="bible" aria-label="系列总圣经生成模型"></div>
               <button class="secondary-action" id="applyBibleTemplateBtn" type="button">免费套用模板</button>
               <button class="ghost-action" id="generateBibleBtn" type="button">DeepSeek 帮我起草</button>
             </div>
@@ -507,7 +541,7 @@
               <div><p class="eyebrow">连载质检</p><h2>连载一致性检查</h2></div>
               <div class="header-actions"><div data-ai-model-switch data-ai-model-scope="continuity" aria-label="一致性检查模型"></div><button class="small-action" id="checkContinuityBtn">检查当前集</button></div>
             </div>
-            <p class="helper bible-intro">一键对照短剧圣经、已完成集数与当前剧本：角色性格、精灵能力、人物关系和上一集悬念是否被正确承接。</p>
+            <p class="helper bible-intro">一键对照当前剧本绑定的本次圣经、系列总圣经与已完成集数：角色性格、精灵能力、人物关系和上一集悬念是否被正确承接。</p>
             <div class="consistency-output" id="consistencyOutput"></div>
             <section class="script-doctor-section">
               <div class="result-header">
@@ -706,10 +740,11 @@
     <script src="./api-client.js?v=20260714-storyboard-reader"></script>
     <script src="./data-store.js?v=20260714-storyboard-reader"></script>
     <script src="./archive-sync.js?v=20260714-storyboard-reader"></script>
-    <script src="./app-state.js?v=20260714-continuation-workspace"></script>
+    <script src="./episode-bible.js?v=20260715-episode-bible"></script>
+    <script src="./app-state.js?v=20260715-episode-bible"></script>
     <script src="./creation-session.js?v=20260714-continuation-workspace"></script>
     <script src="./ai-operation.js?v=20260714-storyboard-reader"></script>
     <script src="./generation-client.js?v=20260714-storyboard-reader"></script>
-    <script src="./app.js?v=20260714-continuation-workspace"></script>
+    <script src="./app.js?v=20260715-episode-bible"></script>
   </body>
 </html>

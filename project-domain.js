@@ -3,7 +3,7 @@
   if (typeof module === "object" && module.exports) module.exports = api;
   if (root) root.RocoProjectDomain = api;
 })(typeof globalThis !== "undefined" ? globalThis : this, function () {
-  const PROJECT_SCHEMA_VERSION = 6;
+  const PROJECT_SCHEMA_VERSION = 7;
 
   function emptySeriesLedger() {
     return {
@@ -90,6 +90,12 @@
       creationMode: snapshot.creationMode === "continue" ? "continue" : "new",
       sourceRef: snapshot.sourceRef && typeof snapshot.sourceRef === "object" ? { ...snapshot.sourceRef } : null,
       continuationBrief: snapshot.continuationBrief && typeof snapshot.continuationBrief === "object" ? { ...snapshot.continuationBrief } : null,
+      generationBibleSnapshot: snapshot.generationBibleSnapshot && typeof snapshot.generationBibleSnapshot === "object" ? { ...snapshot.generationBibleSnapshot } : null,
+      episodeBibleSnapshot: snapshot.episodeBibleSnapshot && typeof snapshot.episodeBibleSnapshot === "object" ? { ...snapshot.episodeBibleSnapshot } : null,
+      bibleFingerprint: String(snapshot.bibleFingerprint || ""),
+      canonDeltas: Array.isArray(snapshot.canonDeltas) ? snapshot.canonDeltas.map((item) => ({ ...item })) : [],
+      acceptedCanonDeltaIds: normalizeIdList(snapshot.acceptedCanonDeltaIds),
+      legacyBibleSnapshotMissing: Boolean(snapshot.legacyBibleSnapshotMissing),
       doctorResult,
       doctorReport: doctorResult?.report || snapshot.doctorReport || null,
     };
@@ -119,6 +125,12 @@
     episode.creationMode = version.creationMode || "new";
     episode.sourceRef = version.sourceRef ? { ...version.sourceRef } : null;
     episode.continuationBrief = version.continuationBrief ? { ...version.continuationBrief } : null;
+    episode.generationBibleSnapshot = version.generationBibleSnapshot ? { ...version.generationBibleSnapshot } : null;
+    episode.episodeBibleSnapshot = version.episodeBibleSnapshot ? { ...version.episodeBibleSnapshot } : null;
+    episode.bibleFingerprint = version.bibleFingerprint || "";
+    episode.canonDeltas = Array.isArray(version.canonDeltas) ? version.canonDeltas.map((item) => ({ ...item })) : [];
+    episode.acceptedCanonDeltaIds = normalizeIdList(version.acceptedCanonDeltaIds);
+    episode.legacyBibleSnapshotMissing = Boolean(version.legacyBibleSnapshotMissing);
     episode.doctorResult = version.doctorResult || null;
     episode.doctorReport = version.doctorReport || null;
     return episode;
@@ -273,6 +285,22 @@
         })) : episode.versions,
       }));
       project.schemaVersion = 6;
+    }
+
+    if (project.schemaVersion < 7) {
+      project.episodes = project.episodes.map((episode) => ({
+        ...episode,
+        versions: Array.isArray(episode.versions) ? episode.versions.map((version) => ({
+          ...version,
+          generationBibleSnapshot: null,
+          episodeBibleSnapshot: null,
+          bibleFingerprint: "",
+          canonDeltas: [],
+          acceptedCanonDeltaIds: [],
+          legacyBibleSnapshotMissing: Boolean(version.script),
+        })) : episode.versions,
+      }));
+      project.schemaVersion = 7;
     }
 
     project.schemaVersion = PROJECT_SCHEMA_VERSION;

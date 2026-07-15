@@ -605,6 +605,35 @@ tbody tr:hover td { background: rgba(200, 221, 124, 0.035); }
 .beat-card p { margin: 4px 0 0; color: var(--ink-soft); font-size: 10px; line-height: 1.5; }
 .approve-beats { width: 100%; }
 .beat-sheet-controls { display: flex; align-items: center; gap: 8px; }
+.episode-bible-panel { margin: 14px 0; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: rgba(8, 14, 12, 0.42); }
+.episode-bible-panel[open] { border-color: rgba(200, 221, 124, 0.3); }
+.episode-bible-panel > summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px; cursor: pointer; list-style: none; }
+.episode-bible-panel > summary::-webkit-details-marker { display: none; }
+.episode-bible-panel > summary > span { display: grid; min-width: 0; gap: 3px; }
+.episode-bible-panel > summary strong { color: var(--ink); font-size: 13px; }
+.episode-bible-panel > summary small { color: var(--ink-faint); font-size: 10px; font-weight: 650; line-height: 1.45; }
+.episode-bible-status { flex: 0 0 auto; padding: 4px 7px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); color: var(--ink-faint); font-size: 10px; font-style: normal; font-weight: 850; }
+.episode-bible-status.is-draft { color: #e1c788; border-color: rgba(225, 199, 136, 0.42); }
+.episode-bible-status.is-confirmed, .episode-bible-status.is-aligned { color: var(--signal); border-color: rgba(200, 221, 124, 0.48); }
+.episode-bible-status.is-stale { color: var(--danger); border-color: rgba(240, 148, 136, 0.48); background: var(--danger-bg); }
+.episode-bible-body { display: grid; gap: 12px; padding: 0 12px 13px; border-top: 1px solid var(--line); }
+.episode-bible-body > .helper { margin: 11px 0 0; }
+.episode-bible-toolbar { display: grid; gap: 8px; }
+.episode-bible-actions, .episode-bible-confirm-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+.episode-bible-grid { display: grid; gap: 10px; }
+.episode-bible-grid label { display: grid; gap: 6px; color: var(--ink-soft); font-size: 11px; font-weight: 850; }
+.episode-bible-grid textarea { min-height: 76px; }
+.episode-bible-wide { grid-column: 1 / -1; }
+.canon-delta-panel { display: grid; gap: 10px; padding: 11px; border: 1px solid rgba(225, 199, 136, 0.32); border-left: 3px solid #e1c788; border-radius: var(--radius-sm); background: rgba(225, 199, 136, 0.045); }
+.canon-delta-panel > div:first-child { display: grid; gap: 3px; }
+.canon-delta-panel strong { color: var(--ink); font-size: 12px; }
+.canon-delta-panel span { color: var(--ink-faint); font-size: 10px; line-height: 1.45; }
+.canon-delta-list { display: grid; gap: 7px; }
+.canon-delta-item { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 8px; align-items: start; padding: 8px 0; border-top: 1px solid var(--line); color: var(--ink-soft); font-size: 10px; line-height: 1.5; }
+.canon-delta-item:first-child { border-top: 0; }
+.canon-delta-item input { margin-top: 3px; accent-color: var(--signal); }
+.canon-delta-item b { display: block; color: var(--signal); font-size: 10px; }
+.canon-delta-item small { display: block; margin-top: 3px; color: var(--ink-faint); }
 .canon-source-section, .script-doctor-section { margin-top: 30px; padding-top: 24px; border-top: 1px solid var(--line); }
 .canon-source-entry { display: grid; grid-template-columns: minmax(160px, 0.35fr) minmax(220px, 0.65fr); gap: 12px; margin-top: 16px; }
 .canon-source-entry label { display: grid; gap: 7px; color: var(--ink-soft); font-size: 12px; font-weight: 850; }

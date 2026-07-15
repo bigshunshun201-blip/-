@@ -93,6 +93,7 @@
       brief: normalizeBrief(brief),
       sourceScript: source.script,
       sourceStoryboard: Array.isArray(source.storyboard) ? source.storyboard : [],
+      sourceEpisodeBible: source.episodeBibleSnapshot || source.generationBibleSnapshot || null,
     };
   }
 
