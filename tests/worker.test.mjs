@@ -184,8 +184,29 @@ test("storyboard segment planner adapts duration and marks fixed-mode trimming",
   }
   const chunks = __test.storyboardSegmentChunks(sixty.segments);
   assert.deepEqual(chunks.map((chunk) => chunk.length), [4, 4]);
-  assert.equal(chunks.reduce((total, chunk) => total + __test.storyboardOutputTokens(chunk.length), 0), 8560);
+  assert.equal(__test.storyboardOutputTokens(1), 4600);
+  assert.equal(__test.storyboardOutputTokens(2), 5600);
+  assert.equal(chunks.reduce((total, chunk) => total + __test.storyboardOutputTokens(chunk.length), 0), 15200);
   assert.equal(__test.storyboardSegmentChunks(__test.storyboardSegmentPlan(180, "smart").segments).length, 6);
+});
+
+test("planning and storyboard compact retries preserve their required structures", () => {
+  const input = {
+    duration: 60,
+    episodeNumber: 2,
+    characters: "阿洛、迪莫",
+    scene: "月牙镇",
+    episodePlan: {},
+  };
+  const planPrompt = __test.plansPrompt(input, { compactRetry: true });
+  assert.match(planPrompt, /截断后的紧凑重试/);
+  assert.match(planPrompt, /仍必须保留 3 套方案和全部字段/);
+  const storyboardPrompt = __test.storyboardPrompt({ ...input, script: { title: "续集" } }, {
+    segments: __test.storyboardSegmentPlan(15).segments.slice(0, 1),
+    compactRetry: true,
+  });
+  assert.match(storyboardPrompt, /单段紧凑重试/);
+  assert.match(storyboardPrompt, /正好 2 个连续动作阶段/);
 });
 
 test("script normalizer rejects incomplete output and missing requested roles", () => {

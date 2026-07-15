@@ -503,7 +503,9 @@ function storyboardSegmentPlan(duration, clipMode = "smart") {
 }
 
 function storyboardOutputTokens(segmentCount) {
-  return Math.min(MAX_STORYBOARD_OUTPUT_TOKENS, 2200 + (Math.max(1, Number(segmentCount) || 1) * 520));
+  // A production-ready segment carries continuity, action phases, sound and a standalone video prompt.
+  // The previous budget was sized for the older compact schema and could truncate even a valid response.
+  return Math.min(MAX_STORYBOARD_OUTPUT_TOKENS, 3600 + (Math.max(1, Number(segmentCount) || 1) * 1000));
 }
 
 function storyboardSegmentChunks(segments, chunkSize = STORYBOARD_CHUNK_SIZE) {
@@ -816,6 +818,7 @@ function storyboardPrompt(input, options = {}) {
     ? `整集 ${payload.duration} 秒共 ${segmentPlan.segments.length} 段。本次只生成第 ${firstShot}-${lastShot} 段，必须严格返回下面 ${segmentCount} 段，不要输出其他段：${stringify(requestedSegments, 3000)}`
     : `整集 ${payload.duration} 秒必须严格按下面的制作段计划拆成正好 ${segmentCount} 段，每段对应一次独立 AI 视频生成任务：${stringify(requestedSegments, 3000)}`;
   const previousContinuity = textValue(options.previousContinuity);
+  const compactRetry = Boolean(options.compactRetry);
   return `你是抖音竖屏 9:16 短剧分镜导演。只根据给定剧本生成分镜，不能改写或另起剧情。只输出严格 JSON，不要 Markdown 或解释。
 
 要求：
@@ -832,9 +835,10 @@ function storyboardPrompt(input, options = {}) {
 11. 所有视频段合起来必须完整实现当前剧本；最后一段必须呈现剧本结尾悬念，不能擅自增加新反转或混入其他剧本内容。
 12. 角色若有结构化角色卡，动作链和画面提示词必须体现其标志性动作、反差或喜剧触发器；口头禅只能出现在剧本已有台词中，不得为分镜擅自加戏。
 13. 每段必须用 beatIds 和 dialogueIds 原样引用剧本中的节拍与台词 id；分镜台词必须与所引用 LINE 原台词一致，不能只写意思相近的新台词。
-14. 每段 visualPrompt 建议 100-180 字，完整写清环境、构图、角色外观与位置、连续动作、镜头、光色、特效和禁止事项；continuityIn、continuityOut 各建议 40-90 字。增加的是制作信息密度，不得增加剧本之外的新事件。
-15. beatBreakdown 按本段时长拆成 2-3 个连续动作阶段，写清每阶段的起点、动作变化和落点，确保可直接用于一次 AI 视频生成。
+14. 每段 visualPrompt 建议 ${compactRetry ? "80-140" : "100-180"} 字，完整写清环境、构图、角色外观与位置、连续动作、镜头、光色、特效和禁止事项；continuityIn、continuityOut 各建议 ${compactRetry ? "30-60" : "40-90"} 字。增加的是制作信息密度，不得增加剧本之外的新事件。
+15. beatBreakdown 按本段时长拆成 ${compactRetry ? "正好 2 个" : "2-3 个"}连续动作阶段，写清每阶段的起点、动作变化和落点，确保可直接用于一次 AI 视频生成。
 ${previousContinuity ? `16. 本批第一段 continuityIn 必须准确承接上一批最后状态，不得重置人物或道具：${previousContinuity}` : ""}
+${compactRetry ? "17. 这是单段紧凑重试：每个字段只写一次，不复述要求、不输出备选方案、不在字符串中嵌套 JSON。" : ""}
 
 项目连续性资料：${canon}
 
@@ -1143,9 +1147,10 @@ ${continuationPromptContext(payload, 7000)}
 限制：beats 必须正好 8 条，id 从 BEAT-01 到 BEAT-08。`;
 }
 
-function plansPrompt(input) {
+function plansPrompt(input, options = {}) {
   const payload = normalizeInput(input);
   const names = roleNames(payload);
+  const compactRetry = Boolean(options.compactRetry);
   return `你是《洛克王国：世界》手游抖音连续短剧的单集策划。根据本次选题、短剧圣经、前集连续性和热梗偏好，实时创作 3 套彼此明显不同的本集策划。只输出严格 JSON，不要 Markdown、解释或代码围栏。
 
 要求：
@@ -1161,6 +1166,7 @@ function plansPrompt(input) {
 10. 三套分别使用不同的创新引擎、喜剧机制和视觉母题；至少一套用视觉喜剧，一套用规则误导，一套用关系反差，但不能复用失忆、万能黑衣人、契约突然失效等通用套路。
 11. 每套必须有一个一眼能记住、静音也能看懂的 9:16 强画面，并让反转由前面出现过的规则、道具或人物选择触发。
 12. 每套必须写清主角的具体目标、失败代价、不可兼得的被迫选择，以及本集结束后的关系变化；不能只从观众视角罗列钩子。
+${compactRetry ? "13. 这是截断后的紧凑重试：每个字符串字段只写一句，每项不超过 55 字，不复述项目资料，不提供备选解释；仍必须保留 3 套方案和全部字段。" : ""}
 
 项目与连续性资料：${bibleContext(payload)}
 
@@ -1789,7 +1795,7 @@ async function askDeepSeek(env, input, prompt, maxTokens, usageMeter, options = 
   }
   const data = JSON.parse(raw);
   if (data.choices?.[0]?.finish_reason === "length") {
-    throw codedError("AI 单次输出达到模型长度上限，本次结果不完整。分镜会自动拆成更小批次重试；剧本请缩短输入或降低时长后重试。", "AI_OUTPUT_TRUNCATED");
+    throw codedError("AI 本次输出达到模型长度上限，系统未保存不完整结果。", "AI_OUTPUT_TRUNCATED");
   }
   const content = data.choices?.[0]?.message?.content || raw;
   try {
@@ -1846,11 +1852,12 @@ async function generateStoryboardInChunks(env, input, duration, usageMeter) {
   const plan = storyboardSegmentPlan(duration, input.clipMode);
   const script = input.script || input.previousScript;
 
-  const generateChunk = async (segments, previousContinuity = "") => {
-    const maxTokens = storyboardOutputTokens(segments.length);
+  const generateChunk = async (segments, previousContinuity = "", compactRetry = false) => {
+    const maxTokens = compactRetry ? Math.min(MAX_STORYBOARD_OUTPUT_TOKENS, 6500) : storyboardOutputTokens(segments.length);
     try {
-      const raw = await askDeepSeek(env, input, storyboardPrompt(input, { segments, previousContinuity }), maxTokens, usageMeter, {
+      const raw = await askDeepSeek(env, input, storyboardPrompt(input, { segments, previousContinuity, compactRetry }), maxTokens, usageMeter, {
         label: `storyboard-${segments[0].shot}-${segments.at(-1).shot}`,
+        temperature: compactRetry ? 0.42 : 0.72,
       });
       const normalized = await normalizeWithRepair(
         env,
@@ -1863,7 +1870,12 @@ async function generateStoryboardInChunks(env, input, duration, usageMeter) {
       );
       return normalized.storyboard;
     } catch (cause) {
-      if (cause?.code !== "AI_OUTPUT_TRUNCATED" || segments.length === 1) throw cause;
+      if (cause?.code !== "AI_OUTPUT_TRUNCATED") throw cause;
+      if (segments.length === 1) {
+        if (compactRetry) throw codedError("该视频段两次生成都被模型截断，请稍后重试本段。系统已保留剧本和已有分镜，不需要缩短整部剧本。", "STORYBOARD_SEGMENT_TRUNCATED");
+        console.warn(JSON.stringify({ event: "storyboard_single_segment_compact_retry", shot: segments[0].shot }));
+        return generateChunk(segments, previousContinuity, true);
+      }
       const middle = Math.ceil(segments.length / 2);
       console.warn(JSON.stringify({ event: "storyboard_chunk_split", firstShot: segments[0].shot, lastShot: segments.at(-1).shot }));
       const firstHalf = await generateChunk(segments.slice(0, middle), previousContinuity);
@@ -1993,7 +2005,28 @@ async function api(request, env, url) {
   }
 
   if (url.pathname === "/api/plans") {
-    const result = normalizePlans(await askDeepSeek(env, input, plansPrompt(input), 2200, usageMeter));
+    let rawPlans;
+    try {
+      rawPlans = await askDeepSeek(env, input, plansPrompt(input), 5000, usageMeter, {
+        label: "episode-plans",
+        temperature: 0.78,
+      });
+    } catch (cause) {
+      if (cause?.code !== "AI_OUTPUT_TRUNCATED") throw cause;
+      console.warn(JSON.stringify({ event: "episode_plans_compact_retry" }));
+      try {
+        rawPlans = await askDeepSeek(env, input, plansPrompt(input, { compactRetry: true }), 6500, usageMeter, {
+          label: "episode-plans-compact-retry",
+          temperature: 0.52,
+        });
+      } catch (retryCause) {
+        if (retryCause?.code === "AI_OUTPUT_TRUNCATED") {
+          throw codedError("三套本集策划连续两次被模型截断，请再次点击生成。当前输入、已保存策划和剧本均未被覆盖。", "PLANS_OUTPUT_TRUNCATED");
+        }
+        throw retryCause;
+      }
+    }
+    const result = normalizePlans(rawPlans);
     return success(result);
   }
 
