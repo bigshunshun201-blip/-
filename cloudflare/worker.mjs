@@ -1367,6 +1367,7 @@ function normalizeRewriteScript(result, input = {}) {
   const candidate = normalizeScript({ script: result?.script || result }, payload).script;
   const violations = rewriteScopeViolations(original, candidate, targetBeatIds);
   if (violations.length) throw validationError("局部改写", [`模型改动了锁定区域：${violations.join("、")}`]);
+  if (sameJson(original, candidate)) throw validationError("局部改写", ["模型没有对目标节拍或关联台词产生任何实际改动"]);
   const changeSummary = textValue(result?.changeSummary);
   if (!changeSummary) throw validationError("局部改写", ["缺少修改摘要"]);
   return {

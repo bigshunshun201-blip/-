@@ -862,11 +862,32 @@ tbody tr:hover td { background: rgba(200, 221, 124, 0.035); }
 .editor-text-lists { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 18px; }
 .editor-text-lists .editor-section-head { grid-column: 1 / -1; }
 
-.rewrite-candidate-panel, .canon-review-panel {
+.working-draft-diff, .rewrite-candidate-panel, .canon-review-panel {
   margin-top: 24px;
   padding: 18px 0;
   border-top: 2px solid rgba(195, 223, 108, .48);
   border-bottom: 1px solid var(--line);
+}
+.working-draft-diff {
+  margin: 10px 0 4px;
+  padding: 18px;
+  border: 1px solid rgba(195, 223, 108, .38);
+  border-left: 3px solid var(--accent);
+  background: rgba(195, 223, 108, .055);
+}
+.working-draft-diff > .helper { margin: -4px 0 16px; }
+.working-draft-diff .version-diff {
+  max-height: 520px;
+  overflow: auto;
+  padding-right: 8px;
+}
+.working-version-notice {
+  margin: 16px 0 0;
+  padding: 12px 14px;
+  border-left: 3px solid var(--accent);
+  background: rgba(195, 223, 108, .07);
+  color: var(--text);
+  font-size: 13px;
 }
 .candidate-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
 .danger-action { min-height: 38px; padding: 0 14px; border: 1px solid rgba(255, 120, 105, .55); background: transparent; color: #ff9d91; font: inherit; font-weight: 700; cursor: pointer; }

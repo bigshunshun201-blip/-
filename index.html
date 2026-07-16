@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>洛克王国短剧创作工作台</title>
-    <link rel="stylesheet" href="./styles.css?v=20260715-script-refinement" />
+    <link rel="stylesheet" href="./styles.css?v=20260716-working-diff" />
   </head>
   <body>
     <a class="skip-link" href="#workspace">跳到创作工作区</a>
@@ -633,6 +633,14 @@
                 <div class="ai-model-line"><span>局部改写</span><div data-ai-model-switch data-ai-model-scope="scriptRewrite" aria-label="剧本局部改写模型"></div></div>
                 <div class="ai-model-line"><span>圣经复核</span><div data-ai-model-switch data-ai-model-scope="scriptCanonReview" aria-label="剧本圣经复核模型"></div></div>
               </div>
+              <section class="working-draft-diff" id="workingDraftDiffPanel" hidden>
+                <div class="candidate-head">
+                  <div><p class="eyebrow">本次改动对比</p><h3 id="workingDraftDiffTitle">基础版本 → 当前工作稿</h3></div>
+                  <span id="workingDraftDiffMeta"></span>
+                </div>
+                <p class="helper">这里会持续保留采用后的差异；保存为新版本后，可到“版本”页继续比较历史版本。</p>
+                <div class="version-diff" id="workingDraftDiff"></div>
+              </section>
               <div class="script-editor-output" id="scriptEditorOutput"></div>
               <section class="rewrite-candidate-panel" id="rewriteCandidatePanel" hidden>
                 <div class="candidate-head"><div><p class="eyebrow">AI 改写候选</p><h3 id="rewriteCandidateTitle">等待审阅</h3></div><span id="rewriteCandidateMeta"></span></div>
@@ -654,6 +662,7 @@
                 <span>对比</span>
                 <label>版本 B<select id="scriptCompareRight"></select></label>
               </div>
+              <div class="working-version-notice" id="workingVersionNotice" hidden></div>
               <div class="script-version-list" id="scriptVersionList"></div>
               <div class="version-diff" id="scriptVersionDiff"></div>
             </section>
@@ -795,6 +804,6 @@
     <script src="./creation-session.js?v=20260714-continuation-workspace"></script>
     <script src="./ai-operation.js?v=20260714-storyboard-reader"></script>
     <script src="./generation-client.js?v=20260714-storyboard-reader"></script>
-    <script src="./app.js?v=20260715-script-refinement"></script>
+    <script src="./app.js?v=20260716-working-diff"></script>
   </body>
 </html>

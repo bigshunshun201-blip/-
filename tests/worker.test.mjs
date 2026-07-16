@@ -761,9 +761,23 @@ test("script revision keeps a working draft separate and compares structured fie
   assert.equal(session.dirty, true);
   const groups = scriptRevision.structuredDiff(original, session.workingScript);
   assert.deepEqual(groups.map((group) => group.field), ["structure"]);
+  assert.equal(scriptRevision.diffCount(groups), 1);
   assert.deepEqual(scriptRevision.rewriteViolations(original, session.workingScript, ["BEAT-02"]), []);
   session.workingScript.title = "越界改标题";
   assert.deepEqual(scriptRevision.rewriteViolations(original, session.workingScript, ["BEAT-02"]), ["title"]);
+});
+
+test("script refinement keeps adopted working-draft differences visible and comparable", async () => {
+  const html = await readFile(new URL("../index.html", import.meta.url), "utf8");
+  const source = await readFile(new URL("../app.js", import.meta.url), "utf8");
+  assert.match(html, /id="workingDraftDiffPanel"/);
+  assert.match(html, /id="workingVersionNotice"/);
+  assert.match(source, /workingDraftCompareId = "__working-draft__"/);
+  assert.match(source, /function renderWorkingDraftDiff\(\)/);
+  assert.match(source, /当前工作稿 · 未保存/);
+  assert.match(source, /AI 返回的候选与当前工作稿没有可见差异/);
+  assert.match(source, /const returnView = options\.silent \? session\.activeView : "versions"/);
+  assert.match(source, /并已打开与基础版本的对比/);
 });
 
 test("episode versions require an approved matching fingerprint before storyboard generation", () => {
@@ -790,6 +804,7 @@ test("worker local rewrite rejects changes outside the selected beat", () => {
   const escaped = structuredClone(candidate);
   escaped.hooks = ["偷偷更换结尾"];
   assert.throws(() => __test.normalizeRewriteScript({ script: escaped, changeSummary: "越界" }, input), /锁定区域/);
+  assert.throws(() => __test.normalizeRewriteScript({ script: original, changeSummary: "没有修改" }, input), /没有对目标节拍或关联台词产生任何实际改动/);
 });
 
 test("canon review normalizer keeps actionable issues and bible suggestions", () => {

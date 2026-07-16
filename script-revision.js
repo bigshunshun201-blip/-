@@ -141,6 +141,10 @@
     }).filter((group) => group.changes.length);
   }
 
+  function diffCount(groups = []) {
+    return (Array.isArray(groups) ? groups : []).reduce((total, group) => total + (Array.isArray(group?.changes) ? group.changes.length : 0), 0);
+  }
+
   function linkedToTarget(item, targetBeatIds) {
     return unique(item?.beatIds).some((id) => targetBeatIds.includes(id));
   }
@@ -175,6 +179,7 @@
     createSession,
     begin,
     structuredDiff,
+    diffCount,
     rewriteViolations,
     same,
   };

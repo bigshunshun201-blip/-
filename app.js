@@ -8,6 +8,7 @@
   const accessCodeKey = "roco-shortdrama-access-code";
   const maxHistoryItems = 60;
   const apiTimeoutMs = 600_000;
+  const workingDraftCompareId = "__working-draft__";
   let activeStoryboardSegmentIndex = 0;
   const characterFieldIds = ["characterName", "characterRole", "characterTraits", "characterContrast", "characterDesire", "characterWeakness", "characterCatchphrases", "characterMannerism", "characterComedyTrigger", "characterBoundary", "characterSpeechPattern", "characterPressureResponse", "characterLieTell", "characterAddressStyle", "characterForbiddenPhrases", "characterInnerNeed", "characterWound", "characterSecret"];
   const apiClient = window.RocoApiClient.create({ accessCodeKey, timeoutMs: apiTimeoutMs });
@@ -2995,9 +2996,32 @@
     if (!panel) return;
     panel.hidden = !candidate;
     if (!candidate) return;
+    const differences = scriptRevisionDomain.structuredDiff(session.workingScript, candidate.script);
     $("#rewriteCandidateTitle").textContent = candidate.changeSummary || "局部改写候选";
-    $("#rewriteCandidateMeta").textContent = `${candidate.model || "DeepSeek"} · ${(candidate.affectedBeatIds || []).join("、")}`;
-    $("#rewriteCandidateDiff").innerHTML = uiTemplates.versionDiff(scriptRevisionDomain.structuredDiff(session.workingScript, candidate.script));
+    $("#rewriteCandidateMeta").textContent = `${candidate.model || "DeepSeek"} · ${scriptRevisionDomain.diffCount(differences)} 项改动 · ${(candidate.affectedBeatIds || []).join("、")}`;
+    $("#rewriteCandidateDiff").innerHTML = uiTemplates.versionDiff(differences);
+  }
+
+  function renderWorkingDraftDiff() {
+    const panel = $("#workingDraftDiffPanel");
+    const target = $("#workingDraftDiff");
+    const session = state.scriptRevisionSession;
+    const episode = currentProjectEpisode();
+    const baseVersion = (episode?.versions || []).find((item) => item.id === session?.baseVersionId);
+    if (!panel || !target) return;
+    const differences = session?.workingScript && baseVersion?.script
+      ? scriptRevisionDomain.structuredDiff(baseVersion.script, session.workingScript)
+      : [];
+    const changeCount = scriptRevisionDomain.diffCount(differences);
+    panel.hidden = !session?.dirty || !baseVersion || !changeCount;
+    if (panel.hidden) {
+      target.innerHTML = "";
+      return;
+    }
+    const baseIndex = (episode.versions || []).findIndex((item) => item.id === baseVersion.id) + 1;
+    $("#workingDraftDiffTitle").textContent = `v${baseIndex} 基础版本 → 当前工作稿`;
+    $("#workingDraftDiffMeta").textContent = `${changeCount} 项可见改动`;
+    target.innerHTML = uiTemplates.versionDiff(differences);
   }
 
   function renderScriptCanonReview() {
@@ -3028,6 +3052,7 @@
     target.innerHTML = uiTemplates.scriptEditor(session.workingScript, session);
     $("#scriptDraftState").textContent = session.dirty ? "工作稿有未保存修改" : "工作稿与当前版本一致";
     if ($("#scriptRevisionNote")) $("#scriptRevisionNote").value = session.revisionNote || "";
+    renderWorkingDraftDiff();
     renderRewriteCandidate();
     renderScriptCanonReview();
   }
@@ -3038,42 +3063,61 @@
     const activeVersion = activeEpisodeVersion(episode);
     const session = ensureScriptRevisionSession();
     if ($("#scriptVersionList")) $("#scriptVersionList").innerHTML = uiTemplates.scriptVersions(versions, activeVersion?.id || "");
-    const options = versions.map((version, index) => `<option value="${escapeHtml(version.id)}">v${index + 1} · ${escapeHtml(version.script?.title || "未命名")}</option>`).join("");
+    const persistedOptions = versions.map((version, index) => `<option value="${escapeHtml(version.id)}">v${index + 1} · ${escapeHtml(version.script?.title || "未命名")}</option>`).join("");
+    const hasWorkingDraft = Boolean(session?.dirty && session.workingScript);
+    const options = `${persistedOptions}${hasWorkingDraft ? `<option value="${workingDraftCompareId}">当前工作稿 · 未保存</option>` : ""}`;
     const left = $("#scriptCompareLeft");
     const right = $("#scriptCompareRight");
+    const workingNotice = $("#workingVersionNotice");
     if (!left || !right) return;
     left.innerHTML = options;
     right.innerHTML = options;
     if (!session || !versions.length) {
       left.disabled = true;
       right.disabled = true;
+      if (workingNotice) workingNotice.hidden = true;
       $("#scriptVersionDiff").innerHTML = `<p class="helper">至少需要一个剧本版本。</p>`;
       return;
     }
     left.disabled = false;
     right.disabled = false;
-    session.compareLeftId = versions.some((item) => item.id === session.compareLeftId) ? session.compareLeftId : versions.at(-2)?.id || versions.at(-1)?.id || "";
-    session.compareRightId = versions.some((item) => item.id === session.compareRightId) ? session.compareRightId : activeVersion?.id || versions.at(-1)?.id || "";
+    const validCompareIds = new Set([...versions.map((item) => item.id), ...(hasWorkingDraft ? [workingDraftCompareId] : [])]);
+    session.compareLeftId = validCompareIds.has(session.compareLeftId) ? session.compareLeftId : session.baseVersionId || versions.at(-2)?.id || versions.at(-1)?.id || "";
+    session.compareRightId = validCompareIds.has(session.compareRightId)
+      ? session.compareRightId
+      : (hasWorkingDraft ? workingDraftCompareId : activeVersion?.id || versions.at(-1)?.id || "");
     left.value = session.compareLeftId;
     right.value = session.compareRightId;
-    const leftVersion = versions.find((item) => item.id === session.compareLeftId);
-    const rightVersion = versions.find((item) => item.id === session.compareRightId);
-    $("#scriptVersionDiff").innerHTML = leftVersion && rightVersion
-      ? uiTemplates.versionDiff(scriptRevisionDomain.structuredDiff(leftVersion.script, rightVersion.script))
-      : `<p class="helper">至少需要一个剧本版本。</p>`;
+    const scriptForCompare = (id) => id === workingDraftCompareId ? session.workingScript : versions.find((item) => item.id === id)?.script;
+    const leftScript = scriptForCompare(session.compareLeftId);
+    const rightScript = scriptForCompare(session.compareRightId);
+    if (workingNotice) {
+      workingNotice.hidden = !hasWorkingDraft;
+      workingNotice.textContent = hasWorkingDraft ? "当前工作稿尚未保存，已加入版本 B，可直接与基础版本比较。" : "";
+    }
+    $("#scriptVersionDiff").innerHTML = leftScript && rightScript
+      ? uiTemplates.versionDiff(scriptRevisionDomain.structuredDiff(leftScript, rightScript))
+      : `<p class="helper">请先形成工作稿或保存第二个剧本版本。</p>`;
   }
 
   function markWorkingScriptChanged(source = "manual") {
     const session = ensureScriptRevisionSession();
     if (!session) return;
+    const wasDirty = session.dirty;
     session.workingScript = scriptRevisionDomain.normalizeScript(session.workingScript);
     session.revisionSource = source;
     session.canonReview = null;
     const base = (currentProjectEpisode()?.versions || []).find((item) => item.id === session.baseVersionId);
     session.dirty = !base || !scriptRevisionDomain.same(base.script, session.workingScript);
+    if (!wasDirty && session.dirty) {
+      session.compareLeftId = session.baseVersionId;
+      session.compareRightId = workingDraftCompareId;
+    }
     state.script = session.workingScript;
     if (session.dirty) state.storyboard = [];
     renderScriptVersionStatus();
+    renderWorkingDraftDiff();
+    if (session.activeView === "versions") renderScriptVersions();
     refreshCreationActions();
     renderStoryboard();
     clearTimeout(markWorkingScriptChanged.saveTimer);
@@ -3151,13 +3195,18 @@
     const session = ensureScriptRevisionSession();
     if (!session?.rewriteCandidate?.script) throw new Error("当前没有可采用的改写候选。");
     const candidate = session.rewriteCandidate;
+    const differences = scriptRevisionDomain.structuredDiff(session.workingScript, candidate.script);
+    const changeCount = scriptRevisionDomain.diffCount(differences);
+    if (!changeCount) throw new Error("AI 返回的候选与当前工作稿没有可见差异，本次未采用。请换一种更具体的改写要求后重试。");
     session.workingScript = scriptRevisionDomain.normalizeScript(candidate.script);
     if (candidate.recastMappings) updateRoleInputsAfterRecast(candidate.recastMappings);
     session.rewriteCandidate = null;
     markWorkingScriptChanged(candidate.revisionSource || "ai-rewrite");
     renderScript();
     setScriptView("edit");
-    setStatus("AI 改写候选已采用到工作稿，尚未创建正式版本");
+    setStatus(`已采用 ${changeCount} 项改动到工作稿；上方保留改前与改后对比，尚未创建正式版本`);
+    const diffPanel = $("#workingDraftDiffPanel");
+    if (diffPanel && !diffPanel.hidden) diffPanel.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
   function discardRewriteCandidate() {
@@ -3185,6 +3234,8 @@
     if (!session?.workingScript) throw new Error("当前没有可保存的工作稿。");
     const validation = scriptRevisionDomain.validateScript(session.workingScript);
     if (!validation.valid) throw new Error(`工作稿结构不完整：${validation.issues.join("；")}`);
+    const parentVersionId = session.baseVersionId;
+    const returnView = options.silent ? session.activeView : "versions";
     state.script = validation.script;
     state.storyboard = [];
     state.creativePack = window.RocoStudio.generateCreativePack(state.script, getInput(), state.topics);
@@ -3204,10 +3255,13 @@
     const review = options.preserveReview ? session.canonReview : null;
     state.scriptRevisionSession = scriptRevisionDomain.begin(version.script, version.id);
     state.scriptRevisionSession.canonReview = review;
+    state.scriptRevisionSession.compareLeftId = parentVersionId;
+    state.scriptRevisionSession.compareRightId = version.id;
+    state.scriptRevisionSession.activeView = returnView;
     persistProjects();
     renderScript(); renderStoryboard(); renderCreativePack(); renderHistory();
     saveDraft(false);
-    if (!options.silent) setStatus("工作稿已保存为新的草稿版本，原版本保持不变");
+    if (!options.silent) setStatus("工作稿已保存为新的草稿版本，并已打开与基础版本的对比");
     return version;
   }
 
