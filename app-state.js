@@ -3,11 +3,11 @@
   if (typeof module === "object" && module.exports) module.exports = api;
   if (root) root.RocoAppState = api;
 })(typeof globalThis !== "undefined" ? globalThis : this, function () {
-  const aiModelScopes = ["meme", "mix", "plan", "beat", "script", "scriptRewrite", "scriptCanonReview", "storyboard", "storyboardRewrite", "bible", "episodeBible", "character", "continuity", "topics", "ledger", "doctor", "recast"];
+  const aiModelScopes = ["meme", "mix", "plan", "beat", "script", "scriptRewrite", "scriptCanonReview", "storyboard", "storyboardRewrite", "imagePrompt", "bible", "episodeBible", "character", "continuity", "topics", "ledger", "doctor", "recast"];
   const defaultAiModels = Object.fromEntries(aiModelScopes.map((scope) => [scope, "deepseek-v4-flash"]));
   const aiModelScopeLabels = {
     meme: "热梗提炼", mix: "角色与梗搭配", plan: "单集策划", beat: "剧情节拍表",
-    script: "剧本", scriptRewrite: "局部改写", scriptCanonReview: "圣经复核", storyboard: "分镜", storyboardRewrite: "单段分镜重生成", bible: "系列总圣经", episodeBible: "本次创作圣经", character: "角色卡",
+    script: "剧本", scriptRewrite: "局部改写", scriptCanonReview: "圣经复核", storyboard: "分镜", storyboardRewrite: "单段分镜重生成", imagePrompt: "ChatGPT 图片提示词", bible: "系列总圣经", episodeBible: "本次创作圣经", character: "角色卡",
     continuity: "一致性检查", topics: "选题", ledger: "连载台账", doctor: "剧本医生", recast: "智能换角",
   };
 

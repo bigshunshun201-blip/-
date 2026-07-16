@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>洛克王国短剧创作工作台</title>
-    <link rel="stylesheet" href="./styles.css?v=20260716-production-ui" />
+    <link rel="stylesheet" href="./styles.css?v=20260716-image-prompts" />
   </head>
   <body>
     <a class="skip-link" href="#workspace">跳到创作工作区</a>
@@ -696,6 +696,28 @@
               <div class="ai-model-line"><span>单段重生成</span><div data-ai-model-switch data-ai-model-scope="storyboardRewrite" aria-label="单段分镜重生成模型"></div></div>
               <div class="storyboard-refine-actions"><button class="ghost-action" id="discardStoryboardDraftBtn" type="button">放弃工作稿</button><button class="secondary-action" id="saveStoryboardVersionBtn" type="button">保存分镜新版本</button></div>
             </section>
+            <section class="image-prompt-toolbar" id="imagePromptToolbar" hidden>
+              <div class="image-prompt-heading">
+                <p class="eyebrow">ChatGPT 关键帧</p>
+                <strong>把每段分镜转换为可直接生成图片的提示词</strong>
+                <span>生成结果先进入分镜工作稿，保存新版本后正式留档。</span>
+              </div>
+              <label>视觉风格
+                <select id="imagePromptStyle">
+                  <option value="手游CG动画质感">手游 CG 动画质感</option>
+                  <option value="高品质3D动画电影">高品质 3D 动画电影</option>
+                  <option value="轻喜剧卡通渲染">轻喜剧卡通渲染</option>
+                  <option value="电影感奇幻写实">电影感奇幻写实</option>
+                </select>
+              </label>
+              <label>补充要求<input id="imagePromptInstruction" placeholder="例如：角色表情更夸张，场景保持明亮" /></label>
+              <div class="ai-model-line"><span>图片提示词模型</span><div data-ai-model-switch data-ai-model-scope="imagePrompt" aria-label="ChatGPT 图片提示词生成模型"></div></div>
+              <div class="image-prompt-actions">
+                <button class="ghost-action" id="copyAllImagePromptsBtn" type="button">复制全部提示词</button>
+                <button class="secondary-action" id="generateCurrentImagePromptBtn" type="button">生成当前段</button>
+                <button class="primary-action" id="generateAllImagePromptsBtn" type="button">生成全部段</button>
+              </div>
+            </section>
             <div class="storyboard-version-list" id="storyboardHistory"></div>
             <div class="storyboard-host" id="storyboardTable"></div>
           </article>
@@ -812,18 +834,18 @@
     <script src="./generator.js?v=20260714-storyboard-reader"></script>
     <script src="./workflow-core.js?v=20260714-storyboard-reader"></script>
     <script src="./script-revision.js?v=20260716-bible-delta-selection"></script>
-    <script src="./storyboard-revision.js?v=20260716-storyboard-refinement"></script>
+    <script src="./storyboard-revision.js?v=20260716-image-prompts"></script>
     <script src="./project-domain.js?v=20260716-production-loop"></script>
     <script src="./episode-planner.js?v=20260714-storyboard-reader"></script>
-    <script src="./ui-templates.js?v=20260716-production-loop"></script>
+    <script src="./ui-templates.js?v=20260716-image-prompts"></script>
     <script src="./api-client.js?v=20260714-storyboard-reader"></script>
     <script src="./data-store.js?v=20260714-storyboard-reader"></script>
     <script src="./archive-sync.js?v=20260714-storyboard-reader"></script>
     <script src="./episode-bible.js?v=20260715-episode-bible"></script>
-    <script src="./app-state.js?v=20260716-production-loop"></script>
+    <script src="./app-state.js?v=20260716-image-prompts"></script>
     <script src="./creation-session.js?v=20260714-continuation-workspace"></script>
     <script src="./ai-operation.js?v=20260714-storyboard-reader"></script>
     <script src="./generation-client.js?v=20260714-storyboard-reader"></script>
-    <script src="./app.js?v=20260716-production-ui"></script>
+    <script src="./app.js?v=20260716-image-prompts"></script>
   </body>
 </html>

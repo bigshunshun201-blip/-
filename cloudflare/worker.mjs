@@ -27,6 +27,7 @@ const AI_PATH_COST = new Map([
   ["/api/script-canon-review", 1],
   ["/api/storyboard", 1],
   ["/api/rewrite-storyboard-segment", 1],
+  ["/api/image-prompts", 1],
   ["/api/bible", 1],
   ["/api/episode-bible", 1],
   ["/api/character-card", 1],
@@ -411,6 +412,8 @@ function normalizeIdList(value, limit = 24) {
 function normalizeInput(input = {}) {
   const activeMemeIds = normalizeIdList(input.activeMemeIds, 6);
   const activeCharacterIds = normalizeIdList(input.activeCharacterIds, 8);
+  const imagePromptSegmentIndexes = [...new Set((Array.isArray(input.imagePromptSegmentIndexes) ? input.imagePromptSegmentIndexes : [])
+    .map(Number).filter((index) => Number.isInteger(index) && index >= 0 && index < 24))];
   const continuation = input.continuationContext && typeof input.continuationContext === "object" ? input.continuationContext : null;
   return {
     mode: String(input.mode || input.creationMode || "new").trim(),
@@ -445,6 +448,9 @@ function normalizeInput(input = {}) {
     storyboard: Array.isArray(input.storyboard) ? input.storyboard.slice(0, 24) : [],
     storyboardSegmentIndex: Math.max(0, Math.min(Number(input.storyboardSegmentIndex || 0), 23)),
     storyboardRewriteInstruction: String(input.storyboardRewriteInstruction || "").trim(),
+    imagePromptSegmentIndexes,
+    imagePromptStyle: String(input.imagePromptStyle || "手游CG动画质感").trim(),
+    imagePromptInstruction: String(input.imagePromptInstruction || "").trim(),
     rewriteTarget: input.rewriteTarget && typeof input.rewriteTarget === "object" ? {
       beatIds: normalizeIdList(input.rewriteTarget.beatIds, 8),
       instruction: String(input.rewriteTarget.instruction || "").trim(),
@@ -889,6 +895,42 @@ function rewriteStoryboardSegmentPrompt(input) {
 本次圣经：${stringify(payload.episodeBible || payload.generationBibleSnapshot || {}, 6000)}
 
 返回结构：{"segment":{"clipId":"","shot":1,"beatIds":[],"dialogueIds":[],"timeRange":"","seconds":8,"generationSeconds":8,"trimSeconds":0,"generationMode":"单场景连续镜头","segmentGoal":"","continuityIn":"","continuityOut":"","beatBreakdown":[{"range":"0-3秒","content":""},{"range":"3-8秒","content":""}],"visual":"","characters":"","scene":"","action":"","line":"","scale":"","movement":"","sound":"","subtitle":"","visualPrompt":"","assetLinks":"","assetNote":"","assetStatus":"待制作"},"changeSummary":"具体说明本段改了什么"}`;
+}
+
+function selectedImagePromptSegments(payload, explicitSegments = null) {
+  if (Array.isArray(explicitSegments) && explicitSegments.length) return explicitSegments;
+  const indexes = payload.imagePromptSegmentIndexes.length
+    ? payload.imagePromptSegmentIndexes
+    : payload.storyboard.map((_, index) => index);
+  return indexes.map((index) => payload.storyboard[index]).filter(Boolean);
+}
+
+function imagePromptPrompt(input, options = {}) {
+  const payload = normalizeInput(input);
+  const segments = selectedImagePromptSegments(payload, options.segments);
+  return `你是 ChatGPT 图片生成提示词导演。请把给定竖屏短剧分镜转换为逐段关键帧图片提示词，只输出严格 JSON，不要 Markdown 或解释。
+
+用途：用户会把 prompt 原样粘贴到 ChatGPT 生成一张与该视频段对应的 9:16 分镜关键帧。图片不是宣传海报，而是后续 AI 视频制作可参考的准确画面。
+
+硬约束：
+1. 每个视频段只选择一个最能表达本段剧情任务的瞬间，frameMoment 要说明取在动作发生前、发生中还是落点；不得新增剧本或分镜外事件。
+2. prompt 必须能脱离上下文独立使用，写清：角色身份与稳定外观、服装和表情、角色位置与朝向、正在发生的唯一动作、关键道具、前中后景、景别、机位、光线、色彩和环境状态。
+3. 视觉风格统一为“${compact(payload.imagePromptStyle, "手游CG动画质感")}”；竖屏 9:16，主体位于字幕安全区之外，画面中禁止文字、字幕、Logo、水印、边框、UI、分屏和拼贴。
+4. 角色外观必须优先服从角色卡、本次创作圣经和相邻段 continuityIn/continuityOut。资料未提供的外观不能擅自频繁变化；用“保持与同系列参考图完全一致”约束发型、服装、体型、配色和配饰。
+5. consistencyAnchor 只记录后续图片必须逐字复用的视觉事实，包括角色外观、服装、道具归属、场景方位与主光方向；不能写剧情概述。
+6. prompt 建议 140-260 个中文字符，具体、可视化、避免空泛形容词；禁止多时刻叠加、连续动作描述和“先……然后……最后……”。
+7. 《洛克王国：世界》手游设定来源边界必须遵守项目资料，不得补入页游剧情。角色不是本集角色卡成员时仍可出场，但必须以当前剧本和分镜中的身份为准。
+8. 用户补充要求：${compact(payload.imagePromptInstruction, "无额外要求，以分镜准确性和角色一致性优先")}。
+
+当前剧本：${stringify(payload.script || {}, 15000)}
+本次创作圣经：${stringify(payload.episodeBible || payload.generationBibleSnapshot || {}, 7500)}
+角色卡：${stringify(payload.projectCharacterCards || [], 6500)}
+需要生成关键帧的分镜段：${stringify(segments, 22000)}
+
+返回结构：
+{"imagePrompts":[{"clipId":"CLIP-01","shot":1,"frameMoment":"动作发生中的准确瞬间","consistencyAnchor":"跨镜头必须固定的角色外观、道具、方位和光线","prompt":"可直接粘贴给 ChatGPT 的完整中文图片提示词"}]}
+
+限制：imagePrompts 必须正好 ${segments.length} 条，clipId 和 shot 必须与输入逐一对应并保持顺序。`;
 }
 
 function continuityPrompt(input) {
@@ -1967,6 +2009,57 @@ function normalizeRewrittenStoryboardSegment(result, input = {}) {
   return { segment, changeSummary: textValue(result?.changeSummary) || `已重生成 ${source.clipId}` };
 }
 
+function normalizeImagePrompts(result, input = {}, explicitSegments = null) {
+  const payload = normalizeInput(input);
+  const expected = selectedImagePromptSegments(payload, explicitSegments);
+  const source = Array.isArray(result?.imagePrompts) ? result.imagePrompts : [];
+  const issues = [];
+  if (source.length !== expected.length) issues.push(`应返回${expected.length}条图片提示词，实际为${source.length}条`);
+  const imagePrompts = expected.map((segment, index) => {
+    const candidate = source.find((item) => textValue(item?.clipId) === textValue(segment?.clipId)) || source[index] || {};
+    const prompt = textValue(candidate.prompt);
+    const frameMoment = textValue(candidate.frameMoment);
+    const consistencyAnchor = textValue(candidate.consistencyAnchor);
+    if (!frameMoment) issues.push(`${segment?.clipId || `第${index + 1}段`}缺少取帧时刻`);
+    if (!consistencyAnchor) issues.push(`${segment?.clipId || `第${index + 1}段`}缺少角色一致性锚点`);
+    if (prompt.length < 60) issues.push(`${segment?.clipId || `第${index + 1}段`}的图片提示词过短`);
+    return {
+      clipId: textValue(segment?.clipId) || `CLIP-${String(index + 1).padStart(2, "0")}`,
+      shot: Math.max(1, Number(segment?.shot || index + 1)),
+      frameMoment,
+      consistencyAnchor,
+      prompt,
+    };
+  });
+  if (issues.length) throw validationError("ChatGPT图片提示词", issues);
+  return { imagePrompts };
+}
+
+async function generateImagePromptsInChunks(env, input, usageMeter) {
+  const payload = normalizeInput(input);
+  const segments = selectedImagePromptSegments(payload);
+  const imagePrompts = [];
+  for (let index = 0; index < segments.length; index += 6) {
+    const chunk = segments.slice(index, index + 6);
+    const maxTokens = Math.min(7200, 2200 + chunk.length * 650);
+    const raw = await askDeepSeek(env, input, imagePromptPrompt(input, { segments: chunk }), maxTokens, usageMeter, {
+      label: `image-prompts-${chunk[0]?.shot || index + 1}-${chunk.at(-1)?.shot || index + chunk.length}`,
+      temperature: 0.42,
+    });
+    const normalized = await normalizeWithRepair(
+      env,
+      input,
+      raw,
+      (value) => normalizeImagePrompts(value, input, chunk),
+      maxTokens,
+      usageMeter,
+      "image-prompts",
+    );
+    imagePrompts.push(...normalized.imagePrompts);
+  }
+  return { imagePrompts };
+}
+
 async function generateStoryboardInChunks(env, input, duration, usageMeter) {
   const plan = storyboardSegmentPlan(duration, input.clipMode);
   const script = input.script || input.previousScript;
@@ -2082,6 +2175,9 @@ async function api(request, env, url) {
   if (url.pathname === "/api/rewrite-storyboard-segment" && (!input.script || !Array.isArray(input.storyboard) || !input.storyboard.length || !String(input.storyboardRewriteInstruction || "").trim())) {
     return error("请提供当前剧本、完整分镜和本段重生成要求", "STORYBOARD_REWRITE_CONTEXT_REQUIRED", 400);
   }
+  if (url.pathname === "/api/image-prompts" && (!input.script || !Array.isArray(input.storyboard) || !input.storyboard.length)) {
+    return error("请先准备当前剧本和对应分镜，再生成图片提示词", "IMAGE_PROMPT_CONTEXT_REQUIRED", 400);
+  }
   if (url.pathname === "/api/rewrite-script" && (!input.script || !Array.isArray(input.rewriteTarget?.beatIds) || !input.rewriteTarget.beatIds.length)) {
     return error("请提供当前剧本、目标节拍和改写要求", "REWRITE_TARGET_REQUIRED", 400);
   }
@@ -2129,6 +2225,11 @@ async function api(request, env, url) {
   if (url.pathname === "/api/rewrite-storyboard-segment") {
     const raw = await askDeepSeek(env, input, rewriteStoryboardSegmentPrompt(input), 4200, usageMeter, { temperature: 0.52 });
     const result = await normalizeWithRepair(env, input, raw, (value) => normalizeRewrittenStoryboardSegment(value, input), 4200, usageMeter, "rewrite-storyboard-segment");
+    return success(result);
+  }
+
+  if (url.pathname === "/api/image-prompts") {
+    const result = await generateImagePromptsInChunks(env, input, usageMeter);
     return success(result);
   }
 
@@ -2292,6 +2393,8 @@ export const __test = {
   beatSheetPrompt,
   storyboardPrompt,
   rewriteStoryboardSegmentPrompt,
+  imagePromptPrompt,
+  normalizeImagePrompts,
   continuityPrompt,
   episodeBiblePrompt,
   extractJson,

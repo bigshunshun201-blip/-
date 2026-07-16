@@ -259,6 +259,19 @@
                   <h4>AI 视频提示词</h4>
                   <p>${escapeHtml(shot.visualPrompt)}</p>
                 </section>
+                <section class="storyboard-detail-block storyboard-image-prompt-block ${shot.imagePrompt ? "is-ready" : "is-empty"}" data-image-prompt-block="${index}">
+                  <div class="storyboard-image-prompt-head">
+                    <div><h4>ChatGPT 关键帧提示词</h4><span data-image-prompt-state>${shot.imagePrompt ? "已对应当前分镜工作稿" : "尚未生成"}</span></div>
+                    <button class="small-action" type="button" data-copy-image-prompt="${index}" ${shot.imagePrompt ? "" : "disabled"}>复制图片提示词</button>
+                  </div>
+                  ${shot.imagePrompt ? `
+                    <dl class="image-prompt-meta">
+                      <div><dt>取帧时刻</dt><dd>${escapeHtml(shot.imagePromptMoment)}</dd></div>
+                      <div><dt>一致性锚点</dt><dd>${escapeHtml(shot.imagePromptAnchor)}</dd></div>
+                    </dl>
+                    <p class="image-prompt-copy">${escapeHtml(shot.imagePrompt)}</p>
+                  ` : `<p class="helper">使用上方“生成当前段”或“生成全部段”，AI 会严格读取本段角色、场景、动作和首尾连续性。</p>`}
+                </section>
                 <section class="storyboard-production-fields">
                   <label>关联资产<input data-shot-field="assetLinks" data-shot-index="${index}" value="${escapeHtml(shot.assetLinks)}" placeholder="资产库名称 / 待采集素材" /></label>
                   <label>制作备注<input data-shot-field="assetNote" data-shot-index="${index}" value="${escapeHtml(shot.assetNote)}" placeholder="负责人、截止时间或备注" /></label>
@@ -281,6 +294,9 @@
                     ${area(index, "continuityIn", shot.continuityIn, "承接入点")}
                     ${area(index, "continuityOut", shot.continuityOut, "承接出点")}
                     ${area(index, "visualPrompt", shot.visualPrompt, "AI 视频提示词", 6)}
+                    ${input(index, "imagePromptMoment", shot.imagePromptMoment, "图片取帧时刻")}
+                    ${area(index, "imagePromptAnchor", shot.imagePromptAnchor, "角色一致性锚点", 4)}
+                    ${area(index, "imagePrompt", shot.imagePrompt, "ChatGPT 图片提示词", 7)}
                     ${input(index, "beatIds", (shot.beatIds || []).join("、"), "关联节拍 ID")}
                     ${input(index, "dialogueIds", (shot.dialogueIds || []).join("、"), "关联台词 ID")}
                     ${input(index, "generationMode", shot.generationMode, "生成模式")}

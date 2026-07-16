@@ -36,7 +36,9 @@
       beatBreakdown: (Array.isArray(value.beatBreakdown) ? value.beatBreakdown : []).map((item) => ({ range: text(item?.range), content: text(item?.content) })).filter((item) => item.range || item.content),
       visual: text(value.visual), characters: text(value.characters), scene: text(value.scene), action: text(value.action),
       line: text(value.line), scale: text(value.scale), movement: text(value.movement), sound: text(value.sound),
-      subtitle: text(value.subtitle), visualPrompt: text(value.visualPrompt), assetLinks: text(value.assetLinks),
+      subtitle: text(value.subtitle), visualPrompt: text(value.visualPrompt),
+      imagePromptMoment: text(value.imagePromptMoment), imagePromptAnchor: text(value.imagePromptAnchor), imagePrompt: text(value.imagePrompt),
+      assetLinks: text(value.assetLinks),
       assetNote: text(value.assetNote), assetStatus: text(value.assetStatus) || "待制作",
     };
   }
@@ -102,7 +104,9 @@
     const labels = {
       segmentGoal: "本段任务", beatBreakdown: "段内节拍", visual: "画面", characters: "角色", scene: "场景",
       action: "动作", line: "台词", subtitle: "字幕", scale: "景别", movement: "镜头运动", sound: "声音",
-      continuityIn: "承接入点", continuityOut: "承接出点", visualPrompt: "视频提示词", beatIds: "节拍ID", dialogueIds: "台词ID",
+      continuityIn: "承接入点", continuityOut: "承接出点", visualPrompt: "视频提示词",
+      imagePromptMoment: "图片取帧时刻", imagePromptAnchor: "角色一致性锚点", imagePrompt: "ChatGPT图片提示词",
+      beatIds: "节拍ID", dialogueIds: "台词ID",
     };
     return Object.entries(labels).flatMap(([field, label]) => same(before[field], after[field]) ? [] : [{ field, label, before: clone(before[field]), after: clone(after[field]) }]);
   }

@@ -162,6 +162,22 @@ test("storyboard chunks allow omitted dialogue text and restore it from script i
   assert.equal(result[1].line, "它在倒着指路。");
 });
 
+test("ChatGPT image prompts stay bound to their storyboard clips", () => {
+  const storyboard = [
+    { clipId: "CLIP-01", shot: 1, characters: "阿洛、迪莫", scene: "月牙镇", action: "徽章裂开" },
+    { clipId: "CLIP-02", shot: 2, characters: "阿洛", scene: "月牙镇路口", action: "举起徽章" },
+  ];
+  const prompt = "竖屏9:16，手游CG动画质感，阿洛位于画面左侧举起裂开的银色徽章，迪莫在右后方警惕后退，前景碎光、中景角色、背景月牙镇路牌，冷色主光，角色服装与同系列参考图一致，画面无文字无水印无界面。";
+  const result = __test.normalizeImagePrompts({ imagePrompts: [
+    { clipId: "CLIP-01", shot: 99, frameMoment: "徽章裂开的瞬间", consistencyAnchor: "阿洛在左、迪莫在右，银色徽章归阿洛", prompt },
+    { clipId: "CLIP-02", shot: 2, frameMoment: "阿洛举起徽章的动作落点", consistencyAnchor: "阿洛服装和徽章裂纹保持一致", prompt: `${prompt} 阿洛改为画面中央。` },
+  ] }, { storyboard, imagePromptSegmentIndexes: [0, 1] });
+  assert.deepEqual(result.imagePrompts.map((item) => item.clipId), ["CLIP-01", "CLIP-02"]);
+  assert.deepEqual(result.imagePrompts.map((item) => item.shot), [1, 2]);
+  assert.match(__test.imagePromptPrompt({ storyboard, script: editableScript(), imagePromptSegmentIndexes: [0] }), /ChatGPT 图片生成提示词导演/);
+  assert.match(__test.imagePromptPrompt({ storyboard, script: editableScript(), imagePromptSegmentIndexes: [0] }), /竖屏 9:16/);
+});
+
 test("worker single-segment rewrite preserves technical fields and neighboring continuity", () => {
   const source = Array.from({ length: 3 }, (_, index) => ({
     clipId: `CLIP-0${index + 1}`, shot: index + 1, timeRange: `${index * 8}-${(index + 1) * 8}秒`, seconds: 8,
@@ -447,12 +463,12 @@ test("beat sheet normalizer requires eight causal production beats", () => {
 
 test("UI contains the production workflow controls", async () => {
   const html = await readFile(new URL("../index.html", import.meta.url), "utf8");
-  for (const id of ["clipMode", "creativeMixBrief", "characterPicker", "memePicker", "suggestCreativeMixBtn", "creativeMixHistoryList", "planOpeningHook", "planProtagonistGoal", "planStakes", "planForcedChoice", "planRelationshipShift", "autoPlanBtn", "suggestPlansBtn", "planSuggestions", "planHistoryList", "generateBeatSheetBtn", "beatSheetList", "approveBeatSheetBtn", "beatSheetHistoryList", "planReadyState", "memeLabBtn", "memeInspireBtn", "memeLabResults", "memeLibrary", "addMemeBtn", "generateBibleBtn", "applyBibleTemplateBtn", "generateCharacterBtn", "saveCharacterBtn", "characterLibrary", "storyboardHistory", "checkContinuityBtn", "assetLibrary", "reviewCommentThemes", "exportProjectBtn", "updateSeriesLedgerBtn", "runScriptDoctorBtn", "addCanonSourceBtn", "characterSpeechPattern", "backupCloudNowBtn", "cloudArchiveVersions", "copyWorkspaceKeyBtn", "connectWorkspaceKeyBtn", "openRecastBtn", "recastPanel", "applyRecastBtn", "scriptEditorOutput", "saveScriptVersionBtn", "discardScriptDraftBtn", "approveScriptVersionBtn", "scriptVersionList", "scriptVersionDiff", "scriptCanonReviewPanel"]) {
+  for (const id of ["clipMode", "creativeMixBrief", "characterPicker", "memePicker", "suggestCreativeMixBtn", "creativeMixHistoryList", "planOpeningHook", "planProtagonistGoal", "planStakes", "planForcedChoice", "planRelationshipShift", "autoPlanBtn", "suggestPlansBtn", "planSuggestions", "planHistoryList", "generateBeatSheetBtn", "beatSheetList", "approveBeatSheetBtn", "beatSheetHistoryList", "planReadyState", "memeLabBtn", "memeInspireBtn", "memeLabResults", "memeLibrary", "addMemeBtn", "generateBibleBtn", "applyBibleTemplateBtn", "generateCharacterBtn", "saveCharacterBtn", "characterLibrary", "storyboardHistory", "checkContinuityBtn", "assetLibrary", "reviewCommentThemes", "exportProjectBtn", "updateSeriesLedgerBtn", "runScriptDoctorBtn", "addCanonSourceBtn", "characterSpeechPattern", "backupCloudNowBtn", "cloudArchiveVersions", "copyWorkspaceKeyBtn", "connectWorkspaceKeyBtn", "openRecastBtn", "recastPanel", "applyRecastBtn", "scriptEditorOutput", "saveScriptVersionBtn", "discardScriptDraftBtn", "approveScriptVersionBtn", "scriptVersionList", "scriptVersionDiff", "scriptCanonReviewPanel", "imagePromptToolbar", "imagePromptStyle", "imagePromptInstruction", "generateCurrentImagePromptBtn", "generateAllImagePromptsBtn", "copyAllImagePromptsBtn"]) {
     assert.match(html, new RegExp(`id="${id}"`));
   }
   assert.match(html, /open\.douyin\.com\/platform\/resource\/docs\/openapi\/data-open-service\/tops-data\/hot-video-list/);
   assert.match(html, /data-ai-model-switch/);
-  for (const scope of ["meme", "mix", "plan", "beat", "script", "scriptRewrite", "scriptCanonReview", "storyboard", "bible", "character", "continuity", "topics", "ledger", "doctor", "recast"]) {
+  for (const scope of ["meme", "mix", "plan", "beat", "script", "scriptRewrite", "scriptCanonReview", "storyboard", "imagePrompt", "bible", "character", "continuity", "topics", "ledger", "doctor", "recast"]) {
     assert.match(html, new RegExp(`data-ai-model-scope="${scope}"`));
   }
   for (const id of ["storyboardRefineToolbar", "saveStoryboardVersionBtn", "canonEvidenceMap", "canonEvidenceSummary"]) {
@@ -595,6 +611,7 @@ test("daily budget weights Pro requests and blocks requests over the limit", asy
   assert.equal(__test.requestUnits("/api/episode-bible", "deepseek-v4-flash"), 1);
   assert.equal(__test.requestUnits("/api/recast-script", "deepseek-v4-flash"), 1);
   assert.equal(__test.requestUnits("/api/meme-lab", "deepseek-v4-flash"), 1);
+  assert.equal(__test.requestUnits("/api/image-prompts", "deepseek-v4-flash"), 1);
   assert.equal(__test.requestUnits("/api/character-card", "deepseek-v4-pro"), 3);
   assert.equal(__test.requestUnits("/api/generate", "deepseek-v4-pro"), 6);
   const first = await __test.reserveDailyBudget(env, "/api/generate", "deepseek-v4-pro");
@@ -729,11 +746,12 @@ test("app state initializes independent model preferences", () => {
   assert.equal(state.aiModels.script, "deepseek-v4-flash");
   state.aiModels.episodeBible = "deepseek-v4-pro";
   assert.equal(state.aiModels.bible, "deepseek-v4-flash");
-  assert.equal(appStateModule.aiModelScopes.length, 17);
+  assert.equal(appStateModule.aiModelScopes.length, 18);
   state.aiModels.scriptRewrite = "deepseek-v4-pro";
   assert.equal(state.aiModels.scriptCanonReview, "deepseek-v4-flash");
   state.aiModels.storyboardRewrite = "deepseek-v4-pro";
   assert.equal(state.aiModels.storyboard, "deepseek-v4-flash");
+  assert.equal(state.aiModels.imagePrompt, "deepseek-v4-flash");
   assert.equal(state.episodeBible.status, "unprepared");
 });
 
@@ -1041,6 +1059,8 @@ test("UI templates escape model content and keep production controls", () => {
   assert.match(storyboardHtml, /生成 <strong>8秒<\/strong>/);
   assert.match(storyboardHtml, /data-storyboard-jump="0"/);
   assert.match(storyboardHtml, /data-storyboard-detail="0"/);
+  assert.match(storyboardHtml, /ChatGPT 关键帧提示词/);
+  assert.match(storyboardHtml, /data-storyboard-edit-field="imagePrompt"/);
 
   const editorHtml = uiTemplates.scriptEditor(editableScript(), { lockedBeatIds: ["BEAT-01"] });
   assert.match(editorHtml, /data-script-field="title"/);

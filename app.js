@@ -146,6 +146,9 @@
     const scriptMatchesVersion = Boolean(activeVersion?.script && projectDomain.scriptFingerprint(state.script) === activeVersion.scriptFingerprint);
     const canStoryboard = projectDomain.versionCanGenerateStoryboard(activeVersion) && scriptMatchesVersion && !revisionDirty;
     const copyAllStoryboardButton = $("#copyAllStoryboardBtn");
+    const generateCurrentImagePromptButton = $("#generateCurrentImagePromptBtn");
+    const generateAllImagePromptsButton = $("#generateAllImagePromptsBtn");
+    const copyAllImagePromptsButton = $("#copyAllImagePromptsBtn");
     const continueButton = $("#continueBtn");
     const beatSheetButton = $("#generateBeatSheetBtn");
     const planReadyState = $("#planReadyState");
@@ -186,6 +189,13 @@
     if (copyAllStoryboardButton) {
       copyAllStoryboardButton.disabled = isBusy || !hasStoryboard;
       copyAllStoryboardButton.title = hasStoryboard ? "按视频段顺序复制当前分镜版本" : "当前还没有分镜";
+    }
+    if (generateCurrentImagePromptButton) generateCurrentImagePromptButton.disabled = isBusy || !hasStoryboard;
+    if (generateAllImagePromptsButton) generateAllImagePromptsButton.disabled = isBusy || !hasStoryboard;
+    if (copyAllImagePromptsButton) {
+      const promptCount = state.storyboard.filter((segment) => segment.imagePrompt).length;
+      copyAllImagePromptsButton.disabled = isBusy || !promptCount;
+      copyAllImagePromptsButton.textContent = promptCount ? `复制全部提示词（${promptCount}）` : "复制全部提示词";
     }
     if (continueButton) {
       continueButton.disabled = isBusy || !hasScript;
@@ -3018,6 +3028,9 @@
       sound: shot.sound || "",
       subtitle: shot.subtitle || "",
       visualPrompt: shot.visualPrompt || "",
+      imagePromptMoment: shot.imagePromptMoment || "",
+      imagePromptAnchor: shot.imagePromptAnchor || "",
+      imagePrompt: shot.imagePrompt || "",
       assetLinks: shot.assetLinks || "",
       assetNote: shot.assetNote || "",
       assetStatus: shot.assetStatus || "待准备",
@@ -3649,6 +3662,8 @@
     const session = ensureStoryboardRevisionSession();
     const toolbar = $("#storyboardRefineToolbar");
     if (toolbar) toolbar.hidden = !session;
+    const imagePromptToolbar = $("#imagePromptToolbar");
+    if (imagePromptToolbar) imagePromptToolbar.hidden = !session;
     if (session) {
       $("#storyboardDraftState").textContent = session.dirty ? "分镜工作稿有未保存修改" : "当前分镜版本未修改";
       $("#storyboardRevisionNote").value = session.revisionNote || "";
@@ -3751,6 +3766,9 @@
       `承接入点：${segment.continuityIn || ""}`,
       `承接出点：${segment.continuityOut || ""}`,
       `AI 视频提示词：${segment.visualPrompt || ""}`,
+      `ChatGPT 图片取帧：${segment.imagePromptMoment || "尚未生成"}`,
+      `角色一致性锚点：${segment.imagePromptAnchor || ""}`,
+      `ChatGPT 图片提示词：${segment.imagePrompt || ""}`,
       `关联资产：${segment.assetLinks || ""}`,
       `制作备注：${segment.assetNote || ""}`,
       `素材状态：${segment.assetStatus || "待制作"}`,
@@ -3770,10 +3788,89 @@
     setStatus(`已复制全部 ${state.storyboard.length} 个视频段`);
   }
 
+  function imagePromptText(segment) {
+    return [
+      `${segment.clipId || `CLIP-${String(segment.shot || 1).padStart(2, "0")}`}｜${segment.timeRange || "关键帧"}`,
+      `取帧时刻：${segment.imagePromptMoment || ""}`,
+      `一致性锚点：${segment.imagePromptAnchor || ""}`,
+      `图片提示词：${segment.imagePrompt || ""}`,
+    ].join("\n");
+  }
+
+  async function copyImagePrompt(index) {
+    const segment = state.storyboard[index];
+    if (!segment?.imagePrompt) throw new Error("当前段还没有 ChatGPT 图片提示词。");
+    await navigator.clipboard.writeText(segment.imagePrompt);
+    setStatus(`已复制 ${segment.clipId} 图片提示词，可直接粘贴到 ChatGPT 生成图片`);
+  }
+
+  async function copyAllImagePrompts() {
+    const segments = state.storyboard.filter((segment) => segment.imagePrompt);
+    if (!segments.length) throw new Error("当前分镜还没有可复制的图片提示词。");
+    await navigator.clipboard.writeText(segments.map(imagePromptText).join("\n\n----------------\n\n"));
+    setStatus(`已复制 ${segments.length} 段 ChatGPT 图片提示词`);
+  }
+
+  async function generateImagePrompts(indexes) {
+    const session = ensureStoryboardRevisionSession();
+    if (!state.script || !session?.workingStoryboard?.length) throw new Error("请先生成当前剧本对应的分镜。");
+    const targets = [...new Set(indexes)].filter((index) => Number.isInteger(index) && session.workingStoryboard[index]);
+    if (!targets.length) throw new Error("没有找到要生成图片提示词的分镜段。");
+    if (targets.some((index) => session.workingStoryboard[index].imagePrompt)
+      && !window.confirm("所选分镜已有图片提示词，继续会生成新内容并进入工作稿，是否继续？")) return;
+    const scriptVersion = activeEpisodeVersion(currentProjectEpisode());
+    const operation = beginAiOperation(targets.length === 1 ? "当前段图片提示词" : "全部图片提示词");
+    try {
+      setStatus(`AI 正在为 ${targets.length} 个分镜段生成 ChatGPT 关键帧提示词...`);
+      const initialResponse = await apiRequest("/api/image-prompts", { input: {
+        ...generationContext(getInput(), "imagePrompt"),
+        script: state.script,
+        scriptVersionId: scriptVersion?.id || "",
+        storyboard: session.workingStoryboard,
+        imagePromptSegmentIndexes: targets,
+        imagePromptStyle: $("#imagePromptStyle")?.value || "手游CG动画质感",
+        imagePromptInstruction: $("#imagePromptInstruction")?.value || "",
+        episodeBible: scriptVersion?.episodeBibleSnapshot || scriptVersion?.generationBibleSnapshot || null,
+      } });
+      const response = await resolveAiJob(initialResponse, "图片提示词");
+      assertActiveAiOperation(operation);
+      const prompts = Array.isArray(response.result?.imagePrompts) ? response.result.imagePrompts : [];
+      if (!prompts.length) throw new Error("AI 没有返回可用的图片提示词。");
+      prompts.forEach((item) => {
+        const index = session.workingStoryboard.findIndex((segment) => segment.clipId === item.clipId);
+        if (index < 0 || !targets.includes(index)) return;
+        storyboardRevisionDomain.updateField(session, index, "imagePromptMoment", item.frameMoment || "");
+        storyboardRevisionDomain.updateField(session, index, "imagePromptAnchor", item.consistencyAnchor || "");
+        storyboardRevisionDomain.updateField(session, index, "imagePrompt", item.prompt || "");
+      });
+      state.storyboard = session.workingStoryboard;
+      markStoryboardWorkingChanged();
+      renderStoryboard();
+      setActiveStoryboardSegment(targets[0]);
+      setStatus(`已生成 ${prompts.length} 段 ChatGPT 图片提示词，保存分镜新版本后正式留档${usageSuffix(response)}`);
+    } finally {
+      endAiOperation(operation);
+    }
+  }
+
   function updateStoryboardProductionField(index, field, value) {
     const session = ensureStoryboardRevisionSession();
     if (!session?.workingStoryboard[index]) return;
     storyboardRevisionDomain.updateField(session, index, field, value);
+    const promptFields = new Set(["imagePromptMoment", "imagePromptAnchor", "imagePrompt"]);
+    const productionOnlyFields = new Set(["assetLinks", "assetNote", "assetStatus"]);
+    if (!promptFields.has(field) && !productionOnlyFields.has(field)) {
+      storyboardRevisionDomain.updateField(session, index, "imagePromptMoment", "");
+      storyboardRevisionDomain.updateField(session, index, "imagePromptAnchor", "");
+      storyboardRevisionDomain.updateField(session, index, "imagePrompt", "");
+      const promptBlock = document.querySelector(`[data-image-prompt-block="${index}"]`);
+      promptBlock?.classList.remove("is-ready");
+      promptBlock?.classList.add("is-stale");
+      const promptState = promptBlock?.querySelector("[data-image-prompt-state]");
+      if (promptState) promptState.textContent = "分镜已修改，请重新生成";
+      const promptCopy = promptBlock?.querySelector("[data-copy-image-prompt]");
+      if (promptCopy) promptCopy.disabled = true;
+    }
     markStoryboardWorkingChanged();
     setStatus("分镜修改已进入工作稿，保存新版本后正式留档");
   }
@@ -4679,6 +4776,8 @@
           `- 承接入点：${shot.continuityIn || ""}`,
           `- 承接出点：${shot.continuityOut || ""}`,
           `- AI 视频提示词：${shot.visualPrompt || ""}`,
+          `- ChatGPT 图片取帧：${shot.imagePromptMoment || ""}`,
+          `- ChatGPT 图片提示词：${shot.imagePrompt || ""}`,
         ].join("\n"),
       )
       .join("\n");
@@ -5146,6 +5245,18 @@
         reportError("复制全部分镜", error);
       }
     });
+    $("#generateCurrentImagePromptBtn").addEventListener("click", async () => {
+      try { await generateImagePrompts([activeStoryboardSegmentIndex]); }
+      catch (error) { reportError("生成当前段图片提示词", error); }
+    });
+    $("#generateAllImagePromptsBtn").addEventListener("click", async () => {
+      try { await generateImagePrompts(state.storyboard.map((_, index) => index)); }
+      catch (error) { reportError("生成全部图片提示词", error); }
+    });
+    $("#copyAllImagePromptsBtn").addEventListener("click", async () => {
+      try { await copyAllImagePrompts(); }
+      catch (error) { reportError("复制图片提示词", error); }
+    });
     $("#storyboardTable").addEventListener("change", (event) => {
       const field = event.target.dataset.shotField;
       const index = Number(event.target.dataset.shotIndex);
@@ -5178,8 +5289,14 @@
         return;
       }
       const regenerate = event.target.closest("[data-storyboard-regenerate]");
+      const copyImagePromptButton = event.target.closest("[data-copy-image-prompt]");
       const adoptCandidate = event.target.closest("[data-storyboard-candidate-adopt]");
       const discardCandidate = event.target.closest("[data-storyboard-candidate-discard]");
+      if (copyImagePromptButton) {
+        try { await copyImagePrompt(Number(copyImagePromptButton.dataset.copyImagePrompt)); }
+        catch (error) { reportError("复制图片提示词", error); }
+        return;
+      }
       if (regenerate || adoptCandidate || discardCandidate) {
         try {
           if (regenerate) await regenerateStoryboardSegment(Number(regenerate.dataset.storyboardRegenerate));
