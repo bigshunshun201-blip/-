@@ -26,6 +26,7 @@ const AI_PATH_COST = new Map([
   ["/api/rewrite-script", 1],
   ["/api/script-canon-review", 1],
   ["/api/storyboard", 1],
+  ["/api/rewrite-storyboard-segment", 1],
   ["/api/bible", 1],
   ["/api/episode-bible", 1],
   ["/api/character-card", 1],
@@ -441,6 +442,9 @@ function normalizeInput(input = {}) {
     } : null,
     script: input.script || null,
     scriptVersionId: String(input.scriptVersionId || "").trim(),
+    storyboard: Array.isArray(input.storyboard) ? input.storyboard.slice(0, 24) : [],
+    storyboardSegmentIndex: Math.max(0, Math.min(Number(input.storyboardSegmentIndex || 0), 23)),
+    storyboardRewriteInstruction: String(input.storyboardRewriteInstruction || "").trim(),
     rewriteTarget: input.rewriteTarget && typeof input.rewriteTarget === "object" ? {
       beatIds: normalizeIdList(input.rewriteTarget.beatIds, 8),
       instruction: String(input.rewriteTarget.instruction || "").trim(),
@@ -790,6 +794,7 @@ function scriptCanonReviewPrompt(input) {
 6. generationBibleSnapshot 是生成时不可变依据；episodeBible 是当前校准快照。不得为了迁就剧本而自动改写长期设定。
 
 判定规则：没有实质冲突时 status 返回 passed；有任何需要修正的冲突时返回 issues。每个问题必须引用剧本证据、违反的规则和可执行修改建议。只有确实应成为长期事实的内容才能放入 bibleDeltas。
+无论是否通过，都必须对七类圣经字段逐项返回 evidenceMap。status 只能是 implemented、conflict 或 missing：有剧本节拍/台词落实该事实为 implemented；剧本与事实冲突为 conflict；本集没有出现且不构成冲突为 missing。evidence 必须指出具体剧情证据；beatIds、dialogueIds 只能引用当前剧本已有 ID。
 
 项目资料：
 ${bibleContext(payload)}
@@ -800,7 +805,7 @@ ${continuationPromptContext(payload, 9000)}
 ${stringify(payload.script, 24000)}
 
 返回结构：
-{"review":{"status":"passed或issues","summary":"复核结论","issues":[{"id":"REVIEW-01","category":"角色性格|能力边界|人物关系|连续性|道具状态|结尾钩子|世界规则","severity":"高|中|低","evidence":"剧本中的具体证据","rule":"冲突的圣经或来源事实","recommendation":"如何修改剧本","beatIds":["BEAT-01"],"dialogueIds":["LINE-01"]}],"bibleDeltas":[{"id":"CANON-REVIEW-01","field":"characters|abilities|relations|antagonist|worldRules|mainConflict|hookRules","fact":"建议补入本次圣经的长期事实","evidence":"剧本依据","risk":"对后续的限制"}]}}`;
+{"review":{"status":"passed或issues","summary":"复核结论","issues":[{"id":"REVIEW-01","category":"角色性格|能力边界|人物关系|连续性|道具状态|结尾钩子|世界规则","severity":"高|中|低","evidence":"剧本中的具体证据","rule":"冲突的圣经或来源事实","recommendation":"如何修改剧本","beatIds":["BEAT-01"],"dialogueIds":["LINE-01"]}],"bibleDeltas":[{"id":"CANON-REVIEW-01","field":"characters|abilities|relations|antagonist|worldRules|mainConflict|hookRules","fact":"建议补入本次圣经的长期事实","evidence":"剧本依据","risk":"对后续的限制"}],"evidenceMap":[{"field":"characters","status":"implemented|conflict|missing","fact":"本次圣经中被检查的具体事实","evidence":"剧本如何落实、冲突或未出现","beatIds":["BEAT-01"],"dialogueIds":["LINE-01"]}]}}`;
 }
 
 function storyboardPrompt(input, options = {}) {
@@ -852,7 +857,38 @@ ${continuationPromptContext(payload, 5000)}
     {"clipId":"CLIP-01","shot":1,"beatIds":["BEAT-01"],"dialogueIds":["LINE-01"],"timeRange":"00-08秒","seconds":8,"generationSeconds":8,"segmentGoal":"本段推进的唯一剧情任务","continuityIn":"段首人物、道具和环境状态","continuityOut":"段尾人物、道具和环境状态","beatBreakdown":[{"range":"0-3秒","content":"同一镜头内的动作阶段"},{"range":"3-8秒","content":"同一镜头内的动作阶段"}],"characters":"出镜角色","scene":"单一场景","visual":"整段画面概述","action":"一个主动作和最多一个反应","line":"所引用剧本原台词/旁白","scale":"单一主景别或平滑景别变化","movement":"一种主要镜头运动","sound":"音效/配乐建议","subtitle":"字幕文案","visualPrompt":"单场景连续镜头、无硬切的完整9:16提示词","assetLinks":"资产库名称或待采集素材","assetNote":"制作备注","assetStatus":"待制作"}
   ]
 }
+
 限制：storyboard 必须正好 ${segmentCount} 条，对应第 ${firstShot}-${lastShot} 段并按时间顺序排列；每段内容只能来自当前剧本。宁可把同一动作写具体，也不要用空泛形容词或新增剧情来拉长输出。`;
+}
+
+function rewriteStoryboardSegmentPrompt(input) {
+  const payload = normalizeInput(input);
+  const index = payload.storyboardSegmentIndex;
+  const current = payload.storyboard[index] || {};
+  const previous = payload.storyboard[index - 1] || null;
+  const next = payload.storyboard[index + 1] || null;
+  const fixedIn = textValue(previous?.continuityOut) || textValue(current.continuityIn);
+  const fixedOut = textValue(next?.continuityIn) || textValue(current.continuityOut);
+  return `你是竖屏短剧分镜精修导演。只重生成指定的一个 AI 视频段，不得改写其他段或剧本。只输出严格 JSON。
+
+改写要求：${compact(payload.storyboardRewriteInstruction, "增强动作连续性和画面表现力")}
+
+硬约束：
+1. 只返回一个 segment 对象；shot、clipId、timeRange、seconds、generationSeconds、trimSeconds、generationMode 必须与原段一致。
+2. 本段 continuityIn 必须逐字等于固定承接入点；continuityOut 必须逐字等于固定承接出点。
+3. beatIds 和 dialogueIds 只能引用剧本已有 ID；台词必须与引用的剧本原台词一致，不能改写剧情。
+4. 允许改进本段任务、动作阶段、构图、动作、镜头、声音、字幕和视频提示词，但不能增加剧本外事件。
+5. visualPrompt 必须可独立交给视频模型，写清 9:16 构图、角色位置、连续动作、镜头、光色和禁止事项。
+
+固定承接入点：${fixedIn}
+固定承接出点：${fixedOut}
+前一段（只读）：${stringify(previous || {}, 5000)}
+当前原段：${stringify(current, 9000)}
+后一段（只读）：${stringify(next || {}, 5000)}
+当前剧本：${stringify(payload.script || {}, 18000)}
+本次圣经：${stringify(payload.episodeBible || payload.generationBibleSnapshot || {}, 6000)}
+
+返回结构：{"segment":{"clipId":"","shot":1,"beatIds":[],"dialogueIds":[],"timeRange":"","seconds":8,"generationSeconds":8,"trimSeconds":0,"generationMode":"单场景连续镜头","segmentGoal":"","continuityIn":"","continuityOut":"","beatBreakdown":[{"range":"0-3秒","content":""},{"range":"3-8秒","content":""}],"visual":"","characters":"","scene":"","action":"","line":"","scale":"","movement":"","sound":"","subtitle":"","visualPrompt":"","assetLinks":"","assetNote":"","assetStatus":"待制作"},"changeSummary":"具体说明本段改了什么"}`;
 }
 
 function continuityPrompt(input) {
@@ -1430,12 +1466,27 @@ function normalizeScriptCanonReview(result) {
     evidence: textValue(item?.evidence),
     risk: textValue(item?.risk) || "采用后会成为本剧本版本的长期约束。",
   })).filter((item) => item.field && item.fact && item.evidence);
+  const rawEvidence = Array.isArray(source.evidenceMap) ? source.evidenceMap : [];
+  const evidenceMap = BIBLE_FIELDS.map((field) => {
+    const item = rawEvidence.find((entry) => textValue(entry?.field) === field) || {};
+    const rawStatus = textValue(item.status);
+    const statusAliases = { "已落实": "implemented", "冲突": "conflict", "未出现": "missing" };
+    const status = ["implemented", "conflict", "missing"].includes(rawStatus) ? rawStatus : statusAliases[rawStatus] || "missing";
+    return {
+      field,
+      status,
+      fact: textValue(item.fact),
+      evidence: textValue(item.evidence) || "本次复核没有给出明确的剧本证据。",
+      beatIds: normalizeIdList(item.beatIds, 12),
+      dialogueIds: normalizeIdList(item.dialogueIds, 16),
+    };
+  });
   const requestedStatus = textValue(source.status);
   const status = issues.length || requestedStatus === "issues" ? "issues" : "passed";
   const summary = textValue(source.summary);
   if (!summary) throw validationError("圣经复核", ["缺少复核结论"]);
   if (status === "issues" && !issues.length) throw validationError("圣经复核", ["判定存在问题但没有提供可执行问题明细"]);
-  return { review: { status, summary, issues, bibleDeltas } };
+  return { review: { status, summary, issues, bibleDeltas, evidenceMap } };
 }
 
 function normalizeRecastScript(result, input = {}) {
@@ -1880,6 +1931,42 @@ function normalizeStoryboardChunk(result, expectedSegments) {
   return { storyboard: source };
 }
 
+function normalizeRewrittenStoryboardSegment(result, input = {}) {
+  const payload = normalizeInput(input);
+  const index = payload.storyboardSegmentIndex;
+  const source = payload.storyboard[index];
+  if (!source) throw validationError("单段分镜", ["没有找到原视频段"]);
+  const candidate = result?.segment || result;
+  const normalizedChunk = normalizeStoryboardChunk({ storyboard: [candidate] }, [{ shot: source.shot }]).storyboard[0];
+  const scriptBeatIds = new Set((payload.script?.structure || []).flatMap((item) => normalizeIdList(item?.beatIds, 8)));
+  const scriptDialogue = new Map((payload.script?.dialogue || []).map((item, lineIndex) => [textValue(item?.id) || `LINE-${String(lineIndex + 1).padStart(2, "0")}`, textValue(item?.line)]));
+  const beatIds = normalizeIdList(normalizedChunk.beatIds, 8).filter((id) => scriptBeatIds.has(id));
+  const dialogueIds = normalizeIdList(normalizedChunk.dialogueIds, 10).filter((id) => scriptDialogue.has(id));
+  const previous = payload.storyboard[index - 1];
+  const next = payload.storyboard[index + 1];
+  const continuityIn = textValue(previous?.continuityOut) || textValue(source.continuityIn);
+  const continuityOut = textValue(next?.continuityIn) || textValue(source.continuityOut);
+  const line = dialogueIds.map((id) => scriptDialogue.get(id)).filter(Boolean).join(" / ") || textValue(source.line);
+  const segment = {
+    ...source,
+    ...normalizedChunk,
+    shot: source.shot,
+    clipId: source.clipId,
+    timeRange: source.timeRange,
+    seconds: source.seconds,
+    generationSeconds: source.generationSeconds,
+    trimSeconds: source.trimSeconds,
+    generationMode: source.generationMode,
+    beatIds: beatIds.length ? beatIds : normalizeIdList(source.beatIds, 8),
+    dialogueIds: dialogueIds.length ? dialogueIds : normalizeIdList(source.dialogueIds, 10),
+    line,
+    subtitle: textValue(normalizedChunk.subtitle) || line,
+    continuityIn,
+    continuityOut,
+  };
+  return { segment, changeSummary: textValue(result?.changeSummary) || `已重生成 ${source.clipId}` };
+}
+
 async function generateStoryboardInChunks(env, input, duration, usageMeter) {
   const plan = storyboardSegmentPlan(duration, input.clipMode);
   const script = input.script || input.previousScript;
@@ -1992,6 +2079,9 @@ async function api(request, env, url) {
   if (url.pathname === "/api/storyboard" && !input.script && !input.previousScript) {
     return error("请先生成或恢复一个剧本，再生成分镜", "SCRIPT_REQUIRED", 400);
   }
+  if (url.pathname === "/api/rewrite-storyboard-segment" && (!input.script || !Array.isArray(input.storyboard) || !input.storyboard.length || !String(input.storyboardRewriteInstruction || "").trim())) {
+    return error("请提供当前剧本、完整分镜和本段重生成要求", "STORYBOARD_REWRITE_CONTEXT_REQUIRED", 400);
+  }
   if (url.pathname === "/api/rewrite-script" && (!input.script || !Array.isArray(input.rewriteTarget?.beatIds) || !input.rewriteTarget.beatIds.length)) {
     return error("请提供当前剧本、目标节拍和改写要求", "REWRITE_TARGET_REQUIRED", 400);
   }
@@ -2033,6 +2123,12 @@ async function api(request, env, url) {
   if (url.pathname === "/api/storyboard") {
     const storyboardDuration = Math.max(15, Math.min(Number(input.duration || 60), 180));
     const result = await generateStoryboardInChunks(env, input, storyboardDuration, usageMeter);
+    return success(result);
+  }
+
+  if (url.pathname === "/api/rewrite-storyboard-segment") {
+    const raw = await askDeepSeek(env, input, rewriteStoryboardSegmentPrompt(input), 4200, usageMeter, { temperature: 0.52 });
+    const result = await normalizeWithRepair(env, input, raw, (value) => normalizeRewrittenStoryboardSegment(value, input), 4200, usageMeter, "rewrite-storyboard-segment");
     return success(result);
   }
 
@@ -2178,6 +2274,7 @@ export const __test = {
   storyboardSegmentChunks,
   normalizeStoryboard,
   normalizeStoryboardChunk,
+  normalizeRewrittenStoryboardSegment,
   normalizeContinuity,
   normalizeBible,
   normalizeCharacterCard,
@@ -2194,6 +2291,7 @@ export const __test = {
   plansPrompt,
   beatSheetPrompt,
   storyboardPrompt,
+  rewriteStoryboardSegmentPrompt,
   continuityPrompt,
   episodeBiblePrompt,
   extractJson,

@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>洛克王国短剧创作工作台</title>
-    <link rel="stylesheet" href="./styles.css?v=20260716-working-diff" />
+    <link rel="stylesheet" href="./styles.css?v=20260716-production-loop" />
   </head>
   <body>
     <a class="skip-link" href="#workspace">跳到创作工作区</a>
@@ -417,7 +417,7 @@
             </section>
             <section class="project-section series-ledger-section">
               <div class="section-title">
-                <div><h3>连载台账</h3><p>从已归档集数提取未解悬念、人物状态、能力代价、关键道具和下一集义务。</p></div>
+                <div><h3>连载台账</h3><p>剧本批准后自动从已批准版本提取未解悬念、人物状态、能力代价、关键道具和下一集义务。</p></div>
                 <div class="header-actions"><div data-ai-model-switch data-ai-model-scope="ledger" aria-label="连载台账模型"></div><button class="small-action" id="updateSeriesLedgerBtn" type="button">AI 更新台账</button></div>
               </div>
               <div class="series-ledger-output" id="seriesLedgerOutput"></div>
@@ -543,6 +543,13 @@
             </div>
             <p class="helper bible-intro">一键对照当前剧本绑定的本次圣经、系列总圣经与已完成集数：角色性格、精灵能力、人物关系和上一集悬念是否被正确承接。</p>
             <div class="consistency-output" id="consistencyOutput"></div>
+            <section class="canon-evidence-section">
+              <div class="section-title">
+                <div><h3>圣经落实证据图</h3><p>复用剧本批准复核结果，将七类设定映射到节拍、台词与对应分镜段。</p></div>
+                <span class="canon-evidence-summary" id="canonEvidenceSummary">等待复核</span>
+              </div>
+              <div class="canon-evidence-map" id="canonEvidenceMap"></div>
+            </section>
             <section class="script-doctor-section">
               <div class="result-header">
                 <div><p class="eyebrow">剧作诊断</p><h2>剧本医生</h2></div>
@@ -677,6 +684,12 @@
               <button class="small-action" id="copyAllStoryboardBtn" type="button">复制全部分镜</button>
             </div>
             <p class="helper bible-intro">每段对应一次独立 AI 视频生成。智能模式会按总时长均衡拆成 5-8 秒制作段；每段限制为一个连续场景和一个主动作，减少人物漂移与镜头断裂。</p>
+            <section class="storyboard-refine-toolbar" id="storyboardRefineToolbar" hidden>
+              <div><p class="eyebrow">分镜工作稿</p><strong id="storyboardDraftState">当前分镜版本未修改</strong></div>
+              <label>版本说明<input id="storyboardRevisionNote" placeholder="例如：加强第 3 段动作连续性" /></label>
+              <div class="ai-model-line"><span>单段重生成</span><div data-ai-model-switch data-ai-model-scope="storyboardRewrite" aria-label="单段分镜重生成模型"></div></div>
+              <div class="storyboard-refine-actions"><button class="ghost-action" id="discardStoryboardDraftBtn" type="button">放弃工作稿</button><button class="secondary-action" id="saveStoryboardVersionBtn" type="button">保存分镜新版本</button></div>
+            </section>
             <div class="storyboard-version-list" id="storyboardHistory"></div>
             <div class="storyboard-host" id="storyboardTable"></div>
           </article>
@@ -793,17 +806,18 @@
     <script src="./generator.js?v=20260714-storyboard-reader"></script>
     <script src="./workflow-core.js?v=20260714-storyboard-reader"></script>
     <script src="./script-revision.js?v=20260716-bible-delta-selection"></script>
-    <script src="./project-domain.js?v=20260714-storyboard-reader"></script>
+    <script src="./storyboard-revision.js?v=20260716-storyboard-refinement"></script>
+    <script src="./project-domain.js?v=20260716-production-loop"></script>
     <script src="./episode-planner.js?v=20260714-storyboard-reader"></script>
-    <script src="./ui-templates.js?v=20260714-storyboard-reader"></script>
+    <script src="./ui-templates.js?v=20260716-production-loop"></script>
     <script src="./api-client.js?v=20260714-storyboard-reader"></script>
     <script src="./data-store.js?v=20260714-storyboard-reader"></script>
     <script src="./archive-sync.js?v=20260714-storyboard-reader"></script>
     <script src="./episode-bible.js?v=20260715-episode-bible"></script>
-    <script src="./app-state.js?v=20260715-episode-bible"></script>
+    <script src="./app-state.js?v=20260716-production-loop"></script>
     <script src="./creation-session.js?v=20260714-continuation-workspace"></script>
     <script src="./ai-operation.js?v=20260714-storyboard-reader"></script>
     <script src="./generation-client.js?v=20260714-storyboard-reader"></script>
-    <script src="./app.js?v=20260716-bible-delta-selection"></script>
+    <script src="./app.js?v=20260716-production-loop"></script>
   </body>
 </html>

@@ -177,7 +177,7 @@
     `;
   }
 
-  function storyboard(storyboardRows = [], hasScript = false, activeIndex = 0) {
+  function storyboard(storyboardRows = [], hasScript = false, activeIndex = 0, options = {}) {
     if (!storyboardRows.length) {
       return hasScript
         ? `<p class="helper">当前剧本版本还没有对应分镜。确认剧本方向可用后，点击“基于本版剧本生成 AI 视频段”。</p>`
@@ -186,6 +186,10 @@
     const selectedIndex = Math.max(0, Math.min(Number(activeIndex) || 0, storyboardRows.length - 1));
     const statusOptions = ["已有", "待制作", "待采集"];
     const beats = (items = []) => items.map((beat) => `<div class="segment-beat"><strong>${escapeHtml(beat.range)}</strong><span>${escapeHtml(beat.content)}</span></div>`).join("");
+    const candidate = options.candidate || null;
+    const input = (index, field, value, label) => `<label>${label}<input data-storyboard-edit-field="${field}" data-shot-index="${index}" value="${escapeHtml(value)}" /></label>`;
+    const area = (index, field, value, label, rows = 3) => `<label>${label}<textarea data-storyboard-edit-field="${field}" data-shot-index="${index}" rows="${rows}">${escapeHtml(value)}</textarea></label>`;
+    const candidateDiff = (changes = []) => changes.length ? changes.map((item) => `<article class="storyboard-candidate-change"><strong>${escapeHtml(item.label)}</strong><div><p><span>当前</span>${escapeHtml(Array.isArray(item.before) ? JSON.stringify(item.before) : item.before)}</p><p><span>候选</span>${escapeHtml(Array.isArray(item.after) ? JSON.stringify(item.after) : item.after)}</p></div></article>`).join("") : `<p class="helper">候选没有产生可见改动。</p>`;
     return `
       <div class="storyboard-review" data-storyboard-review>
         <nav class="storyboard-segment-rail" aria-label="分镜段落">
@@ -260,6 +264,35 @@
                   <label>制作备注<input data-shot-field="assetNote" data-shot-index="${index}" value="${escapeHtml(shot.assetNote)}" placeholder="负责人、截止时间或备注" /></label>
                   <label>素材状态<select data-shot-field="assetStatus" data-shot-index="${index}">${statusOptions.map((status) => `<option value="${status}" ${shot.assetStatus === status ? "selected" : ""}>${status}</option>`).join("")}</select></label>
                 </section>
+                <details class="storyboard-segment-editor" ${index === selectedIndex ? "open" : ""}>
+                  <summary>精修本段全部制作字段</summary>
+                  <div class="storyboard-editor-grid">
+                    ${input(index, "segmentGoal", shot.segmentGoal, "本段任务")}
+                    ${input(index, "characters", shot.characters, "角色")}
+                    ${input(index, "scene", shot.scene, "场景")}
+                    ${area(index, "beatBreakdown", (shot.beatBreakdown || []).map((item) => `${item.range}｜${item.content}`).join("\n"), "段内节拍（每行：时间｜动作）")}
+                    ${area(index, "visual", shot.visual, "画面内容")}
+                    ${area(index, "action", shot.action, "角色动作")}
+                    ${area(index, "line", shot.line, "台词/旁白")}
+                    ${area(index, "subtitle", shot.subtitle, "字幕")}
+                    ${input(index, "scale", shot.scale, "景别")}
+                    ${input(index, "movement", shot.movement, "镜头运动")}
+                    ${input(index, "sound", shot.sound, "音效/配乐")}
+                    ${area(index, "continuityIn", shot.continuityIn, "承接入点")}
+                    ${area(index, "continuityOut", shot.continuityOut, "承接出点")}
+                    ${area(index, "visualPrompt", shot.visualPrompt, "AI 视频提示词", 6)}
+                    ${input(index, "beatIds", (shot.beatIds || []).join("、"), "关联节拍 ID")}
+                    ${input(index, "dialogueIds", (shot.dialogueIds || []).join("、"), "关联台词 ID")}
+                    ${input(index, "generationMode", shot.generationMode, "生成模式")}
+                    ${input(index, "generationSeconds", shot.generationSeconds, "生成秒数")}
+                    ${input(index, "trimSeconds", shot.trimSeconds, "裁剪秒数")}
+                  </div>
+                  <div class="storyboard-ai-rewrite">
+                    <input data-storyboard-rewrite-instruction="${index}" value="${escapeHtml(options.instructionByClipId?.[shot.clipId] || "")}" placeholder="例如：动作更连贯，保留台词与首尾人物位置" />
+                    <button class="secondary-action" type="button" data-storyboard-regenerate="${index}">AI 重生成本段</button>
+                  </div>
+                  ${candidate?.index === index ? `<section class="storyboard-segment-candidate"><div class="candidate-head"><div><p class="eyebrow">单段 AI 候选</p><h3>${escapeHtml(candidate.summary || "等待采用")}</h3></div><span>前后边界已锁定</span></div>${candidateDiff(candidate.changes)}<div class="candidate-actions"><button class="ghost-action" type="button" data-storyboard-candidate-discard>放弃候选</button><button class="secondary-action" type="button" data-storyboard-candidate-adopt>采用到分镜工作稿</button></div></section>` : ""}
+                </details>
               </div>
             </article>`).join("")}
         </section>

@@ -3,7 +3,11 @@
   if (typeof module === "object" && module.exports) module.exports = api;
   if (root) root.RocoProjectDomain = api;
 })(typeof globalThis !== "undefined" ? globalThis : this, function () {
-  const PROJECT_SCHEMA_VERSION = 8;
+  const PROJECT_SCHEMA_VERSION = 9;
+
+  function clone(value) {
+    return value == null ? value : JSON.parse(JSON.stringify(value));
+  }
 
   function scriptFingerprint(script) {
     const source = JSON.stringify(script || null);
@@ -26,6 +30,11 @@
       summary: String(review.summary || ""),
       issues: Array.isArray(review.issues) ? review.issues.map((item) => ({ ...item })) : [],
       bibleDeltas: Array.isArray(review.bibleDeltas) ? review.bibleDeltas.map((item) => ({ ...item })) : [],
+      evidenceMap: Array.isArray(review.evidenceMap) ? review.evidenceMap.map((item) => ({
+        ...item,
+        beatIds: normalizeIdList(item?.beatIds),
+        dialogueIds: normalizeIdList(item?.dialogueIds),
+      })) : [],
       overrideReason: String(review.overrideReason || ""),
     };
   }
@@ -69,10 +78,13 @@
     return {
       id: snapshot.id || newId("storyboard-version"),
       createdAt: snapshot.createdAt || new Date().toISOString(),
-      storyboard: Array.isArray(snapshot.storyboard) ? snapshot.storyboard : [],
+      storyboard: Array.isArray(snapshot.storyboard) ? clone(snapshot.storyboard) : [],
       scriptVersionId: snapshot.scriptVersionId || "",
       source: snapshot.source || "",
       model: snapshot.model || "",
+      parentStoryboardVersionId: String(snapshot.parentStoryboardVersionId || ""),
+      revisionSource: String(snapshot.revisionSource || "generated"),
+      revisionNote: String(snapshot.revisionNote || ""),
     };
   }
 
@@ -148,7 +160,7 @@
     episode.activeVersionId = version.id;
     episode.input = { ...(version.input || {}) };
     episode.script = version.script || null;
-    episode.storyboard = Array.isArray(version.storyboard) ? version.storyboard : [];
+    episode.storyboard = Array.isArray(version.storyboard) ? clone(version.storyboard) : [];
     episode.storyboardVersions = Array.isArray(version.storyboardVersions) ? version.storyboardVersions : [];
     episode.activeStoryboardVersionId = version.activeStoryboardVersionId || null;
     episode.creativePack = version.creativePack || null;
@@ -370,6 +382,8 @@
       project.schemaVersion = 8;
     }
 
+    if (project.schemaVersion < 9) project.schemaVersion = 9;
+
     project.schemaVersion = PROJECT_SCHEMA_VERSION;
     return normalizeProjectEpisodes(project);
   }
@@ -452,11 +466,14 @@
       scriptVersionId: version.id,
       source: response.source,
       model: response.model,
+      parentStoryboardVersionId: version.activeStoryboardVersionId || "",
+      revisionSource: response.revisionSource || "generated",
+      revisionNote: response.revisionNote || "",
     });
     version.storyboardVersions = Array.isArray(version.storyboardVersions) ? version.storyboardVersions : [];
     version.storyboardVersions.push(storyboardVersion);
     version.activeStoryboardVersionId = storyboardVersion.id;
-    version.storyboard = storyboardVersion.storyboard;
+    version.storyboard = clone(storyboardVersion.storyboard);
     version.source = response.source || version.source || "";
     version.model = response.model || version.model || "";
     applyEpisodeVersion(episode, version.id);
@@ -470,7 +487,7 @@
     const storyboardVersion = (version.storyboardVersions || []).find((item) => item.id === storyboardVersionId);
     if (!storyboardVersion || (storyboardVersion.scriptVersionId && storyboardVersion.scriptVersionId !== version.id)) return null;
     version.activeStoryboardVersionId = storyboardVersion.id;
-    version.storyboard = storyboardVersion.storyboard;
+    version.storyboard = clone(storyboardVersion.storyboard);
     applyEpisodeVersion(episode, version.id);
     episode.updatedAt = new Date().toISOString();
     return storyboardVersion;

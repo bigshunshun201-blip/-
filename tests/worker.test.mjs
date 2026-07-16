@@ -18,6 +18,7 @@ const uiTemplates = require("../ui-templates.js");
 const creationSession = require("../creation-session.js");
 const episodeBible = require("../episode-bible.js");
 const scriptRevision = require("../script-revision.js");
+const storyboardRevision = require("../storyboard-revision.js");
 
 const completeBible = Object.fromEntries(episodeBible.FIELDS.map((field) => [field, `${field}设定`]));
 
@@ -159,6 +160,28 @@ test("storyboard chunks allow omitted dialogue text and restore it from script i
   assert.equal(result[0].line, "先别碰那枚徽章。");
   assert.equal(result[0].subtitle, "先别碰那枚徽章。");
   assert.equal(result[1].line, "它在倒着指路。");
+});
+
+test("worker single-segment rewrite preserves technical fields and neighboring continuity", () => {
+  const source = Array.from({ length: 3 }, (_, index) => ({
+    clipId: `CLIP-0${index + 1}`, shot: index + 1, timeRange: `${index * 8}-${(index + 1) * 8}秒`, seconds: 8,
+    generationSeconds: 8, trimSeconds: 0, generationMode: "单场景连续镜头", beatIds: [`BEAT-0${index + 1}`],
+    dialogueIds: [`LINE-0${index + 1}`], segmentGoal: `任务${index + 1}`, continuityIn: `入点${index + 1}`,
+    continuityOut: `出点${index + 1}`, beatBreakdown: [{ range: "0-3秒", content: "发现异常" }, { range: "3-8秒", content: "完成动作" }],
+    visual: "徽章发光", characters: "阿洛、迪莫", scene: "月牙镇", action: "阿洛抬手", line: `台词${index + 1}`,
+    scale: "中近景", movement: "缓推", sound: "低频提示音", subtitle: `台词${index + 1}`,
+    visualPrompt: "9:16单场景连续镜头，前景徽章，中景人物，背景月牙镇，字幕安全区留空", assetStatus: "待制作",
+  }));
+  const candidate = { ...source[1], clipId: "错误ID", shot: 99, seconds: 30, continuityIn: "错误入点", continuityOut: "错误出点", action: "门锁反向弹开" };
+  const result = __test.normalizeRewrittenStoryboardSegment({ segment: candidate, changeSummary: "增强门锁反应" }, {
+    storyboard: source, storyboardSegmentIndex: 1, script: editableScript(),
+  });
+  assert.equal(result.segment.clipId, "CLIP-02");
+  assert.equal(result.segment.shot, 2);
+  assert.equal(result.segment.seconds, 8);
+  assert.equal(result.segment.continuityIn, "出点1");
+  assert.equal(result.segment.continuityOut, "入点3");
+  assert.equal(result.segment.line, "台词2");
 });
 
 test("storyboard segment planner adapts duration and marks fixed-mode trimming", () => {
@@ -432,6 +455,10 @@ test("UI contains the production workflow controls", async () => {
   for (const scope of ["meme", "mix", "plan", "beat", "script", "scriptRewrite", "scriptCanonReview", "storyboard", "bible", "character", "continuity", "topics", "ledger", "doctor", "recast"]) {
     assert.match(html, new RegExp(`data-ai-model-scope="${scope}"`));
   }
+  for (const id of ["storyboardRefineToolbar", "saveStoryboardVersionBtn", "canonEvidenceMap", "canonEvidenceSummary"]) {
+    assert.match(html, new RegExp(`id="${id}"`));
+  }
+  assert.match(html, /data-ai-model-scope="storyboardRewrite"/);
 });
 
 test("JSON extraction repairs common missing commas from model output", () => {
@@ -698,9 +725,11 @@ test("app state initializes independent model preferences", () => {
   assert.equal(state.aiModels.script, "deepseek-v4-flash");
   state.aiModels.episodeBible = "deepseek-v4-pro";
   assert.equal(state.aiModels.bible, "deepseek-v4-flash");
-  assert.equal(appStateModule.aiModelScopes.length, 16);
+  assert.equal(appStateModule.aiModelScopes.length, 17);
   state.aiModels.scriptRewrite = "deepseek-v4-pro";
   assert.equal(state.aiModels.scriptCanonReview, "deepseek-v4-flash");
+  state.aiModels.storyboardRewrite = "deepseek-v4-pro";
+  assert.equal(state.aiModels.storyboard, "deepseek-v4-flash");
   assert.equal(state.episodeBible.status, "unprepared");
 });
 
@@ -822,18 +851,22 @@ test("worker local rewrite keeps target changes and discards changes outside the
   assert.throws(() => __test.normalizeRewriteScript({ script: original, changeSummary: "没有修改" }, input), /没有对目标节拍或关联台词产生任何实际改动/);
 });
 
-test("canon review normalizer keeps actionable issues and bible suggestions", () => {
+test("canon review normalizer keeps actionable issues, bible suggestions, and seven evidence fields", () => {
   const reviewed = __test.normalizeScriptCanonReview({ review: {
     status: "issues", summary: "能力代价没有兑现",
     issues: [{ category: "能力边界", severity: "高", evidence: "迪莫连续释放三次技能", rule: "每次后需要冷却", recommendation: "让第三次失败并由阿洛补位", beatIds: ["BEAT-06"] }],
     bibleDeltas: [{ field: "relations", fact: "阿洛开始主动补位", evidence: "第六拍挡在迪莫前", risk: "后续需延续互助关系" }],
+    evidenceMap: [{ field: "abilities", status: "冲突", fact: "迪莫释放后必须冷却", evidence: "第六拍仍连续施法", beatIds: ["BEAT-06"], dialogueIds: ["LINE-06"] }],
   } });
   assert.equal(reviewed.review.status, "issues");
   assert.equal(reviewed.review.issues[0].severity, "高");
   assert.equal(reviewed.review.bibleDeltas[0].field, "relations");
+  assert.equal(reviewed.review.evidenceMap.length, 7);
+  assert.equal(reviewed.review.evidenceMap.find((item) => item.field === "abilities").status, "conflict");
+  assert.equal(reviewed.review.evidenceMap.find((item) => item.field === "characters").status, "missing");
 });
 
-test("project schema v8 preserves continuation lineage and does not fabricate legacy bible snapshots", () => {
+test("project schema v9 preserves continuation lineage and does not fabricate legacy bible snapshots", () => {
   const migrated = projectDomain.migrateProjectRecord({
     schemaVersion: 6,
     id: "legacy-v6",
@@ -841,7 +874,7 @@ test("project schema v8 preserves continuation lineage and does not fabricate le
     planBatches: [{ id: "plan-1" }],
     episodes: [{ id: "episode-1", episodeNumber: 1, versions: [{ id: "version-1", script: { title: "第一集" } }], activeVersionId: "version-1" }],
   });
-  assert.equal(migrated.schemaVersion, 8);
+  assert.equal(migrated.schemaVersion, 9);
   assert.equal(migrated.episodes[0].versions[0].creationMode, "new");
   assert.equal(migrated.episodes[0].versions[0].generationBibleSnapshot, null);
   assert.equal(migrated.episodes[0].versions[0].episodeBibleSnapshot, null);
@@ -939,13 +972,36 @@ test("storyboard versions stay attached to one script version and can be restore
     versionSnapshot: { script: { title: "当前剧本" } },
   });
   const first = projectDomain.updateActiveStoryboard(episode, [{ shot: 1, segmentGoal: "第一版" }], { model: "flash" });
-  const second = projectDomain.updateActiveStoryboard(episode, [{ shot: 1, segmentGoal: "第二版" }], { model: "pro" });
+  const second = projectDomain.updateActiveStoryboard(episode, [{ shot: 1, segmentGoal: "第二版" }], { model: "pro", revisionSource: "manual", revisionNote: "强化动作" });
   assert.equal(projectDomain.activeEpisodeVersion(episode).storyboardVersions.length, 2);
   assert.equal(first.scriptVersionId, version.id);
   assert.equal(second.scriptVersionId, version.id);
+  assert.equal(second.parentStoryboardVersionId, first.id);
+  assert.equal(second.revisionNote, "强化动作");
+  second.storyboard[0].segmentGoal = "修改返回值";
   projectDomain.applyStoryboardVersion(episode, first.id);
   assert.equal(episode.storyboard[0].segmentGoal, "第一版");
   assert.equal(episode.activeStoryboardVersionId, first.id);
+});
+
+test("storyboard refinement locks neighboring continuity and keeps the base version immutable", () => {
+  const base = [
+    { clipId: "CLIP-01", shot: 1, seconds: 8, continuityIn: "开场", continuityOut: "人物站在门左侧", segmentGoal: "到门口" },
+    { clipId: "CLIP-02", shot: 2, seconds: 8, continuityIn: "人物站在门左侧", continuityOut: "徽章举到胸前", segmentGoal: "检查徽章" },
+    { clipId: "CLIP-03", shot: 3, seconds: 8, continuityIn: "徽章举到胸前", continuityOut: "结束", segmentGoal: "门打开" },
+  ];
+  const session = storyboardRevision.begin(base, "sb-v1");
+  storyboardRevision.updateField(session, 1, "action", "角色将徽章贴近门锁");
+  assert.equal(base[1].action, undefined);
+  const candidate = storyboardRevision.lockCandidateBoundaries(session.workingStoryboard, 1, {
+    ...session.workingStoryboard[1], clipId: "BAD", shot: 99, seconds: 30,
+    continuityIn: "错误入点", continuityOut: "错误出点", action: "门锁反向弹开",
+  });
+  assert.equal(candidate.clipId, "CLIP-02");
+  assert.equal(candidate.shot, 2);
+  assert.equal(candidate.seconds, 8);
+  assert.equal(candidate.continuityIn, "人物站在门左侧");
+  assert.equal(candidate.continuityOut, "徽章举到胸前");
 });
 
 test("project domain validates episode plans and preserves review thresholds", () => {
@@ -993,6 +1049,7 @@ test("page loads domain and template modules before app.js", async () => {
   const html = await readFile(new URL("../index.html", import.meta.url), "utf8");
   const domainIndex = html.indexOf("project-domain.js");
   const revisionIndex = html.indexOf("script-revision.js");
+  const storyboardRevisionIndex = html.indexOf("storyboard-revision.js");
   const plannerIndex = html.indexOf("episode-planner.js");
   const templatesIndex = html.indexOf("ui-templates.js");
   const archiveIndex = html.indexOf("archive-sync.js");
@@ -1001,7 +1058,7 @@ test("page loads domain and template modules before app.js", async () => {
   const operationIndex = html.indexOf("ai-operation.js");
   const generationIndex = html.indexOf("generation-client.js");
   const appIndex = html.indexOf("app.js");
-  assert.ok(revisionIndex > 0 && domainIndex > revisionIndex && plannerIndex > domainIndex && templatesIndex > plannerIndex && archiveIndex > templatesIndex && episodeBibleIndex > archiveIndex && stateIndex > episodeBibleIndex && operationIndex > stateIndex && generationIndex > operationIndex && appIndex > generationIndex);
+  assert.ok(revisionIndex > 0 && storyboardRevisionIndex > revisionIndex && domainIndex > storyboardRevisionIndex && plannerIndex > domainIndex && templatesIndex > plannerIndex && archiveIndex > templatesIndex && episodeBibleIndex > archiveIndex && stateIndex > episodeBibleIndex && operationIndex > stateIndex && generationIndex > operationIndex && appIndex > generationIndex);
 });
 
 test("public build includes the continuation session module", async () => {
@@ -1010,5 +1067,6 @@ test("public build includes the continuation session module", async () => {
   assert.match(source, /"creation-session\.js"/);
   assert.match(source, /"episode-bible\.js"/);
   assert.match(source, /"script-revision\.js"/);
+  assert.match(source, /"storyboard-revision\.js"/);
   assert.ok(html.indexOf("creation-session.js") < html.indexOf("app.js?v="));
 });

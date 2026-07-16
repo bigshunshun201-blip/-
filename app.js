@@ -54,6 +54,7 @@
   const episodePlanner = window.RocoEpisodePlanner;
   const creationSession = window.RocoCreationSession;
   const scriptRevisionDomain = window.RocoScriptRevision;
+  const storyboardRevisionDomain = window.RocoStoryboardRevision;
   const episodeBibleDomain = window.RocoEpisodeBible;
   const episodeBibleFieldIds = {
     characters: "episodeBibleCharacters", abilities: "episodeBibleAbilities", relations: "episodeBibleRelations",
@@ -236,6 +237,7 @@
     state.currentHistoryId = null;
     state.script = null;
     state.storyboard = [];
+    state.storyboardRevisionSession = null;
     state.creativePack = null;
     state.scriptDoctor = null;
     state.scriptRevisionSession = null;
@@ -390,6 +392,7 @@
       creativePack: state.creativePack,
       scriptDoctor: state.scriptDoctor,
       scriptRevisionSession: scriptRevisionDomain.createSession(state.scriptRevisionSession || {}),
+      storyboardRevisionSession: storyboardRevisionDomain.createSession(state.storyboardRevisionSession || {}),
       planOptions: state.planOptions.map((item) => ({ ...item, plan: { ...(item.plan || {}) } })),
       selectedPlanOptionId: state.selectedPlanOptionId,
       activePlanBatchId: state.activePlanBatchId,
@@ -421,6 +424,9 @@
     state.scriptRevisionSession = session.scriptRevisionSession
       ? scriptRevisionDomain.createSession(session.scriptRevisionSession)
       : state.script ? scriptRevisionDomain.begin(state.script, activeEpisodeVersion(currentProjectEpisode())?.id || "") : null;
+    state.storyboardRevisionSession = session.storyboardRevisionSession
+      ? storyboardRevisionDomain.createSession(session.storyboardRevisionSession)
+      : null;
     state.planOptions = Array.isArray(session.planOptions) ? session.planOptions : [];
     state.selectedPlanOptionId = session.selectedPlanOptionId || null;
     state.activePlanBatchId = session.activePlanBatchId || null;
@@ -1729,6 +1735,7 @@
     state.currentHistoryId = null;
     state.script = null;
     state.storyboard = [];
+    state.storyboardRevisionSession = null;
     state.creativePack = null;
     state.scriptDoctor = null;
     state.scriptRevisionSession = null;
@@ -2191,6 +2198,7 @@
     state.reviewEpisodeId = episode.id;
     state.script = episode.script || null;
     state.storyboard = episode.storyboard || [];
+    state.storyboardRevisionSession = null;
     state.creativePack = episode.creativePack || null;
     state.scriptDoctor = episode.doctorResult || null;
     state.currentHistoryId = episode.historyId || null;
@@ -2305,6 +2313,7 @@
 
   function renderConsistency() {
     renderScriptDoctor();
+    renderCanonEvidenceMap();
     const target = $("#consistencyOutput");
     if (!target) return;
     const report = currentProjectEpisode()?.consistency;
@@ -2328,6 +2337,46 @@
           <div><span class="check-status ${escapeHtml(check.status || "warn")}">${escapeHtml(check.status || "warn")}</span><p>${escapeHtml(check.evidence || "")}</p><p>修正建议：${escapeHtml(check.fix || "无需修正")}</p></div>
         </article>`).join("")}</div>
       ${report.nextEpisodeCarryover ? `<section class="content-block"><h3>下一集承接提示</h3><p>${escapeHtml(report.nextEpisodeCarryover)}</p></section>` : ""}`;
+  }
+
+  function renderCanonEvidenceMap() {
+    const target = $("#canonEvidenceMap");
+    const summary = $("#canonEvidenceSummary");
+    if (!target || !summary) return;
+    const version = activeEpisodeVersion(currentProjectEpisode());
+    const evidenceMap = version?.approvalReview?.evidenceMap || [];
+    if (!state.script || !evidenceMap.length) {
+      summary.textContent = "等待复核";
+      target.innerHTML = `<p class="helper">批准当前剧本时会自动生成证据图。升级前的历史版本未保存证据，可重新执行批准复核后生成。</p>`;
+      return;
+    }
+    const labels = {
+      characters: "角色设定", abilities: "能力边界", relations: "角色关系", antagonist: "反派",
+      worldRules: "世界规则", mainConflict: "主线矛盾", hookRules: "钩子规则",
+    };
+    const statusLabels = { implemented: "已落实", conflict: "冲突", missing: "未出现" };
+    const storyboard = state.storyboardRevisionSession?.workingStoryboard || state.storyboard || [];
+    const counts = evidenceMap.reduce((result, item) => {
+      result[item.status] = (result[item.status] || 0) + 1;
+      return result;
+    }, {});
+    summary.textContent = `${counts.implemented || 0} 已落实 · ${counts.conflict || 0} 冲突 · ${counts.missing || 0} 未出现`;
+    target.innerHTML = evidenceMap.map((item) => {
+      const beatIds = Array.isArray(item.beatIds) ? item.beatIds : [];
+      const dialogueIds = Array.isArray(item.dialogueIds) ? item.dialogueIds : [];
+      const clips = storyboard.filter((segment) =>
+        (segment.beatIds || []).some((id) => beatIds.includes(id))
+        || (segment.dialogueIds || []).some((id) => dialogueIds.includes(id)))
+        .map((segment) => segment.clipId || `镜头${segment.shot}`);
+      const refs = [...beatIds, ...dialogueIds, ...clips];
+      const status = ["implemented", "conflict", "missing"].includes(item.status) ? item.status : "missing";
+      return `<article class="canon-evidence-item" data-status="${status}">
+        <div class="canon-evidence-head"><h4>${escapeHtml(labels[item.field] || item.field || "设定")}</h4><span class="canon-evidence-status ${status}">${statusLabels[status]}</span></div>
+        ${item.fact ? `<p class="canon-evidence-fact">${escapeHtml(item.fact)}</p>` : ""}
+        <p>${escapeHtml(item.evidence || "本次复核没有给出明确证据。")}</p>
+        <div class="canon-evidence-refs">${refs.length ? refs.map((id) => `<span>${escapeHtml(id)}</span>`).join("") : `<span>本集无引用</span>`}</div>
+      </article>`;
+    }).join("");
   }
 
   async function runContinuityCheck() {
@@ -2389,29 +2438,51 @@
     target.innerHTML = hasContent ? `
       <div class="ledger-grid">${groups.map(([title, items, keys]) => `<article><h4>${title}</h4>${items.length ? `<ul>${items.slice(0, 8).map((item) => `<li>${escapeHtml(ledgerItemText(item, keys))}</li>`).join("")}</ul>` : `<p>暂无</p>`}</article>`).join("")}
       <article><h4>反派推进</h4><p>${escapeHtml(ledger.antagonistProgress || "暂无")}</p></article></div>`
-      : `<p class="helper">归档剧本后点击“AI 更新台账”，系统会把跨集必须记住的信息沉淀在这里。</p>`;
+      : `<p class="helper">批准剧本后系统会自动更新台账；也可以点击“AI 更新台账”手工重试。</p>`;
     const history = project?.ledgerVersions || [];
     if ($("#ledgerHistoryCount")) $("#ledgerHistoryCount").textContent = String(history.length);
-    if ($("#ledgerHistoryList")) $("#ledgerHistoryList").innerHTML = history.length ? history.slice(0, 10).map((item, index) => `<div class="plan-history-item"><div><strong>${escapeHtml(new Date(item.createdAt).toLocaleString("zh-CN", { hour12: false }))}</strong><span>${escapeHtml(item.model || "model")} · ${item.episodeCount || 0} 集</span></div><button class="small-action" type="button" data-ledger-restore="${index}">恢复</button></div>`).join("") : `<p class="helper">每次 AI 更新都会留下版本。</p>`;
+    if ($("#ledgerHistoryList")) $("#ledgerHistoryList").innerHTML = history.length ? history.slice(0, 10).map((item, index) => `<div class="plan-history-item"><div><strong>${escapeHtml(new Date(item.createdAt).toLocaleString("zh-CN", { hour12: false }))}</strong><span>${escapeHtml(item.model || "model")} · ${item.episodeCount || 0} 集 · ${item.trigger === "approval" ? "批准后自动" : "手工"}</span></div><button class="small-action" type="button" data-ledger-restore="${index}">恢复</button></div>`).join("") : `<p class="helper">每次 AI 更新都会留下版本。</p>`;
   }
 
-  async function updateSeriesLedger() {
+  function approvedEpisodesForLedger(project) {
+    return (project?.episodes || []).map((episode) => {
+      const versions = (episode.versions || []).filter((version) => version?.script && version.approvalStatus === "approved");
+      const active = versions.find((version) => version.id === episode.activeVersionId);
+      const version = active || versions.sort((a, b) => String(a.approvedAt || a.createdAt).localeCompare(String(b.approvedAt || b.createdAt))).at(-1);
+      return version ? { ...episode, script: version.script, consistency: version.consistency || null, updatedAt: version.approvedAt || version.createdAt } : null;
+    }).filter(Boolean);
+  }
+
+  async function updateSeriesLedger(options = {}) {
     const project = currentProject();
-    if (!project?.episodes?.some((episode) => episode.script)) throw new Error("请先归档至少一集剧本，再更新连载台账。");
+    const approvedEpisodes = approvedEpisodesForLedger(project);
+    if (!approvedEpisodes.length) throw new Error("请先批准至少一集剧本，再更新连载台账。");
     const operation = beginAiOperation("连载台账更新");
     try {
-      setStatus("AI 正在核对全部已归档集数并更新连载台账...");
-      const projectEpisodes = window.RocoWorkflowCore.ledgerEpisodeBatch(project.episodes, 30);
+      setStatus(options.automatic ? "剧本已批准，AI 正在自动更新连载台账..." : "AI 正在核对全部已批准集数并更新连载台账...");
+      const projectEpisodes = window.RocoWorkflowCore.ledgerEpisodeBatch(approvedEpisodes, 30);
       const response = await apiRequest("/api/series-ledger", { input: generationContext({ ...getInput(), projectEpisodes }, "ledger") });
       assertActiveAiOperation(operation);
       const ledger = normalizeSeriesLedger(response.result?.ledger || response.result);
       project.seriesLedger = ledger;
-      project.ledgerVersions = [{ id: newId("ledger"), createdAt: new Date().toISOString(), model: response.model || "", source: response.source || "", episodeCount: projectEpisodes.length, ledger }, ...(project.ledgerVersions || [])].slice(0, 30);
+      project.ledgerVersions = [{
+        id: newId("ledger"), createdAt: new Date().toISOString(), model: response.model || "", source: response.source || "",
+        episodeCount: projectEpisodes.length, trigger: options.automatic ? "approval" : "manual",
+        throughVersionId: options.approvedVersion?.id || "", ledger,
+      }, ...(project.ledgerVersions || [])].slice(0, 30);
       project.updatedAt = new Date().toISOString();
       await persistProjects();
       renderSeriesLedger();
-      setStatus(`连载台账已更新并留档 ${nowTime()} · ${response.model || "deepseek"}${usageSuffix(response)}`);
+      setStatus(`${options.automatic ? "剧本已批准，连载台账已自动更新" : "连载台账已更新并留档"} ${nowTime()} · ${response.model || "deepseek"}${usageSuffix(response)}`);
     } finally { endAiOperation(operation); }
+  }
+
+  async function autoUpdateSeriesLedger(approvedVersion) {
+    try {
+      await updateSeriesLedger({ automatic: true, approvedVersion });
+    } catch (error) {
+      setStatus(`剧本已批准，但自动更新连载台账失败：${error.message || "请稍后手工重试"}`, true);
+    }
   }
 
   function restoreLedgerVersion(index) {
@@ -3130,7 +3201,10 @@
       session.compareRightId = workingDraftCompareId;
     }
     state.script = session.workingScript;
-    if (session.dirty) state.storyboard = [];
+    if (session.dirty) {
+      state.storyboard = [];
+      state.storyboardRevisionSession = null;
+    }
     renderScriptVersionStatus();
     renderWorkingDraftDiff();
     if (session.activeView === "versions") renderScriptVersions();
@@ -3239,6 +3313,7 @@
     if (!session?.dirty || !baseVersion) throw new Error("当前没有可放弃的工作稿修改。");
     state.script = baseVersion.script;
     state.storyboard = baseVersion.storyboard || [];
+    state.storyboardRevisionSession = null;
     state.creativePack = baseVersion.creativePack || window.RocoStudio.generateCreativePack(state.script, getInput(), state.topics);
     state.scriptRevisionSession = scriptRevisionDomain.begin(baseVersion.script, baseVersion.id);
     renderScript(); renderStoryboard(); renderCreativePack(); saveDraft(false);
@@ -3255,6 +3330,7 @@
     const returnView = options.silent ? session.activeView : "versions";
     state.script = validation.script;
     state.storyboard = [];
+    state.storyboardRevisionSession = null;
     state.creativePack = window.RocoStudio.generateCreativePack(state.script, getInput(), state.topics);
     upsertProjectEpisode({
       mode: state.creationMode,
@@ -3299,11 +3375,13 @@
     if (!approved) throw new Error("剧本版本批准失败，请重新打开该版本后重试。");
     state.script = approved.script;
     state.storyboard = approved.storyboard || [];
+    state.storyboardRevisionSession = null;
     state.scriptRevisionSession = scriptRevisionDomain.begin(approved.script, approved.id);
     state.scriptRevisionSession.canonReview = approvalReview;
     persistProjects(); saveDraft(false);
     renderScript(); renderStoryboard(); renderProject(); renderConsistency();
     setStatus(overrideReason ? "本版已按人工原因标记为有风险批准，可继续生成分镜" : "本版已通过圣经复核并批准，可以生成对应分镜");
+    return approved;
   }
 
   async function approveCurrentScript() {
@@ -3315,6 +3393,7 @@
     }
     const baseVersion = (currentProjectEpisode()?.versions || []).find((item) => item.id === session.baseVersionId) || activeEpisodeVersion(currentProjectEpisode());
     const operation = beginAiOperation("剧本圣经复核");
+    let approvedVersion = null;
     try {
       setStatus("AI 正在进行批准前圣经与连续性复核...");
       const response = await apiRequest("/api/script-canon-review", { input: {
@@ -3327,7 +3406,7 @@
       session.canonReview = { ...review, source: response.source || "", model: response.model || "", checkedAt: new Date().toISOString() };
       session.selectedBibleDeltaIds = [];
       if (review.status === "passed") {
-        finalizeScriptApproval(review, response);
+        approvedVersion = finalizeScriptApproval(review, response);
       } else {
         renderScriptCanonReview();
         setScriptView("edit");
@@ -3335,14 +3414,16 @@
         setStatus(`复核发现 ${review.issues?.length || 0} 个问题，请修改、采用圣经建议或人工强制批准`, true);
       }
     } finally { endAiOperation(operation); }
+    if (approvedVersion) await autoUpdateSeriesLedger(approvedVersion);
   }
 
-  function forceApproveCurrentScript() {
+  async function forceApproveCurrentScript() {
     const review = state.scriptRevisionSession?.canonReview;
     if (!review || review.status !== "issues") throw new Error("当前没有可强制批准的复核问题。");
     const reason = window.prompt("请说明为什么接受这些连续性风险。该原因会永久记录在版本中：", "本集有意制造设定疑点，后续集数会解释");
     if (!String(reason || "").trim()) throw new Error("强制批准必须填写原因。");
-    finalizeScriptApproval(review, { source: review.source, model: review.model }, String(reason).trim());
+    const approvedVersion = finalizeScriptApproval(review, { source: review.source, model: review.model }, String(reason).trim());
+    await autoUpdateSeriesLedger(approvedVersion);
   }
 
   function applyReviewBibleDeltas() {
@@ -3508,12 +3589,60 @@
     target.innerHTML = uiTemplates.table(rows, columns);
   }
 
+  function ensureStoryboardRevisionSession() {
+    if (!state.storyboard.length) {
+      state.storyboardRevisionSession = null;
+      return null;
+    }
+    const version = activeEpisodeVersion(currentProjectEpisode());
+    const activeStoryboardVersionId = version?.activeStoryboardVersionId || "";
+    const session = state.storyboardRevisionSession;
+    if (!session?.workingStoryboard?.length || (!session.dirty && session.baseStoryboardVersionId !== activeStoryboardVersionId)) {
+      state.storyboardRevisionSession = storyboardRevisionDomain.begin(state.storyboard, activeStoryboardVersionId);
+    }
+    state.storyboard = state.storyboardRevisionSession.workingStoryboard;
+    return state.storyboardRevisionSession;
+  }
+
+  function storyboardBaseVersion(session = state.storyboardRevisionSession) {
+    const scriptVersion = activeEpisodeVersion(currentProjectEpisode());
+    return (scriptVersion?.storyboardVersions || []).find((item) => item.id === session?.baseStoryboardVersionId) || null;
+  }
+
+  function markStoryboardWorkingChanged() {
+    const session = ensureStoryboardRevisionSession();
+    if (!session) return;
+    const base = storyboardBaseVersion(session);
+    session.dirty = !base || !storyboardRevisionDomain.same(base.storyboard, session.workingStoryboard);
+    state.storyboard = session.workingStoryboard;
+    const status = $("#storyboardDraftState");
+    if (status) status.textContent = session.dirty ? "分镜工作稿有未保存修改" : "当前分镜版本未修改";
+    const save = $("#saveStoryboardVersionBtn");
+    const discard = $("#discardStoryboardDraftBtn");
+    if (save) save.disabled = !session.dirty || Boolean(state.activeAiOperation);
+    if (discard) discard.disabled = !session.dirty || Boolean(state.activeAiOperation);
+    clearTimeout(markStoryboardWorkingChanged.saveTimer);
+    markStoryboardWorkingChanged.saveTimer = setTimeout(() => saveDraft(false), 450);
+  }
+
   function renderStoryboard() {
     refreshCreationActions();
     activeStoryboardSegmentIndex = state.storyboard.length
       ? Math.max(0, Math.min(activeStoryboardSegmentIndex, state.storyboard.length - 1))
       : 0;
-    $("#storyboardTable").innerHTML = uiTemplates.storyboard(state.storyboard, Boolean(state.script), activeStoryboardSegmentIndex);
+    const session = ensureStoryboardRevisionSession();
+    const toolbar = $("#storyboardRefineToolbar");
+    if (toolbar) toolbar.hidden = !session;
+    if (session) {
+      $("#storyboardDraftState").textContent = session.dirty ? "分镜工作稿有未保存修改" : "当前分镜版本未修改";
+      $("#storyboardRevisionNote").value = session.revisionNote || "";
+      $("#saveStoryboardVersionBtn").disabled = !session.dirty || Boolean(state.activeAiOperation);
+      $("#discardStoryboardDraftBtn").disabled = !session.dirty || Boolean(state.activeAiOperation);
+    }
+    $("#storyboardTable").innerHTML = uiTemplates.storyboard(state.storyboard, Boolean(state.script), activeStoryboardSegmentIndex, {
+      candidate: session?.candidate,
+      instructionByClipId: session?.instructionByClipId || {},
+    });
     renderStoryboardHistory();
   }
 
@@ -3578,7 +3707,8 @@
     const episode = currentProjectEpisode();
     const restored = applyStoryboardVersion(episode, id);
     if (!restored) throw new Error("没有找到这个分镜版本，或它不属于当前剧本版本。");
-    state.storyboard = restored.storyboard || [];
+    state.storyboard = storyboardRevisionDomain.clone(restored.storyboard || []);
+    state.storyboardRevisionSession = storyboardRevisionDomain.begin(state.storyboard, restored.id);
     currentProject().updatedAt = episode.updatedAt;
     persistProjects();
     renderStoryboard();
@@ -3625,22 +3755,77 @@
   }
 
   function updateStoryboardProductionField(index, field, value) {
-    const shot = state.storyboard[index];
-    if (!shot || !["assetLinks", "assetNote", "assetStatus"].includes(field)) return;
-    shot[field] = value;
-    const episode = currentProjectEpisode();
-    const version = activeEpisodeVersion(episode);
-    if (episode && version) {
-      version.storyboard = state.storyboard;
-      const storyboardVersion = (version.storyboardVersions || []).find((item) => item.id === version.activeStoryboardVersionId);
-      if (storyboardVersion) storyboardVersion.storyboard = state.storyboard;
-      applyEpisodeVersion(episode, version.id);
-      episode.updatedAt = new Date().toISOString();
-      currentProject().updatedAt = new Date().toISOString();
-      persistProjects();
-    }
-    saveDraft(false);
-    setStatus("分镜制作状态已保存");
+    const session = ensureStoryboardRevisionSession();
+    if (!session?.workingStoryboard[index]) return;
+    storyboardRevisionDomain.updateField(session, index, field, value);
+    markStoryboardWorkingChanged();
+    setStatus("分镜修改已进入工作稿，保存新版本后正式留档");
+  }
+
+  function saveStoryboardWorkingVersion() {
+    const session = ensureStoryboardRevisionSession();
+    if (!session?.dirty) throw new Error("当前分镜工作稿没有修改。");
+    state.storyboard = storyboardRevisionDomain.clone(session.workingStoryboard);
+    const meta = { source: "editor", model: "manual", revisionSource: "manual", revisionNote: session.revisionNote || "分镜逐段精修" };
+    updateCurrentHistoryStoryboard(meta);
+    const version = activeEpisodeVersion(currentProjectEpisode());
+    state.storyboardRevisionSession = storyboardRevisionDomain.begin(state.storyboard, version?.activeStoryboardVersionId || "");
+    renderStoryboard(); renderConsistency(); saveDraft(false);
+    setStatus("分镜工作稿已保存为新版本，原分镜版本保持不变");
+  }
+
+  function discardStoryboardWorkingDraft() {
+    const session = ensureStoryboardRevisionSession();
+    const base = storyboardBaseVersion(session);
+    if (!session?.dirty || !base) throw new Error("当前没有可放弃的分镜修改。");
+    state.storyboard = storyboardRevisionDomain.clone(base.storyboard);
+    state.storyboardRevisionSession = storyboardRevisionDomain.begin(state.storyboard, base.id);
+    renderStoryboard(); saveDraft(false);
+    setStatus("已放弃分镜工作稿，并恢复基础分镜版本");
+  }
+
+  async function regenerateStoryboardSegment(index) {
+    const session = ensureStoryboardRevisionSession();
+    const segment = session?.workingStoryboard?.[index];
+    if (!segment) throw new Error("没有找到要重生成的视频段。");
+    const instruction = String(session.instructionByClipId?.[segment.clipId] || "").trim();
+    if (!instruction) throw new Error("请先填写本段重生成要求。");
+    const scriptVersion = activeEpisodeVersion(currentProjectEpisode());
+    const operation = beginAiOperation("单段分镜重生成");
+    try {
+      setStatus(`AI 正在重生成 ${segment.clipId}，前后段边界保持锁定...`);
+      const response = await apiRequest("/api/rewrite-storyboard-segment", { input: {
+        ...generationContext(getInput(), "storyboardRewrite"), script: state.script, scriptVersionId: scriptVersion?.id || "",
+        storyboard: session.workingStoryboard, storyboardSegmentIndex: index, storyboardRewriteInstruction: instruction,
+        episodeBible: scriptVersion?.episodeBibleSnapshot || scriptVersion?.generationBibleSnapshot || null,
+      } });
+      assertActiveAiOperation(operation);
+      const candidateSegment = storyboardRevisionDomain.lockCandidateBoundaries(session.workingStoryboard, index, response.result?.segment || response.result);
+      const changes = storyboardRevisionDomain.segmentDiff(segment, candidateSegment);
+      if (!changes.length) throw new Error("AI 返回内容与当前视频段没有可见差异，请换一个更具体的要求。");
+      session.candidate = { index, segment: candidateSegment, changes, summary: response.result?.changeSummary || `重生成 ${segment.clipId}`, createdAt: new Date().toISOString() };
+      renderStoryboard(); saveDraft(false);
+      setActiveStoryboardSegment(index);
+      setStatus(`单段分镜候选已生成，共 ${changes.length} 项改动${usageSuffix(response)}`);
+    } finally { endAiOperation(operation); }
+  }
+
+  function adoptStoryboardSegmentCandidate() {
+    const session = ensureStoryboardRevisionSession();
+    const index = session?.candidate?.index;
+    if (!storyboardRevisionDomain.adoptCandidate(session)) throw new Error("当前没有可采用的单段分镜候选。");
+    state.storyboard = session.workingStoryboard;
+    markStoryboardWorkingChanged(); renderStoryboard(); setActiveStoryboardSegment(index);
+    setStatus("单段候选已采用到分镜工作稿；相邻段首尾边界保持不变");
+  }
+
+  function discardStoryboardSegmentCandidate() {
+    const session = ensureStoryboardRevisionSession();
+    if (!session?.candidate) return;
+    const index = session.candidate.index;
+    session.candidate = null;
+    renderStoryboard(); setActiveStoryboardSegment(index); saveDraft(false);
+    setStatus("已放弃单段分镜候选，工作稿未改变");
   }
 
   function topReferenceRows() {
@@ -3821,6 +4006,7 @@
     restoreCreativeWorkflow(item.input);
     state.script = item.script;
     state.storyboard = item.storyboard || [];
+    state.storyboardRevisionSession = null;
     state.creativePack = item.creativePack || null;
     state.scriptDoctor = archived?.version?.doctorResult || null;
     state.currentHistoryId = item.id || null;
@@ -4124,6 +4310,7 @@
       const generated = normalizeScriptResult(response.result);
       state.script = generated.script;
       state.storyboard = [];
+      state.storyboardRevisionSession = null;
       state.scriptDoctor = null;
       state.creativePack = window.RocoStudio.generateCreativePack(state.script, input, state.topics);
       state.episodeBible.generationSnapshot = confirmedBibleSnapshot;
@@ -4189,6 +4376,7 @@
       const response = await resolveAiJob(initialResponse, "分镜");
       assertActiveAiOperation(operation);
       state.storyboard = normalizeStoryboardResult(response.result);
+      state.storyboardRevisionSession = null;
       activeStoryboardSegmentIndex = 0;
       updateCurrentHistoryStoryboard(response);
       renderStoryboard();
@@ -4343,6 +4531,7 @@
         const draftBible = draftVersion?.episodeBibleSnapshot || draftVersion?.generationBibleSnapshot || null;
         state.script = episode.script || null;
         state.storyboard = Array.isArray(episode.storyboard) ? episode.storyboard : [];
+        state.storyboardRevisionSession = null;
         state.creativePack = episode.creativePack || null;
         state.scriptDoctor = episode.doctorResult || null;
         state.scriptRevisionSession = state.script ? scriptRevisionDomain.begin(state.script, draftVersion?.id || "") : null;
@@ -4360,6 +4549,7 @@
         // Older drafts embedded content directly; keep this one-time migration fallback.
         state.script = draft.script || null;
         state.storyboard = Array.isArray(draft.storyboard) ? draft.storyboard : [];
+        state.storyboardRevisionSession = null;
         state.creativePack = draft.creativePack || null;
         state.scriptRevisionSession = state.script ? scriptRevisionDomain.begin(state.script, "") : null;
       }
@@ -4892,8 +5082,8 @@
       renderScriptCanonReview();
       saveDraft(false);
     });
-    $("#forceApproveScriptBtn").addEventListener("click", () => {
-      try { forceApproveCurrentScript(); } catch (error) { reportError("强制批准", error); }
+    $("#forceApproveScriptBtn").addEventListener("click", async () => {
+      try { await forceApproveCurrentScript(); } catch (error) { reportError("强制批准", error); }
     });
     $("#applyReviewBibleDeltasBtn").addEventListener("click", () => {
       try { applyReviewBibleDeltas(); } catch (error) { reportError("采用圣经建议", error); }
@@ -4938,6 +5128,20 @@
       if (!field || Number.isNaN(index)) return;
       updateStoryboardProductionField(index, field, event.target.value);
     });
+    $("#storyboardTable").addEventListener("input", (event) => {
+      const editField = event.target.dataset.storyboardEditField;
+      const instructionIndex = event.target.dataset.storyboardRewriteInstruction;
+      if (editField) {
+        updateStoryboardProductionField(Number(event.target.dataset.shotIndex), editField, event.target.value);
+        return;
+      }
+      if (instructionIndex !== undefined) {
+        const session = ensureStoryboardRevisionSession();
+        const segment = session?.workingStoryboard?.[Number(instructionIndex)];
+        if (segment) session.instructionByClipId[segment.clipId] = event.target.value;
+        saveDraft(false);
+      }
+    });
     $("#storyboardTable").addEventListener("click", async (event) => {
       const jump = event.target.closest("[data-storyboard-jump]");
       if (jump) {
@@ -4949,6 +5153,17 @@
         setActiveStoryboardSegment(activeStoryboardSegmentIndex + Number(step.dataset.storyboardStep), { focus: true });
         return;
       }
+      const regenerate = event.target.closest("[data-storyboard-regenerate]");
+      const adoptCandidate = event.target.closest("[data-storyboard-candidate-adopt]");
+      const discardCandidate = event.target.closest("[data-storyboard-candidate-discard]");
+      if (regenerate || adoptCandidate || discardCandidate) {
+        try {
+          if (regenerate) await regenerateStoryboardSegment(Number(regenerate.dataset.storyboardRegenerate));
+          if (adoptCandidate) adoptStoryboardSegmentCandidate();
+          if (discardCandidate) discardStoryboardSegmentCandidate();
+        } catch (error) { reportError("分镜精修", error); }
+        return;
+      }
       const button = event.target.closest("[data-copy-storyboard-segment]");
       if (!button) return;
       try {
@@ -4956,6 +5171,17 @@
       } catch (error) {
         reportError("复制视频段", error);
       }
+    });
+    $("#storyboardRevisionNote").addEventListener("input", (event) => {
+      const session = ensureStoryboardRevisionSession();
+      if (session) session.revisionNote = event.target.value;
+      saveDraft(false);
+    });
+    $("#saveStoryboardVersionBtn").addEventListener("click", () => {
+      try { saveStoryboardWorkingVersion(); } catch (error) { reportError("保存分镜版本", error); }
+    });
+    $("#discardStoryboardDraftBtn").addEventListener("click", () => {
+      try { discardStoryboardWorkingDraft(); } catch (error) { reportError("放弃分镜工作稿", error); }
     });
     $("#storyboardTable").addEventListener("keydown", (event) => {
       const link = event.target.closest("[data-storyboard-jump]");
