@@ -55,6 +55,7 @@
   const creationSession = window.RocoCreationSession;
   const scriptRevisionDomain = window.RocoScriptRevision;
   const storyboardRevisionDomain = window.RocoStoryboardRevision;
+  const imagePromptWorkflow = window.RocoImagePromptWorkflow;
   const episodeBibleDomain = window.RocoEpisodeBible;
   const episodeBibleFieldIds = {
     characters: "episodeBibleCharacters", abilities: "episodeBibleAbilities", relations: "episodeBibleRelations",
@@ -1606,11 +1607,16 @@
     status.textContent = state.cloudArchive.message || "云端备份待连接";
     status.dataset.state = state.cloudArchive.state || "idle";
     const versions = state.cloudArchive.versions || archiveSync.getCloudVersions();
-    target.innerHTML = versions.length ? versions.map((item) => `
-      <article class="cloud-version-row">
-        <div><strong>恢复点 v${escapeHtml(item.revision)}</strong><span>${escapeHtml(item.createdAt ? new Date(item.createdAt).toLocaleString("zh-CN", { hour12: false }) : "时间未知")} · ${escapeHtml(item.projectCount || 0)} 个项目</span></div>
-        <button class="small-action" type="button" data-cloud-restore="${escapeHtml(item.revision)}">恢复此版本</button>
-      </article>`).join("") : `<p class="helper">尚无云端恢复点。点击“立即备份”创建第一版。</p>`;
+    target.innerHTML = versions.length ? versions.map((item) => {
+      const byteCount = Number(item.byteCount || 0);
+      const sizeLabel = byteCount ? `${byteCount >= 1024 * 1024 ? (byteCount / 1024 / 1024).toFixed(1) + " MB" : Math.ceil(byteCount / 1024) + " KB"}` : "旧版容量未知";
+      const modeLabel = item.storageMode === "chunked" ? "分片备份" : "轻量备份";
+      return `
+        <article class="cloud-version-row">
+          <div><strong>恢复点 v${escapeHtml(item.revision)}</strong><span>${escapeHtml(item.createdAt ? new Date(item.createdAt).toLocaleString("zh-CN", { hour12: false }) : "时间未知")} · ${escapeHtml(item.projectCount || 0)} 个项目 · ${escapeHtml(sizeLabel)} · ${modeLabel}</span></div>
+          <button class="small-action" type="button" data-cloud-restore="${escapeHtml(item.revision)}">恢复此版本</button>
+        </article>`;
+    }).join("") : `<p class="helper">尚无云端恢复点。点击“立即备份”创建第一版。</p>`;
   }
 
   async function refreshCloudArchive(interactive = true) {
@@ -3788,33 +3794,24 @@
     setStatus(`已复制全部 ${state.storyboard.length} 个视频段`);
   }
 
-  function imagePromptText(segment) {
-    return [
-      `${segment.clipId || `CLIP-${String(segment.shot || 1).padStart(2, "0")}`}｜${segment.timeRange || "关键帧"}`,
-      `取帧时刻：${segment.imagePromptMoment || ""}`,
-      `一致性锚点：${segment.imagePromptAnchor || ""}`,
-      `图片提示词：${segment.imagePrompt || ""}`,
-    ].join("\n");
-  }
-
   async function copyImagePrompt(index) {
     const segment = state.storyboard[index];
     if (!segment?.imagePrompt) throw new Error("当前段还没有 ChatGPT 图片提示词。");
-    await navigator.clipboard.writeText(segment.imagePrompt);
+    await navigator.clipboard.writeText(imagePromptWorkflow.promptText(segment, { includeMeta: false }));
     setStatus(`已复制 ${segment.clipId} 图片提示词，可直接粘贴到 ChatGPT 生成图片`);
   }
 
   async function copyAllImagePrompts() {
     const segments = state.storyboard.filter((segment) => segment.imagePrompt);
     if (!segments.length) throw new Error("当前分镜还没有可复制的图片提示词。");
-    await navigator.clipboard.writeText(segments.map(imagePromptText).join("\n\n----------------\n\n"));
+    await navigator.clipboard.writeText(imagePromptWorkflow.allPromptText(segments));
     setStatus(`已复制 ${segments.length} 段 ChatGPT 图片提示词`);
   }
 
   async function generateImagePrompts(indexes) {
     const session = ensureStoryboardRevisionSession();
     if (!state.script || !session?.workingStoryboard?.length) throw new Error("请先生成当前剧本对应的分镜。");
-    const targets = [...new Set(indexes)].filter((index) => Number.isInteger(index) && session.workingStoryboard[index]);
+    const targets = imagePromptWorkflow.targetIndexes(session.workingStoryboard, indexes);
     if (!targets.length) throw new Error("没有找到要生成图片提示词的分镜段。");
     if (targets.some((index) => session.workingStoryboard[index].imagePrompt)
       && !window.confirm("所选分镜已有图片提示词，继续会生成新内容并进入工作稿，是否继续？")) return;
@@ -3836,13 +3833,9 @@
       assertActiveAiOperation(operation);
       const prompts = Array.isArray(response.result?.imagePrompts) ? response.result.imagePrompts : [];
       if (!prompts.length) throw new Error("AI 没有返回可用的图片提示词。");
-      prompts.forEach((item) => {
-        const index = session.workingStoryboard.findIndex((segment) => segment.clipId === item.clipId);
-        if (index < 0 || !targets.includes(index)) return;
-        storyboardRevisionDomain.updateField(session, index, "imagePromptMoment", item.frameMoment || "");
-        storyboardRevisionDomain.updateField(session, index, "imagePromptAnchor", item.consistencyAnchor || "");
-        storyboardRevisionDomain.updateField(session, index, "imagePrompt", item.prompt || "");
-      });
+      const merged = imagePromptWorkflow.mergePrompts(session.workingStoryboard, prompts, targets);
+      if (!merged.appliedIndexes.length) throw new Error("AI 返回的图片提示词没有匹配当前分镜编号。");
+      session.workingStoryboard = storyboardRevisionDomain.normalizeStoryboard(merged.storyboard);
       state.storyboard = session.workingStoryboard;
       markStoryboardWorkingChanged();
       renderStoryboard();
@@ -3857,12 +3850,8 @@
     const session = ensureStoryboardRevisionSession();
     if (!session?.workingStoryboard[index]) return;
     storyboardRevisionDomain.updateField(session, index, field, value);
-    const promptFields = new Set(["imagePromptMoment", "imagePromptAnchor", "imagePrompt"]);
-    const productionOnlyFields = new Set(["assetLinks", "assetNote", "assetStatus"]);
-    if (!promptFields.has(field) && !productionOnlyFields.has(field)) {
-      storyboardRevisionDomain.updateField(session, index, "imagePromptMoment", "");
-      storyboardRevisionDomain.updateField(session, index, "imagePromptAnchor", "");
-      storyboardRevisionDomain.updateField(session, index, "imagePrompt", "");
+    if (imagePromptWorkflow.shouldInvalidateForField(field)) {
+      session.workingStoryboard[index] = storyboardRevisionDomain.normalizeSegment(imagePromptWorkflow.invalidateSegment(session.workingStoryboard[index]), index);
       const promptBlock = document.querySelector(`[data-image-prompt-block="${index}"]`);
       promptBlock?.classList.remove("is-ready");
       promptBlock?.classList.add("is-stale");
@@ -5464,7 +5453,7 @@
   }
 
   async function init() {
-    if (!window.RocoStudio || !window.RocoWorkflowCore || !window.RocoProjectDomain || !window.RocoEpisodePlanner || !window.RocoEpisodeBible || !window.RocoUiTemplates || !window.RocoApiClient || !window.RocoDataStore || !window.RocoArchiveSync || !window.RocoAppState || !window.RocoCreationSession || !window.RocoAiOperation || !window.RocoGenerationClient) {
+    if (!window.RocoStudio || !window.RocoWorkflowCore || !window.RocoProjectDomain || !window.RocoEpisodePlanner || !window.RocoEpisodeBible || !window.RocoUiTemplates || !window.RocoApiClient || !window.RocoDataStore || !window.RocoArchiveSync || !window.RocoAppState || !window.RocoCreationSession || !window.RocoAiOperation || !window.RocoGenerationClient || !window.RocoImagePromptWorkflow) {
       setStatus("生成器未加载，请用本地服务打开或刷新缓存", true);
       return;
     }

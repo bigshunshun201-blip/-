@@ -3,8 +3,35 @@
   if (typeof module === "object" && module.exports) module.exports = api;
   if (root) root.RocoArchiveSync = api;
 })(typeof globalThis !== "undefined" ? globalThis : this, function () {
+  const DIRECT_ARCHIVE_BYTES = 1_600_000;
+  const ARCHIVE_CHUNK_BYTES = 400_000;
+
   function clone(value) {
     return typeof structuredClone === "function" ? structuredClone(value) : JSON.parse(JSON.stringify(value));
+  }
+
+  function utf8Bytes(value) {
+    return new TextEncoder().encode(String(value || ""));
+  }
+
+  function splitUtf8(value, maxBytes = ARCHIVE_CHUNK_BYTES) {
+    const encoded = utf8Bytes(value);
+    const decoder = new TextDecoder();
+    const chunks = [];
+    let start = 0;
+    while (start < encoded.length) {
+      let end = Math.min(start + maxBytes, encoded.length);
+      while (end < encoded.length && end > start && (encoded[end] & 0xc0) === 0x80) end -= 1;
+      if (end <= start) throw new Error("无法按 UTF-8 安全切分云端档案。");
+      chunks.push(decoder.decode(encoded.slice(start, end)));
+      start = end;
+    }
+    return chunks;
+  }
+
+  async function checksum(value) {
+    const digest = await globalThis.crypto.subtle.digest("SHA-256", utf8Bytes(value));
+    return Array.from(new Uint8Array(digest), (item) => item.toString(16).padStart(2, "0")).join("");
   }
 
   function randomKey() {
@@ -125,15 +152,34 @@
       const interactive = Boolean(backupOptions.interactive);
       if (cloudRevision === null) await listCloud({ interactive });
       status("正在创建云端恢复点...", "syncing");
-      const response = await apiCall("/api/archive/save", {
-        workspaceKey: workspaceKey(),
-        baseRevision: cloudRevision,
-        archive: {
-          formatVersion: 1,
-          localRevision,
-          projects: clone(projects),
-        },
-      }, interactive);
+      const archive = { formatVersion: 1, localRevision, projects: clone(projects) };
+      const serialized = JSON.stringify(archive);
+      let response;
+      if (utf8Bytes(serialized).byteLength <= DIRECT_ARCHIVE_BYTES) {
+        response = await apiCall("/api/archive/save", {
+          workspaceKey: workspaceKey(), baseRevision: cloudRevision, archive,
+        }, interactive);
+      } else {
+        const chunks = splitUtf8(serialized);
+        const archiveChecksum = await checksum(serialized);
+        const prepared = await apiCall("/api/archive/prepare", {
+          workspaceKey: workspaceKey(), baseRevision: cloudRevision, checksum: archiveChecksum,
+          chunkCount: chunks.length, totalBytes: utf8Bytes(serialized).byteLength, projectCount: archive.projects.length,
+        }, interactive);
+        if (prepared.result?.unchanged) {
+          response = prepared;
+        } else {
+          const uploadId = prepared.result?.uploadId;
+          if (!uploadId) throw new Error("云端没有返回分块上传标识。");
+          for (let index = 0; index < chunks.length; index += 1) {
+            status(`正在上传云端恢复点 ${index + 1}/${chunks.length}...`, "syncing");
+            await apiCall("/api/archive/chunk", {
+              workspaceKey: workspaceKey(), uploadId, chunkIndex: index, payloadText: chunks[index],
+            }, interactive);
+          }
+          response = await apiCall("/api/archive/commit", { workspaceKey: workspaceKey(), uploadId }, interactive);
+        }
+      }
       cloudRevision = Number(response.result?.revision || cloudRevision || 0);
       cloudVersions = [response.result, ...cloudVersions.filter((item) => Number(item.revision) !== cloudRevision)].slice(0, 20);
       status(`云端恢复点 v${cloudRevision} 已保存`, "saved");
@@ -200,5 +246,5 @@
     };
   }
 
-  return { create, parseEnvelope };
+  return { create, parseEnvelope, splitUtf8, utf8Bytes, checksum, DIRECT_ARCHIVE_BYTES, ARCHIVE_CHUNK_BYTES };
 });

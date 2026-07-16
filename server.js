@@ -14,11 +14,19 @@ const mime = {
   ".md": "text/markdown; charset=utf-8",
   ".png": "image/png",
 };
+const securityHeaders = {
+  "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'",
+  "Cross-Origin-Opener-Policy": "same-origin",
+  "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+  "Referrer-Policy": "strict-origin-when-cross-origin",
+  "X-Content-Type-Options": "nosniff",
+  "X-Frame-Options": "DENY",
+};
 
 let cloudflareWorkerPromise;
 
 function send(res, status, body, type = "application/json; charset=utf-8", headers = {}) {
-  res.writeHead(status, { "Content-Type": type, "Cache-Control": "no-store", ...headers });
+  res.writeHead(status, { ...securityHeaders, "Content-Type": type, "Cache-Control": "no-store", ...headers });
   res.end(Buffer.isBuffer(body) || typeof body === "string" ? body : JSON.stringify(body));
 }
 

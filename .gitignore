@@ -6,3 +6,5 @@ public/
 !.env.example
 cloudflare/.dev.vars
 npm-debug.log*
+test-results/
+playwright-report/

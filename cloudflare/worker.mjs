@@ -1,6 +1,16 @@
 import { jsonrepair } from "jsonrepair";
+import { handleArchiveRequest } from "./archive-service.mjs";
 
+const SECURITY_HEADERS = {
+  "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'",
+  "cross-origin-opener-policy": "same-origin",
+  "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+  "referrer-policy": "strict-origin-when-cross-origin",
+  "x-content-type-options": "nosniff",
+  "x-frame-options": "DENY",
+};
 const JSON_HEADERS = {
+  ...SECURITY_HEADERS,
   "content-type": "application/json; charset=utf-8",
   "cache-control": "no-store",
 };
@@ -8,9 +18,12 @@ const JSON_HEADERS = {
 const ALLOWED_MODELS = new Set(["deepseek-v4-flash", "deepseek-v4-pro"]);
 const BIBLE_FIELDS = ["characters", "abilities", "relations", "antagonist", "worldRules", "mainConflict", "hookRules"];
 const MAX_INPUT_BYTES = 120_000;
-const MAX_ARCHIVE_BYTES = 2_000_000;
 const RATE_WINDOW_MS = 60_000;
 const MAX_AI_REQUESTS_PER_WINDOW = 12;
+const AUTH_RATE_WINDOW_MS = 5 * 60_000;
+const MAX_AUTH_FAILURES_PER_WINDOW = 8;
+const MAX_ARCHIVE_REQUESTS_PER_WINDOW = 90;
+const MAX_RATE_BUCKETS = 2_048;
 const AI_GENERATION_TIMEOUT_MS = 90_000;
 const AI_REPAIR_TIMEOUT_MS = 60_000;
 const AI_HEARTBEAT_INTERVAL_MS = 10_000;
@@ -20,6 +33,8 @@ const RECAST_OUTPUT_TOKENS = 8000;
 const MAX_STORYBOARD_OUTPUT_TOKENS = 8000;
 const STORYBOARD_CHUNK_SIZE = 4;
 const rateBuckets = new Map();
+const archiveRateBuckets = new Map();
+const authFailureBuckets = new Map();
 const fallbackDailyUsage = new Map();
 const AI_PATH_COST = new Map([
   ["/api/script", 1],
@@ -51,6 +66,12 @@ function error(message, code = "SERVER_ERROR", status = 500) {
   return json({ ok: false, error: message, code }, status);
 }
 
+function secureResponse(response) {
+  const headers = new Headers(response.headers);
+  Object.entries(SECURITY_HEADERS).forEach(([name, value]) => headers.set(name, value));
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+}
+
 function codedError(message, code) {
   const cause = new Error(message);
   cause.code = code;
@@ -69,7 +90,9 @@ function responseForCause(cause) {
           ? 413
           : code === "ARCHIVE_VERSION_CONFLICT"
             ? 409
-            : code === "ARCHIVE_NOT_FOUND"
+            : code === "ARCHIVE_CHUNKS_INCOMPLETE" || code === "ARCHIVE_CHECKSUM_MISMATCH"
+              ? 409
+              : code === "ARCHIVE_NOT_FOUND" || code === "NOT_FOUND"
               ? 404
               : code === "ARCHIVE_DB_UNAVAILABLE"
                 ? 503
@@ -80,7 +103,8 @@ function responseForCause(cause) {
                     : code === "CLIENT_ABORTED"
                       ? 499
                       : 502;
-  return error(cause?.message || "生成服务暂时不可用", code, status);
+  const publicMessage = cause?.code ? cause.message : "生成服务暂时不可用，请稍后重试。";
+  return error(publicMessage || "生成服务暂时不可用，请稍后重试。", code, status);
 }
 
 function heartbeatJsonResponse(run) {
@@ -137,145 +161,49 @@ function shouldHeartbeat(request, url) {
   return request.method === "POST" && AI_PATH_COST.has(url.pathname);
 }
 
-function bytesToHex(bytes) {
-  return [...new Uint8Array(bytes)].map((value) => value.toString(16).padStart(2, "0")).join("");
+function requestClient(request) {
+  return request.headers.get("cf-connecting-ip") || "private-client";
 }
 
-async function sha256(value) {
-  return bytesToHex(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(String(value || ""))));
-}
-
-async function readArchiveRequest(request) {
-  if (!request.body) throw codedError("备份请求缺少内容。", "INVALID_ARCHIVE_REQUEST");
-  const declaredSize = Number(request.headers.get("content-length") || 0);
-  if (declaredSize > MAX_ARCHIVE_BYTES) throw codedError("云端备份超过 2MB，请先精简大型历史资产。", "ARCHIVE_TOO_LARGE");
-  const raw = await request.text();
-  if (new TextEncoder().encode(raw).byteLength > MAX_ARCHIVE_BYTES) throw codedError("云端备份超过 2MB，请先精简大型历史资产。", "ARCHIVE_TOO_LARGE");
-  try {
-    return raw ? JSON.parse(raw) : {};
-  } catch (_) {
-    throw codedError("备份内容不是有效 JSON。", "INVALID_ARCHIVE_REQUEST");
-  }
-}
-
-async function archiveWorkspaceHash(workspaceKey) {
-  const key = String(workspaceKey || "").trim();
-  if (key.length < 24 || key.length > 200) throw codedError("恢复密钥无效。", "INVALID_WORKSPACE_KEY");
-  return sha256(key);
-}
-
-async function archiveList(env, workspaceHash) {
-  if (!env.USAGE_DB) throw codedError("云端档案数据库不可用。", "ARCHIVE_DB_UNAVAILABLE");
-  const head = await env.USAGE_DB.prepare(
-    "SELECT current_revision AS currentRevision, updated_at AS updatedAt FROM archive_workspaces WHERE workspace_hash = ?",
-  ).bind(workspaceHash).first();
-  const result = await env.USAGE_DB.prepare(
-    "SELECT revision, checksum, project_count AS projectCount, created_at AS createdAt FROM project_archive_versions WHERE workspace_hash = ? ORDER BY revision DESC LIMIT 20",
-  ).bind(workspaceHash).all();
-  return {
-    currentRevision: Number(head?.currentRevision || 0),
-    updatedAt: head?.updatedAt || null,
-    versions: (result?.results || []).map((item) => ({ ...item, revision: Number(item.revision), projectCount: Number(item.projectCount || 0) })),
-  };
-}
-
-async function saveArchive(env, request) {
-  const body = await readArchiveRequest(request);
-  const workspaceHash = await archiveWorkspaceHash(body.workspaceKey);
-  const archive = body.archive && typeof body.archive === "object" ? body.archive : null;
-  if (!archive || !Array.isArray(archive.projects)) throw codedError("备份中缺少项目档案。", "INVALID_ARCHIVE_REQUEST");
-  const payloadJson = JSON.stringify(archive);
-  if (new TextEncoder().encode(payloadJson).byteLength > MAX_ARCHIVE_BYTES) throw codedError("云端备份超过 2MB，请先精简大型历史资产。", "ARCHIVE_TOO_LARGE");
-  if (!env.USAGE_DB) throw codedError("云端档案数据库不可用。", "ARCHIVE_DB_UNAVAILABLE");
-  const current = await env.USAGE_DB.prepare(
-    `SELECT current_revision AS currentRevision,
-      (SELECT checksum FROM project_archive_versions WHERE workspace_hash = ? ORDER BY revision DESC LIMIT 1) AS currentChecksum
-     FROM archive_workspaces WHERE workspace_hash = ?`,
-  ).bind(workspaceHash, workspaceHash).first();
-  const currentRevision = Number(current?.currentRevision || 0);
-  const baseRevision = body.baseRevision === null || body.baseRevision === undefined ? null : Number(body.baseRevision);
-  if ((currentRevision > 0 && baseRevision === null) || (baseRevision !== null && baseRevision !== currentRevision)) {
-    const cause = codedError("云端已有更新版本，请先刷新恢复点后再备份。", "ARCHIVE_VERSION_CONFLICT");
-    cause.currentRevision = currentRevision;
-    throw cause;
-  }
-  const now = new Date().toISOString();
-  const checksum = await sha256(payloadJson);
-  if (currentRevision > 0 && current?.currentChecksum === checksum) {
-    return { revision: currentRevision, checksum, projectCount: archive.projects.length, createdAt: now, unchanged: true };
-  }
-  const revision = currentRevision + 1;
-  try {
-    await env.USAGE_DB.batch([
-      env.USAGE_DB.prepare(`
-      INSERT INTO archive_workspaces (workspace_hash, current_revision, created_at, updated_at)
-      VALUES (?, ?, ?, ?)
-      ON CONFLICT(workspace_hash) DO UPDATE SET
-        current_revision = excluded.current_revision,
-        updated_at = excluded.updated_at
-      WHERE current_revision = ?
-    `).bind(workspaceHash, revision, now, now, currentRevision),
-      env.USAGE_DB.prepare(`
-      INSERT INTO project_archive_versions (workspace_hash, revision, payload_json, checksum, project_count, created_at)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).bind(workspaceHash, revision, payloadJson, checksum, archive.projects.length, now),
-      env.USAGE_DB.prepare(`
-      DELETE FROM project_archive_versions
-      WHERE workspace_hash = ? AND revision NOT IN (
-        SELECT revision FROM project_archive_versions WHERE workspace_hash = ? ORDER BY revision DESC LIMIT 20
-      )
-      `).bind(workspaceHash, workspaceHash),
-    ]);
-  } catch (cause) {
-    const latest = await env.USAGE_DB.prepare(
-      "SELECT current_revision AS currentRevision FROM archive_workspaces WHERE workspace_hash = ?",
-    ).bind(workspaceHash).first();
-    if (Number(latest?.currentRevision || 0) !== currentRevision) {
-      throw codedError("云端已有更新版本，请先刷新恢复点后再备份。", "ARCHIVE_VERSION_CONFLICT");
-    }
-    throw cause;
-  }
-  return { revision, checksum, projectCount: archive.projects.length, createdAt: now };
-}
-
-async function loadArchive(env, body) {
-  const workspaceHash = await archiveWorkspaceHash(body.workspaceKey);
-  if (!env.USAGE_DB) throw codedError("云端档案数据库不可用。", "ARCHIVE_DB_UNAVAILABLE");
-  const requestedRevision = Math.max(0, Number(body.revision || 0));
-  const row = requestedRevision
-    ? await env.USAGE_DB.prepare("SELECT revision, payload_json AS payloadJson, checksum, created_at AS createdAt FROM project_archive_versions WHERE workspace_hash = ? AND revision = ?").bind(workspaceHash, requestedRevision).first()
-    : await env.USAGE_DB.prepare("SELECT revision, payload_json AS payloadJson, checksum, created_at AS createdAt FROM project_archive_versions WHERE workspace_hash = ? ORDER BY revision DESC LIMIT 1").bind(workspaceHash).first();
-  if (!row) throw codedError("没有找到对应的云端恢复点。", "ARCHIVE_NOT_FOUND");
-  return { revision: Number(row.revision), checksum: row.checksum, createdAt: row.createdAt, archive: JSON.parse(row.payloadJson) };
-}
-
-async function handleArchiveApi(request, env, url) {
-  if (request.method !== "POST") return error("Not found", "NOT_FOUND", 404);
-  if (url.pathname === "/api/archive/save") return json({ ok: true, result: await saveArchive(env, request) });
-  const body = await readArchiveRequest(request);
-  const workspaceHash = await archiveWorkspaceHash(body.workspaceKey);
-  if (url.pathname === "/api/archive/list") return json({ ok: true, result: await archiveList(env, workspaceHash) });
-  if (url.pathname === "/api/archive/load") return json({ ok: true, result: await loadArchive(env, body) });
-  return error("Not found", "NOT_FOUND", 404);
-}
-
-function consumeRateLimit(request, path) {
+function consumeBucketLimit(store, request, keySuffix, maxRequests, windowMs) {
   const now = Date.now();
-  const client = request.headers.get("cf-connecting-ip") || request.headers.get("x-forwarded-for") || "private-client";
-  const key = `${client}:${path}`;
-  const current = rateBuckets.get(key);
-  const bucket = !current || now - current.startedAt >= RATE_WINDOW_MS ? { startedAt: now, count: 0 } : current;
-  if (bucket.count >= MAX_AI_REQUESTS_PER_WINDOW) {
-    return Math.max(1, Math.ceil((RATE_WINDOW_MS - (now - bucket.startedAt)) / 1000));
+  const key = `${requestClient(request)}:${keySuffix}`;
+  let current = store.get(key);
+  if (!current && store.size >= MAX_RATE_BUCKETS) {
+    for (const [storedKey, value] of store) {
+      if (now - value.startedAt >= windowMs) store.delete(storedKey);
+    }
+    current = store.get(key);
+    if (!current && store.size >= MAX_RATE_BUCKETS) return Math.max(1, Math.ceil(windowMs / 1000));
+  }
+  const bucket = !current || now - current.startedAt >= windowMs ? { startedAt: now, count: 0 } : current;
+  if (bucket.count >= maxRequests) {
+    return Math.max(1, Math.ceil((windowMs - (now - bucket.startedAt)) / 1000));
   }
   bucket.count += 1;
-  rateBuckets.set(key, bucket);
-  if (rateBuckets.size > 500) {
-    for (const [storedKey, value] of rateBuckets) {
-      if (now - value.startedAt >= RATE_WINDOW_MS) rateBuckets.delete(storedKey);
+  store.set(key, bucket);
+  if (store.size > 500) {
+    for (const [storedKey, value] of store) {
+      if (now - value.startedAt >= windowMs) store.delete(storedKey);
     }
   }
   return 0;
+}
+
+function consumeRateLimit(request, path) {
+  return consumeBucketLimit(rateBuckets, request, path, MAX_AI_REQUESTS_PER_WINDOW, RATE_WINDOW_MS);
+}
+
+function consumeArchiveRateLimit(request) {
+  return consumeBucketLimit(archiveRateBuckets, request, "archive", MAX_ARCHIVE_REQUESTS_PER_WINDOW, RATE_WINDOW_MS);
+}
+
+function consumeAuthFailure(request) {
+  return consumeBucketLimit(authFailureBuckets, request, "auth", MAX_AUTH_FAILURES_PER_WINDOW, AUTH_RATE_WINDOW_MS);
+}
+
+function clearAuthFailures(request) {
+  authFailureBuckets.delete(`${requestClient(request)}:auth`);
 }
 
 function usageDay(now = new Date()) {
@@ -2129,7 +2057,17 @@ async function readInput(request) {
 }
 
 async function api(request, env, url) {
-  if (!authorized(request, env)) return error("请输入访问码", "ACCESS_CODE_REQUIRED", 401);
+  if (!authorized(request, env)) {
+    const retryAfter = consumeAuthFailure(request);
+    if (retryAfter) {
+      return new Response(JSON.stringify({ ok: false, error: "访问码尝试过多，请稍后再试。", code: "AUTH_RATE_LIMITED", retryAfter }), {
+        status: 429,
+        headers: { ...JSON_HEADERS, "retry-after": String(retryAfter) },
+      });
+    }
+    return error("访问码无效或已失效", "ACCESS_CODE_REQUIRED", 401);
+  }
+  clearAuthFailures(request);
 
   if (request.method === "GET" && url.pathname === "/api/status") {
     const configured = Boolean(env.DEEPSEEK_API_KEY);
@@ -2150,7 +2088,17 @@ async function api(request, env, url) {
     });
   }
 
-  if (url.pathname.startsWith("/api/archive/")) return handleArchiveApi(request, env, url);
+  if (url.pathname.startsWith("/api/archive/")) {
+    if (request.method !== "POST") return error("Not found", "NOT_FOUND", 404);
+    const retryAfter = consumeArchiveRateLimit(request);
+    if (retryAfter) {
+      return new Response(JSON.stringify({ ok: false, error: "云端备份请求过于频繁，请稍后再试。", code: "RATE_LIMITED", retryAfter }), {
+        status: 429,
+        headers: { ...JSON_HEADERS, "retry-after": String(retryAfter) },
+      });
+    }
+    return json({ ok: true, result: await handleArchiveRequest(request, env, url.pathname) });
+  }
 
   if (request.method !== "POST") return error("Not found", "NOT_FOUND", 404);
   if (!AI_PATH_COST.has(url.pathname)) return error("Not found", "NOT_FOUND", 404);
@@ -2358,7 +2306,7 @@ export default {
         if (shouldHeartbeat(request, url)) return heartbeatJsonResponse(() => api(request, env, url));
         return await api(request, env, url);
       }
-      return env.ASSETS.fetch(request);
+      return secureResponse(await env.ASSETS.fetch(request));
     } catch (cause) {
       return responseForCause(cause);
     }

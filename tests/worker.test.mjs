@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { __test } from "../cloudflare/worker.mjs";
+import worker, { __test } from "../cloudflare/worker.mjs";
 
 const require = createRequire(import.meta.url);
 const workflow = require("../workflow-core.js");
@@ -19,6 +19,7 @@ const creationSession = require("../creation-session.js");
 const episodeBible = require("../episode-bible.js");
 const scriptRevision = require("../script-revision.js");
 const storyboardRevision = require("../storyboard-revision.js");
+const imagePromptWorkflow = require("../image-prompt-workflow.js");
 
 const completeBible = Object.fromEntries(episodeBible.FIELDS.map((field) => [field, `${field}设定`]));
 
@@ -722,6 +723,76 @@ test("archive sync migrates legacy arrays and blocks stale tab overwrites", asyn
   second.dispose();
 });
 
+test("large cloud archives use UTF-8 safe chunk upload and preserve the original JSON", async () => {
+  const calls = [];
+  const receivedChunks = [];
+  const apiClient = {
+    request: async (path, payload) => {
+      calls.push(path);
+      if (path === "/api/archive/list") return { result: { currentRevision: 0, versions: [] } };
+      if (path === "/api/archive/prepare") return { result: { uploadId: "12345678-1234-1234-1234-123456789abc" } };
+      if (path === "/api/archive/chunk") {
+        receivedChunks[payload.chunkIndex] = payload.payloadText;
+        return { result: { chunkIndex: payload.chunkIndex } };
+      }
+      if (path === "/api/archive/commit") return { result: { revision: 1, checksum: "a".repeat(64), projectCount: 1, storageMode: "chunked" } };
+      throw new Error(`unexpected path ${path}`);
+    },
+    fetchApi: async (path, payload) => apiClient.request(path, payload),
+  };
+  const storageValues = new Map();
+  const storage = { getItem: (key) => storageValues.get(key) || null, setItem: (key, value) => storageValues.set(key, value) };
+  const sync = archiveSyncModule.create({ store: { get: async () => undefined, set: async () => {} }, storage, apiClient });
+  const projects = [{ id: "large-project", notes: "月牙镇".repeat(300_000) }];
+  const result = await sync.backupNow(projects, { interactive: true });
+  const reconstructed = JSON.parse(receivedChunks.join(""));
+  assert.equal(result.storageMode, "chunked");
+  assert.ok(calls.includes("/api/archive/prepare"));
+  assert.ok(calls.filter((path) => path === "/api/archive/chunk").length > 1);
+  assert.ok(calls.includes("/api/archive/commit"));
+  assert.ok(!calls.includes("/api/archive/save"));
+  assert.deepEqual(reconstructed.projects, projects);
+  assert.ok(receivedChunks.every((chunk) => archiveSyncModule.utf8Bytes(chunk).byteLength <= archiveSyncModule.ARCHIVE_CHUNK_BYTES));
+  sync.dispose();
+});
+
+test("image prompt domain merges only matching clips and invalidates prompts after visual edits", () => {
+  const storyboard = [{ clipId: "CLIP-01", shot: 1, imagePrompt: "旧提示词", imagePromptMoment: "旧时刻", imagePromptAnchor: "旧锚点" }];
+  const merged = imagePromptWorkflow.mergePrompts(storyboard, [{ clipId: "CLIP-01", frameMoment: "徽章裂开", consistencyAnchor: "角色服装固定", prompt: "新的完整提示词" }], [0]);
+  assert.equal(merged.storyboard[0].imagePrompt, "新的完整提示词");
+  assert.deepEqual(merged.appliedIndexes, [0]);
+  assert.equal(imagePromptWorkflow.mergePrompts(storyboard, [{ clipId: "CLIP-99", prompt: "错绑" }], [0]).appliedIndexes.length, 0);
+  assert.equal(imagePromptWorkflow.invalidateSegment(merged.storyboard[0]).imagePrompt, "");
+  assert.equal(imagePromptWorkflow.shouldInvalidateForField("visual"), true);
+  assert.equal(imagePromptWorkflow.shouldInvalidateForField("assetStatus"), false);
+});
+
+test("worker adds browser security headers and throttles repeated access-code failures", async () => {
+  const assetResponse = await worker.fetch(new Request("https://example.com/"), {
+    ASSETS: { fetch: async () => new Response("<html></html>", { headers: { "content-type": "text/html" } }) },
+  });
+  assert.match(assetResponse.headers.get("content-security-policy"), /frame-ancestors 'none'/);
+  assert.equal(assetResponse.headers.get("x-frame-options"), "DENY");
+  let response;
+  for (let index = 0; index < 9; index += 1) {
+    response = await worker.fetch(new Request("https://example.com/api/status", { headers: { "x-roco-access-code": "wrong", "cf-connecting-ip": "203.0.113.77" } }), { APP_ACCESS_CODE: "correct" });
+  }
+  assert.equal(response.status, 429);
+  assert.equal((await response.json()).code, "AUTH_RATE_LIMITED");
+  const valid = await worker.fetch(new Request("https://example.com/api/status", { headers: { "x-roco-access-code": "correct", "cf-connecting-ip": "203.0.113.77" } }), { APP_ACCESS_CODE: "correct" });
+  assert.equal(valid.status, 200);
+});
+
+test("worker hides uncoded internal failures from browser responses", async () => {
+  const response = await worker.fetch(new Request("https://example.com/"), {
+    ASSETS: { fetch: async () => { throw new Error("D1 SQL statement and private implementation details"); } },
+  });
+  assert.equal(response.status, 502);
+  const body = await response.json();
+  assert.equal(body.code, "SERVER_ERROR");
+  assert.doesNotMatch(body.error, /D1|SQL|private implementation/);
+});
+
 test("AI operation coordinator rejects results after input changes", () => {
   const state = appStateModule.createState();
   state.currentProjectId = "project-1";
@@ -1074,6 +1145,7 @@ test("page loads domain and template modules before app.js", async () => {
   const domainIndex = html.indexOf("project-domain.js");
   const revisionIndex = html.indexOf("script-revision.js");
   const storyboardRevisionIndex = html.indexOf("storyboard-revision.js");
+  const imagePromptIndex = html.indexOf("image-prompt-workflow.js");
   const plannerIndex = html.indexOf("episode-planner.js");
   const templatesIndex = html.indexOf("ui-templates.js");
   const archiveIndex = html.indexOf("archive-sync.js");
@@ -1082,15 +1154,20 @@ test("page loads domain and template modules before app.js", async () => {
   const operationIndex = html.indexOf("ai-operation.js");
   const generationIndex = html.indexOf("generation-client.js");
   const appIndex = html.indexOf("app.js");
-  assert.ok(revisionIndex > 0 && storyboardRevisionIndex > revisionIndex && domainIndex > storyboardRevisionIndex && plannerIndex > domainIndex && templatesIndex > plannerIndex && archiveIndex > templatesIndex && episodeBibleIndex > archiveIndex && stateIndex > episodeBibleIndex && operationIndex > stateIndex && generationIndex > operationIndex && appIndex > generationIndex);
+  assert.ok(revisionIndex > 0 && storyboardRevisionIndex > revisionIndex && imagePromptIndex > storyboardRevisionIndex && domainIndex > imagePromptIndex && plannerIndex > domainIndex && templatesIndex > plannerIndex && archiveIndex > templatesIndex && episodeBibleIndex > archiveIndex && stateIndex > episodeBibleIndex && operationIndex > stateIndex && generationIndex > operationIndex && appIndex > generationIndex);
 });
 
 test("public build includes the continuation session module", async () => {
   const source = await readFile(new URL("../scripts/build-public.mjs", import.meta.url), "utf8");
   const html = await readFile(new URL("../index.html", import.meta.url), "utf8");
+  const staticHeaders = await readFile(new URL("../_headers", import.meta.url), "utf8");
   assert.match(source, /"creation-session\.js"/);
   assert.match(source, /"episode-bible\.js"/);
   assert.match(source, /"script-revision\.js"/);
   assert.match(source, /"storyboard-revision\.js"/);
+  assert.match(source, /"image-prompt-workflow\.js"/);
+  assert.match(source, /"_headers"/);
+  assert.match(staticHeaders, /Content-Security-Policy:.*frame-ancestors 'none'/);
+  assert.match(staticHeaders, /X-Frame-Options: DENY/);
   assert.ok(html.indexOf("creation-session.js") < html.indexOf("app.js?v="));
 });

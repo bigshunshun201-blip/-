@@ -2,12 +2,14 @@ import { cp, copyFile, mkdir, rm } from "node:fs/promises";
 
 const files = [
   "index.html",
+  "_headers",
   "styles.css",
   "app.js",
   "generator.js",
   "workflow-core.js",
   "script-revision.js",
   "storyboard-revision.js",
+  "image-prompt-workflow.js",
   "project-domain.js",
   "episode-bible.js",
   "episode-planner.js",
