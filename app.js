@@ -3031,14 +3031,29 @@
     const review = state.scriptRevisionSession?.canonReview;
     if (!panel || !output) return;
     panel.hidden = !review;
-    if (!review) return;
+    if (!review) {
+      const applyButton = $("#applyReviewBibleDeltasBtn");
+      if (applyButton) {
+        applyButton.hidden = true;
+        applyButton.disabled = true;
+        applyButton.textContent = "采用所选圣经建议";
+      }
+      return;
+    }
     const issues = review.issues || [];
     const deltas = review.bibleDeltas || [];
+    const validDeltaIds = new Set(deltas.map((item) => item.id));
+    const selectedIds = (state.scriptRevisionSession.selectedBibleDeltaIds || []).filter((id) => validDeltaIds.has(id));
+    state.scriptRevisionSession.selectedBibleDeltaIds = selectedIds;
+    const selected = new Set(selectedIds);
     $("#scriptCanonReviewTitle").textContent = review.status === "passed" ? "复核通过" : "发现需要处理的连续性问题";
     output.innerHTML = `<p>${escapeHtml(review.summary || "复核完成")}</p>
       ${issues.map((item) => `<article class="canon-review-issue"><header><strong data-severity="${escapeHtml(item.severity)}">${escapeHtml(item.severity)} · ${escapeHtml(item.category)}</strong><span>${escapeHtml([...(item.beatIds || []), ...(item.dialogueIds || [])].join("、"))}</span></header><p><b>证据：</b>${escapeHtml(item.evidence)}</p><p><b>违反：</b>${escapeHtml(item.rule)}</p><p><b>建议：</b>${escapeHtml(item.recommendation)}</p></article>`).join("")}
-      ${deltas.length ? `<div class="review-bible-deltas"><h4>可选的本次圣经补充</h4>${deltas.map((item) => `<label class="bible-delta-choice"><input type="checkbox" data-review-bible-delta="${escapeHtml(item.id)}" /><span>${escapeHtml(item.field)}</span><div><strong>${escapeHtml(item.fact)}</strong><p>${escapeHtml(item.risk)}</p></div></label>`).join("")}</div>` : ""}`;
-    $("#applyReviewBibleDeltasBtn").hidden = !deltas.length;
+      ${deltas.length ? `<div class="review-bible-deltas"><h4>可选的本次圣经补充</h4>${deltas.map((item) => `<label class="bible-delta-choice"><input type="checkbox" data-review-bible-delta="${escapeHtml(item.id)}" ${selected.has(item.id) ? "checked" : ""} /><span>${escapeHtml(item.field)}</span><div><strong>${escapeHtml(item.fact)}</strong><p>${escapeHtml(item.risk)}</p></div></label>`).join("")}</div>` : ""}`;
+    const applyButton = $("#applyReviewBibleDeltasBtn");
+    applyButton.hidden = !deltas.length;
+    applyButton.disabled = !selectedIds.length;
+    applyButton.textContent = selectedIds.length ? `采用所选 ${selectedIds.length} 条建议` : "请先勾选圣经建议";
     $("#forceApproveScriptBtn").hidden = review.status !== "issues";
   }
 
@@ -3310,6 +3325,7 @@
       assertActiveAiOperation(operation);
       const review = response.result?.review || response.result;
       session.canonReview = { ...review, source: response.source || "", model: response.model || "", checkedAt: new Date().toISOString() };
+      session.selectedBibleDeltaIds = [];
       if (review.status === "passed") {
         finalizeScriptApproval(review, response);
       } else {
@@ -3330,13 +3346,16 @@
   }
 
   function applyReviewBibleDeltas() {
-    const review = state.scriptRevisionSession?.canonReview;
-    const selectedIds = $$('[data-review-bible-delta]:checked').map((input) => input.dataset.reviewBibleDelta);
+    const session = state.scriptRevisionSession;
+    const review = session?.canonReview;
+    const domSelectedIds = $$('[data-review-bible-delta]:checked').map((input) => input.dataset.reviewBibleDelta);
+    const selectedIds = [...new Set([...(session?.selectedBibleDeltaIds || []), ...domSelectedIds])];
     if (!review?.bibleDeltas?.length || !selectedIds.length) throw new Error("请先选择要采用的圣经建议。");
     state.episodeBible.draft = episodeBibleDomain.absorbDeltas(state.episodeBible.draft, review.bibleDeltas, selectedIds);
     state.episodeBible.status = "draft";
     state.episodeBible.confirmedFingerprint = "";
     state.scriptRevisionSession.canonReview = null;
+    state.scriptRevisionSession.selectedBibleDeltaIds = [];
     applyEpisodeBibleToForm(state.episodeBible.draft);
     renderEpisodeBible(); renderScriptCanonReview(); saveDraft(false);
     setStatus("圣经建议已加入本次创作圣经，请检查并重新确认后再批准剧本");
@@ -4861,6 +4880,18 @@
       try { adoptRewriteCandidate(); } catch (error) { reportError("采用改写候选", error); }
     });
     $("#discardRewriteCandidateBtn").addEventListener("click", discardRewriteCandidate);
+    $("#scriptCanonReviewOutput").addEventListener("change", (event) => {
+      const checkbox = event.target.closest("[data-review-bible-delta]");
+      if (!checkbox) return;
+      const session = ensureScriptRevisionSession();
+      if (!session) return;
+      const id = checkbox.dataset.reviewBibleDelta;
+      session.selectedBibleDeltaIds = checkbox.checked
+        ? [...new Set([...(session.selectedBibleDeltaIds || []), id])]
+        : (session.selectedBibleDeltaIds || []).filter((item) => item !== id);
+      renderScriptCanonReview();
+      saveDraft(false);
+    });
     $("#forceApproveScriptBtn").addEventListener("click", () => {
       try { forceApproveCurrentScript(); } catch (error) { reportError("强制批准", error); }
     });

@@ -765,6 +765,8 @@ test("script revision keeps a working draft separate and compares structured fie
   assert.deepEqual(scriptRevision.rewriteViolations(original, session.workingScript, ["BEAT-02"]), []);
   session.workingScript.title = "越界改标题";
   assert.deepEqual(scriptRevision.rewriteViolations(original, session.workingScript, ["BEAT-02"]), ["title"]);
+  const restored = scriptRevision.createSession({ ...session, selectedBibleDeltaIds: ["DELTA-01", "DELTA-01"] });
+  assert.deepEqual(restored.selectedBibleDeltaIds, ["DELTA-01"]);
 });
 
 test("script refinement keeps adopted working-draft differences visible and comparable", async () => {
@@ -778,6 +780,8 @@ test("script refinement keeps adopted working-draft differences visible and comp
   assert.match(source, /AI 返回的候选与当前工作稿没有可见差异/);
   assert.match(source, /const returnView = options\.silent \? session\.activeView : "versions"/);
   assert.match(source, /并已打开与基础版本的对比/);
+  assert.match(source, /selectedBibleDeltaIds/);
+  assert.match(source, /采用所选 \$\{selectedIds\.length\} 条建议/);
 });
 
 test("episode versions require an approved matching fingerprint before storyboard generation", () => {

@@ -91,6 +91,7 @@
       rewriteInstructions: value.rewriteInstructions && typeof value.rewriteInstructions === "object" ? { ...value.rewriteInstructions } : {},
       rewriteCandidate: value.rewriteCandidate ? clone(value.rewriteCandidate) : null,
       canonReview: value.canonReview ? clone(value.canonReview) : null,
+      selectedBibleDeltaIds: unique(value.selectedBibleDeltaIds),
       revisionSource: ["manual", "ai-rewrite", "doctor", "recast"].includes(value.revisionSource) ? value.revisionSource : "manual",
       revisionNote: text(value.revisionNote),
       compareLeftId: text(value.compareLeftId),
