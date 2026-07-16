@@ -1359,6 +1359,36 @@ function rewriteScopeViolations(original, candidate, targetBeatIds) {
   return [...new Set(violations)];
 }
 
+function scopeRewriteCandidate(original, candidate, targetBeatIds) {
+  const scoped = JSON.parse(JSON.stringify(original));
+  const targetStructures = candidate.structure.filter((item) => itemTouchesBeats(item, targetBeatIds));
+  let structureCursor = 0;
+  scoped.structure = original.structure.map((before, index) => {
+    if (!itemTouchesBeats(before, targetBeatIds)) return before;
+    const after = targetStructures[structureCursor++] || candidate.structure[index];
+    if (!after) return before;
+    return { ...after, beatIds: [...before.beatIds] };
+  });
+
+  const originalLines = new Map(original.dialogue.map((item) => [item.id, item]));
+  const candidateLines = new Map(candidate.dialogue.map((item) => [item.id, item]));
+  const omittedTargetLines = [];
+  scoped.dialogue = original.dialogue.flatMap((before) => {
+    if (!itemTouchesBeats(before, targetBeatIds)) return [before];
+    const after = candidateLines.get(before.id);
+    if (!after) {
+      omittedTargetLines.push(before);
+      return [];
+    }
+    return [{ ...after, id: before.id, beatIds: [...before.beatIds] }];
+  });
+  candidate.dialogue.forEach((after) => {
+    if (!originalLines.has(after.id) && itemTouchesBeats(after, targetBeatIds) && scoped.dialogue.length < 24) scoped.dialogue.push(after);
+  });
+  while (scoped.dialogue.length < 6 && omittedTargetLines.length) scoped.dialogue.push(omittedTargetLines.shift());
+  return scoped;
+}
+
 function normalizeRewriteScript(result, input = {}) {
   const payload = normalizeInput(input);
   const targetBeatIds = payload.rewriteTarget?.beatIds || [];
@@ -1366,13 +1396,14 @@ function normalizeRewriteScript(result, input = {}) {
   const original = normalizeScript({ script: payload.script }, payload).script;
   const candidate = normalizeScript({ script: result?.script || result }, payload).script;
   const violations = rewriteScopeViolations(original, candidate, targetBeatIds);
-  if (violations.length) throw validationError("局部改写", [`模型改动了锁定区域：${violations.join("、")}`]);
-  if (sameJson(original, candidate)) throw validationError("局部改写", ["模型没有对目标节拍或关联台词产生任何实际改动"]);
+  const scopedCandidate = scopeRewriteCandidate(original, candidate, targetBeatIds);
+  if (sameJson(original, scopedCandidate)) throw validationError("局部改写", ["模型没有对目标节拍或关联台词产生任何实际改动"]);
   const changeSummary = textValue(result?.changeSummary);
   if (!changeSummary) throw validationError("局部改写", ["缺少修改摘要"]);
   return {
-    script: candidate,
-    changeSummary,
+    script: scopedCandidate,
+    changeSummary: violations.length ? `${changeSummary}（已自动忽略 ${violations.length} 处锁定区域改动）` : changeSummary,
+    discardedChanges: violations,
     affectedBeatIds: normalizeIdList(result?.affectedBeatIds, 8).filter((id) => targetBeatIds.includes(id)).length
       ? normalizeIdList(result?.affectedBeatIds, 8).filter((id) => targetBeatIds.includes(id))
       : targetBeatIds,

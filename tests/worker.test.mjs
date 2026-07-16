@@ -793,7 +793,7 @@ test("episode versions require an approved matching fingerprint before storyboar
   assert.equal(projectDomain.versionCanGenerateStoryboard(approved), false);
 });
 
-test("worker local rewrite rejects changes outside the selected beat", () => {
+test("worker local rewrite keeps target changes and discards changes outside the selected beat", () => {
   const original = editableScript();
   const input = { script: original, rewriteTarget: { beatIds: ["BEAT-02"], instruction: "增强冲突" }, beatSheet: Array.from({ length: 8 }, (_, index) => ({ id: `BEAT-0${index + 1}` })) };
   const candidate = structuredClone(original);
@@ -803,7 +803,18 @@ test("worker local rewrite rejects changes outside the selected beat", () => {
   assert.match(result.script.structure[1].content, /倒计时/);
   const escaped = structuredClone(candidate);
   escaped.hooks = ["偷偷更换结尾"];
-  assert.throws(() => __test.normalizeRewriteScript({ script: escaped, changeSummary: "越界" }, input), /锁定区域/);
+  escaped.structure[3].content = "模型越界修改第四段";
+  escaped.dialogue[4].line = "模型越界修改第五句台词";
+  const sanitized = __test.normalizeRewriteScript({ script: escaped, changeSummary: "强化第二拍但发生越界" }, input);
+  assert.match(sanitized.script.structure[1].content, /倒计时/);
+  assert.equal(sanitized.script.structure[3].content, original.structure[3].content);
+  assert.equal(sanitized.script.dialogue[4].line, original.dialogue[4].line);
+  assert.deepEqual(sanitized.script.hooks, original.hooks);
+  assert.deepEqual(sanitized.discardedChanges, ["hooks", "structure:4", "dialogue:LINE-05"]);
+  assert.match(sanitized.changeSummary, /已自动忽略 3 处锁定区域改动/);
+  const onlyOutside = structuredClone(original);
+  onlyOutside.hooks = ["只修改锁定结尾"];
+  assert.throws(() => __test.normalizeRewriteScript({ script: onlyOutside, changeSummary: "只越界" }, input), /没有对目标节拍或关联台词产生任何实际改动/);
   assert.throws(() => __test.normalizeRewriteScript({ script: original, changeSummary: "没有修改" }, input), /没有对目标节拍或关联台词产生任何实际改动/);
 });
 

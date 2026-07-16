@@ -2998,7 +2998,8 @@
     if (!candidate) return;
     const differences = scriptRevisionDomain.structuredDiff(session.workingScript, candidate.script);
     $("#rewriteCandidateTitle").textContent = candidate.changeSummary || "局部改写候选";
-    $("#rewriteCandidateMeta").textContent = `${candidate.model || "DeepSeek"} · ${scriptRevisionDomain.diffCount(differences)} 项改动 · ${(candidate.affectedBeatIds || []).join("、")}`;
+    const protectedText = candidate.discardedChanges?.length ? ` · 已保护 ${candidate.discardedChanges.length} 处锁定内容` : "";
+    $("#rewriteCandidateMeta").textContent = `${candidate.model || "DeepSeek"} · ${scriptRevisionDomain.diffCount(differences)} 项改动 · ${(candidate.affectedBeatIds || []).join("、")}${protectedText}`;
     $("#rewriteCandidateDiff").innerHTML = uiTemplates.versionDiff(differences);
   }
 
@@ -3184,10 +3185,11 @@
       const candidate = scriptRevisionDomain.normalizeScript(response.result?.script);
       const violations = scriptRevisionDomain.rewriteViolations(session.workingScript, candidate, beatIds);
       if (violations.length) throw new Error(`改写候选触及了锁定内容：${violations.join("、")}`);
-      session.rewriteCandidate = { script: candidate, changeSummary: response.result?.changeSummary || "局部改写完成", affectedBeatIds: response.result?.affectedBeatIds || beatIds, source: response.source || "", model: response.model || "", createdAt: new Date().toISOString() };
+      session.rewriteCandidate = { script: candidate, changeSummary: response.result?.changeSummary || "局部改写完成", affectedBeatIds: response.result?.affectedBeatIds || beatIds, discardedChanges: response.result?.discardedChanges || [], source: response.source || "", model: response.model || "", createdAt: new Date().toISOString() };
       renderRewriteCandidate();
       saveDraft(false);
-      setStatus(`局部改写候选已生成 ${nowTime()} · ${response.model || "DeepSeek"}${usageSuffix(response)}`);
+      const protectedSuffix = response.result?.discardedChanges?.length ? ` · 已自动保护 ${response.result.discardedChanges.length} 处未选内容` : "";
+      setStatus(`局部改写候选已生成 ${nowTime()} · ${response.model || "DeepSeek"}${protectedSuffix}${usageSuffix(response)}`);
     } finally { endAiOperation(operation); }
   }
 
