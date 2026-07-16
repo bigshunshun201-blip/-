@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>洛克王国短剧创作工作台</title>
-    <link rel="stylesheet" href="./styles.css?v=20260716-production-loop" />
+    <link rel="stylesheet" href="./styles.css?v=20260716-production-ui" />
   </head>
   <body>
     <a class="skip-link" href="#workspace">跳到创作工作区</a>
@@ -33,6 +33,12 @@
             <button class="is-active" type="button" role="tab" aria-selected="true" data-creation-mode="new">新建本集</button>
             <button type="button" role="tab" aria-selected="false" data-creation-mode="continue">续写下一集</button>
           </div>
+          <nav class="creation-rail" aria-label="本集制作步骤">
+            <a id="creationStepInput" href="#briefStep" data-state="current"><span>01</span><strong>设定</strong></a>
+            <a id="creationStepAssets" href="#mixStep" data-state="optional"><span>02</span><strong>素材</strong></a>
+            <a id="creationStepPlan" href="#planStep" data-state="waiting"><span>03</span><strong>策划</strong></a>
+            <a id="creationStepProduce" href="#generateStep" data-state="waiting"><span>04</span><strong>生成</strong></a>
+          </nav>
         </div>
         <section class="panel-section continuation-panel" id="continuationPanel" hidden>
           <div class="section-title"><div><p class="eyebrow">续写来源</p><h2>承接哪一版</h2></div></div>
@@ -51,7 +57,7 @@
             <label>可选的新创意<textarea id="continuationNewIdeas" rows="3" placeholder="可以加入新选题、角色、梗或场景，但不能覆盖上一集已经发生的事实。"></textarea></label>
           </details>
         </section>
-        <section class="panel-section brief-panel">
+        <section class="panel-section brief-panel creation-step-section" id="briefStep" data-step="01">
           <div class="section-title">
             <h2>创作输入</h2>
           </div>
@@ -171,7 +177,7 @@
           <select id="aiModel" hidden><option value="deepseek-v4-flash">Flash</option><option value="deepseek-v4-pro">Pro</option></select>
         </section>
 
-        <section class="panel-section compact creative-mix-panel">
+        <section class="panel-section compact creative-mix-panel creation-step-section" id="mixStep" data-step="02">
           <div class="section-title">
             <div>
               <p class="eyebrow">本集创意搭配</p>
@@ -204,7 +210,7 @@
           </details>
         </section>
 
-        <section class="panel-section compact episode-plan-panel">
+        <section class="panel-section compact episode-plan-panel creation-step-section" id="planStep" data-step="03">
           <div class="section-title"><h2>本集策划</h2></div>
           <p class="helper">不用从空白开始。系统可以根据上面的主题、角色和场景先搭好追更结构，你只需要挑选和修改。</p>
           <div class="plan-starter">
@@ -285,7 +291,7 @@
               </section>
             </div>
           </details>
-          <div class="action-stack episode-actions-stack" aria-label="创作动作">
+          <div class="action-stack episode-actions-stack" id="generateStep" aria-label="创作动作" data-step="04">
             <p class="plan-ready-state" id="planReadyState" role="status">请先完整填写或采用一套本集策划</p>
             <div class="ai-model-line"><span>剧本模型</span><div data-ai-model-switch data-ai-model-scope="script" aria-label="剧本生成模型"></div></div>
             <div class="ai-model-line"><span>分镜模型</span><div data-ai-model-switch data-ai-model-scope="storyboard" aria-label="分镜生成模型"></div></div>
@@ -315,15 +321,15 @@
           <div class="toolbar-heading">
             <span class="toolbar-sigil" aria-hidden="true"></span>
             <div>
-              <span>创作航线</span>
+              <span>当前页面</span>
               <strong id="toolbarActiveLabel">剧本</strong>
             </div>
           </div>
           <div class="workspace-groups" role="tablist" aria-label="工作区分类">
-            <button class="workspace-group is-active" type="button" data-workspace-group="creation" aria-pressed="true">创作</button>
-            <button class="workspace-group" type="button" data-workspace-group="planning" aria-pressed="false">策划</button>
-            <button class="workspace-group" type="button" data-workspace-group="world" aria-pressed="false">设定库</button>
-            <button class="workspace-group" type="button" data-workspace-group="operations" aria-pressed="false">项目</button>
+            <button class="workspace-group is-active" type="button" data-workspace-group="creation" aria-pressed="true">创作台</button>
+            <button class="workspace-group" type="button" data-workspace-group="planning" aria-pressed="false">灵感策划</button>
+            <button class="workspace-group" type="button" data-workspace-group="world" aria-pressed="false">世界设定</button>
+            <button class="workspace-group" type="button" data-workspace-group="operations" aria-pressed="false">项目运营</button>
           </div>
           <div class="workspace-subnav">
             <div class="tab-group is-active" data-workspace-tabs="creation" aria-label="创作工作区">
@@ -818,6 +824,6 @@
     <script src="./creation-session.js?v=20260714-continuation-workspace"></script>
     <script src="./ai-operation.js?v=20260714-storyboard-reader"></script>
     <script src="./generation-client.js?v=20260714-storyboard-reader"></script>
-    <script src="./app.js?v=20260716-production-loop"></script>
+    <script src="./app.js?v=20260716-production-ui"></script>
   </body>
 </html>

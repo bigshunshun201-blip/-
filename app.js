@@ -127,10 +127,11 @@
   }
 
   function refreshCreationActions() {
+    const creationInput = getInput();
     const hasScript = Boolean(state.script);
     const hasStoryboard = Boolean(state.storyboard.length);
     const isBusy = Boolean(state.activeAiOperation);
-    const hasCompletePlan = episodePlanner.planIsComplete(getInput().episodePlan);
+    const hasCompletePlan = episodePlanner.planIsComplete(creationInput.episodePlan);
     const hasApprovedBeatSheet = state.beatSheetApproved && state.beatSheet.length === 8;
     const isContinuation = state.creationMode === "continue";
     const hasContinuationSource = Boolean(state.continuationSource?.script && creationSession.normalizeSourceRef(state.continuationSource));
@@ -159,6 +160,21 @@
       planReadyState.textContent = !hasCompletePlan ? "请先完整填写或采用一套本集策划" : !hasApprovedBeatSheet ? "策划已完成，请生成并确认剧情节拍表" : !hasConfirmedEpisodeBible ? "节拍表已确认，请准备本次创作圣经" : "策划、节拍表和本次圣经已就绪";
       planReadyState.classList.toggle("is-ready", hasCompletePlan && hasApprovedBeatSheet && hasConfirmedEpisodeBible);
     }
+    const hasCoreInput = Boolean(String(creationInput.theme || "").trim() && String(creationInput.roles || "").trim() && String(creationInput.scene || "").trim());
+    const selectedAssets = (state.activeCharacterIds?.length || 0) + (state.activeMemeIds?.length || 0);
+    const stepStates = {
+      creationStepInput: hasCoreInput ? "done" : "current",
+      creationStepAssets: selectedAssets ? "done" : "optional",
+      creationStepPlan: hasScript || (hasCompletePlan && hasApprovedBeatSheet) ? "done" : hasCoreInput ? "current" : "waiting",
+      creationStepProduce: hasScript ? "done" : hasCompletePlan && hasApprovedBeatSheet ? "current" : "waiting",
+    };
+    Object.entries(stepStates).forEach(([id, value]) => {
+      const step = document.getElementById(id);
+      if (!step) return;
+      step.dataset.state = value;
+      if (value === "current") step.setAttribute("aria-current", "step");
+      else step.removeAttribute("aria-current");
+    });
     if (storyboardButton) {
       storyboardButton.disabled = isBusy || !hasScript || !canStoryboard || Boolean(state.episodeBible?.scriptNeedsRegeneration);
       storyboardButton.title = state.episodeBible?.scriptNeedsRegeneration
@@ -4712,6 +4728,14 @@
   }
 
   function bindEvents() {
+    $$(".creation-rail a").forEach((link) => link.addEventListener("click", (event) => {
+      const target = document.querySelector(link.getAttribute("href"));
+      const panel = $(".control-panel");
+      const head = $(".control-panel-head");
+      if (!target || !panel) return;
+      event.preventDefault();
+      panel.scrollTo({ top: Math.max(0, target.offsetTop - (head?.offsetHeight || 0) - 8), behavior: "smooth" });
+    }));
     $$('[data-creation-mode]').forEach((button) => button.addEventListener("click", () => {
       try { switchCreationMode(button.dataset.creationMode); } catch (error) { reportError("切换创作方式", error); }
     }));

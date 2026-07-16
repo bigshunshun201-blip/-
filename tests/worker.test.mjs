@@ -458,6 +458,10 @@ test("UI contains the production workflow controls", async () => {
   for (const id of ["storyboardRefineToolbar", "saveStoryboardVersionBtn", "canonEvidenceMap", "canonEvidenceSummary"]) {
     assert.match(html, new RegExp(`id="${id}"`));
   }
+  for (const id of ["creationStepInput", "creationStepAssets", "creationStepPlan", "creationStepProduce", "briefStep", "mixStep", "planStep", "generateStep"]) {
+    assert.match(html, new RegExp(`id="${id}"`));
+  }
+  assert.match(html, /创作台.*灵感策划.*世界设定.*项目运营/s);
   assert.match(html, /data-ai-model-scope="storyboardRewrite"/);
 });
 
