@@ -1091,6 +1091,14 @@
       selectedAssetCount: state.activeCharacterIds.length + state.activeMemeIds.length,
       plans: state.planOptions,
       selectedPlanId: state.selectedPlanOptionId,
+      planBatches: (project?.planBatches || [])
+        .filter((batch) => (batch.creationMode || "new") === state.creationMode && Number(batch.targetEpisodeNumber || batch.episodeNumber || 1) === Number(input.episodeNumber || 1))
+        .slice(0, 8)
+        .map((batch) => ({
+          id: batch.id,
+          active: batch.id === state.activePlanBatchId,
+          label: `${new Date(batch.createdAt).toLocaleString("zh-CN", { hour12: false })} · ${(batch.plans || []).length} 套`,
+        })),
       creationPackage: state.creationPackage,
       packageTab: state.quickFlow?.packageTab || "beats",
       script: state.script,
@@ -1312,6 +1320,8 @@
     const drawer = event.target.closest("[data-quick-drawer]");
     const mode = event.target.closest("[data-quick-creation-mode]");
     const plan = event.target.closest("[data-quick-plan-adopt]");
+    const regeneratePlans = event.target.closest("[data-quick-regenerate-plans]");
+    const restorePlanBatchButton = event.target.closest("[data-quick-plan-batch-restore]");
     const packageTab = event.target.closest("[data-quick-package-tab]");
     const scriptView = event.target.closest("[data-quick-script-view]");
     const rewrite = event.target.closest("[data-quick-rewrite-beats]");
@@ -1338,6 +1348,8 @@
         return;
       }
       if (plan) { adoptPlanOption(Number(plan.dataset.quickPlanAdopt)); renderQuickWorkflow(); return; }
+      if (regeneratePlans) { await regenerateQuickPlans(); return; }
+      if (restorePlanBatchButton) { restorePlanBatch(restorePlanBatchButton.dataset.quickPlanBatchRestore); renderQuickWorkflow(); return; }
       if (packageTab) { state.quickFlow.packageTab = packageTab.dataset.quickPackageTab; renderQuickWorkflow(); return; }
       if (scriptView) { setScriptView(scriptView.dataset.quickScriptView); renderQuickWorkflow(); return; }
       if (rewrite) { await rewriteScriptBeat(rewrite.dataset.quickRewriteBeats); renderQuickWorkflow(); return; }
@@ -1366,10 +1378,14 @@
   async function handleQuickDrawerClick(event) {
     if (event.target.closest("[data-quick-drawer-close]")) { closeQuickDrawer(); return; }
     const topic = event.target.closest("[data-quick-topic-select]");
+    const replaceTopicButton = event.target.closest("[data-quick-topic-replace]");
+    const regenerateTopicsButton = event.target.closest("[data-quick-topics-regenerate]");
     const character = event.target.closest("[data-quick-character-use]");
     const meme = event.target.closest("[data-quick-meme-use]");
     try {
       if (topic) return void selectQuickTopic(Number(topic.dataset.quickTopicSelect));
+      if (replaceTopicButton) { await replaceTopic(Number(replaceTopicButton.dataset.quickTopicReplace)); renderQuickDrawer("topics"); refreshQuickWorkflow(); return; }
+      if (regenerateTopicsButton) { await regenerateTopics(); renderQuickDrawer("topics"); refreshQuickWorkflow(); return; }
       if (character) { useCharacterCard(character.dataset.quickCharacterUse); renderQuickDrawer("assets"); renderQuickWorkflow(); return; }
       if (meme) { adoptSavedMeme(meme.dataset.quickMemeUse); renderQuickDrawer("assets"); renderQuickWorkflow(); }
     } catch (error) { reportError("快速创作素材", error); }
@@ -1667,7 +1683,29 @@
     setStatus(`已恢复第 ${batch.episodeNumber || 1} 集的 3 套策划，可以重新筛选`);
   }
 
-  async function suggestEpisodePlans() {
+  function resetPlanDependenciesForNewBatch() {
+    applyEpisodePlan({});
+    state.creationPackage = null;
+    state.beatSheet = [];
+    state.beatSheetApproved = false;
+    state.activeBeatSheetBatchId = null;
+    state.episodeBible = episodeBibleDomain.createState();
+    writeEpisodeBibleForm({});
+    renderBeatSheet();
+    renderEpisodeBible();
+  }
+
+  async function regenerateQuickPlans() {
+    if (state.script) throw new Error("当前剧本已经生成。请新建本集或进入续写工作区探索新的策划分支。");
+    const hasDependentDraft = Boolean(state.selectedPlanOptionId || state.creationPackage || state.beatSheet.length);
+    if (hasDependentDraft && !window.confirm("换一批会重置当前采用方案和准备包草稿；旧三案仍保留在策划记录中。是否继续？")) return;
+    await suggestEpisodePlans({ replaceCurrent: true });
+    state.quickStep = "plan";
+    state.quickFlow = { ...(state.quickFlow || {}), step: "plan" };
+    renderQuickWorkflow();
+  }
+
+  async function suggestEpisodePlans(requestOptions = {}) {
     const operation = beginAiOperation("本集策划生成");
     try {
       setStatus("DeepSeek 正在生成 3 套本集策划...");
@@ -1680,6 +1718,7 @@
       assertActiveAiOperation(operation);
       const options = scoreCurrentPlans(episodePlanner.normalizePlanOptions(response.result, { prefix: "ai-plan" }));
       if (options.length !== 3) throw new Error("DeepSeek 没有返回 3 套完整策划，请重新生成。");
+      if (requestOptions.replaceCurrent) resetPlanDependenciesForNewBatch();
       state.planOptions = options;
       state.selectedPlanOptionId = null;
       state.creativeReview = null;
@@ -3518,14 +3557,14 @@
       if (!topics.length) throw new Error("AI 没有返回可用选题");
       state.topics = topics;
       refreshTopicDerivedViews();
-      switchTab("topics");
+      if (state.interfaceMode === "pro") switchTab("topics");
       setStatus(`AI 已换一批选题 ${nowTime()} · ${response.model || "model"}${usageSuffix(response)}`);
     } catch (error) {
       const topics = fallbackTopics(8);
       if (!topics.length) throw error;
       state.topics = topics;
       refreshTopicDerivedViews();
-      switchTab("topics");
+      if (state.interfaceMode === "pro") switchTab("topics");
       setStatus(`AI 换题失败，已用本地备选换一批：${error.message}`, true);
     } finally {
       endAiOperation(operation);

@@ -1,5 +1,6 @@
 const { test, expect } = require("@playwright/test");
 const projectDomain = require("../../project-domain.js");
+const episodePlanner = require("../../episode-planner.js");
 
 function fixture() {
   const bible = {
@@ -29,6 +30,12 @@ function fixture() {
       approvalStatus: "approved", approvalReview: { status: "legacy", checkedAt: new Date().toISOString(), summary: "E2E 固定夹具" },
     },
   });
+  const planBatchId = "batch-e2e";
+  project.planBatches = [{
+    id: planBatchId, createdAt: new Date().toISOString(), episodeNumber: 1, targetEpisodeNumber: 1,
+    theme: input.theme, creationMode: "new", selectedPlanId: null,
+    plans: episodePlanner.generatePlanOptions(input, { seed: 7, count: 3 }),
+  }];
   projectDomain.updateActiveStoryboard(episode, [{
     clipId: "CLIP-01", shot: 1, beatIds: ["BEAT-01"], dialogueIds: ["LINE-01"], timeRange: "00-08秒",
     seconds: 8, generationSeconds: 8, trimSeconds: 0, generationMode: "单场景连续镜头",
@@ -41,7 +48,7 @@ function fixture() {
   }], { source: "fixture", model: "fixture" });
   return {
     projects: { formatVersion: 1, revision: 1, writerId: "e2e", updatedAt: new Date().toISOString(), projects: [project] },
-    draft: { currentProjectId: project.id, currentEpisodeId: episode.id, input, creationMode: "new", currentHistoryId: version.historyId || null },
+    draft: { currentProjectId: project.id, currentEpisodeId: episode.id, input, creationMode: "new", currentHistoryId: version.historyId || null, activePlanBatchId: planBatchId },
   };
 }
 
@@ -83,6 +90,8 @@ test("quick guide locks future steps and topic selection only fills the opening 
   await expect(page.locator("#quickDrawerTitle")).toHaveCSS("color", "rgb(20, 33, 25)");
   await expect(page.locator(".quick-topic-drawer article").first()).toHaveCSS("color", "rgb(20, 33, 25)");
   await expect(page.locator(".quick-topic-drawer article p").first()).toHaveCSS("color", "rgb(70, 88, 78)");
+  await expect(page.locator("[data-quick-topics-regenerate]")).toBeVisible();
+  await expect(page.locator('[data-quick-topic-replace="0"]')).toBeVisible();
   await page.locator('[data-quick-topic-select="0"]').click();
   await expect(page.locator("#quickDrawerLayer")).toBeHidden();
   await expect(page.locator("#quickIdeaInput")).toHaveValue("喵喵把月牙镇整成邪修实验室");
@@ -118,6 +127,9 @@ test("desktop production workspace is stable and model scopes remain independent
   await page.locator('[data-quick-model-scope="creationPackage"]').selectOption("deepseek-v4-pro");
   await expect(page.locator('[data-quick-model-scope="creationPackage"]')).toHaveValue("deepseek-v4-pro");
   await expect(page.locator('[data-quick-model-scope="plan"]')).toHaveValue("deepseek-v4-flash");
+  await page.locator('#quickStepRail [data-quick-step="plan"]').click();
+  await expect(page.locator("[data-quick-regenerate-plans]")).toBeVisible();
+  await expect(page.locator(".quick-plan-card")).toHaveCount(3);
   await page.locator('#quickStepRail [data-quick-step="script"]').click();
   await expect(page.locator("body")).toHaveAttribute("data-quick-step", "script");
   await expect(page.locator("#quickStageContent").getByRole("heading", { name: "旧徽章的双生主" })).toBeVisible();

@@ -21,6 +21,7 @@ const scriptRevision = require("../script-revision.js");
 const storyboardRevision = require("../storyboard-revision.js");
 const imagePromptWorkflow = require("../image-prompt-workflow.js");
 const quickWorkflow = require("../quick-workflow.js");
+const quickModeUi = require("../quick-mode-ui.js");
 const creativeQuality = require("../creative-quality.js");
 const comedyMechanism = require("../comedy-mechanism.js");
 const performanceLearning = require("../performance-learning.js");
@@ -45,6 +46,21 @@ test("quick workflow exposes one state-driven primary action and validates creat
   const restoredStates = quickWorkflow.stepStates({ step: "script", hasScript: true, scriptApproved: true, hasStoryboard: true });
   assert.equal(restoredStates.find((item) => item.id === "script").state, "current");
   assert.equal(restoredStates.find((item) => item.id === "storyboard").complete, true);
+});
+
+test("quick mode keeps topic replacement and plan regeneration available", () => {
+  const topicDrawer = quickModeUi.renderDrawer("topics", {
+    topics: [{ title: "新选题", sellingPoint: "强画面冲突", emotion: "爆笑", duration: 60, priority: "S" }],
+  }).body;
+  assert.match(topicDrawer, /data-quick-topics-regenerate/);
+  assert.match(topicDrawer, /data-quick-topic-replace="0"/);
+  const planHtml = quickModeUi.renderStage({
+    step: "plan", selectedPlanId: "", creationPackage: null, packageTab: "beats", hasScript: false,
+    planBatches: [{ id: "batch-1", label: "第一批", active: true }, { id: "batch-2", label: "第二批", active: false }],
+    plans: [{ id: "plan-1", angle: "关系碰撞", title: "测试策划", why: "测试", plan: { openingHook: "开头", conflict: "冲突", reversal: "反转", forcedChoice: "选择" } }],
+  });
+  assert.match(planHtml, /data-quick-regenerate-plans/);
+  assert.match(planHtml, /data-quick-plan-batch-restore="batch-2"/);
 });
 
 test("worker normalizes a complete combined creation package", () => {
