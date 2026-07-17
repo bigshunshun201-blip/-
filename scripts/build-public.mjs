@@ -11,6 +11,7 @@ const files = [
   "storyboard-revision.js",
   "image-prompt-workflow.js",
   "quick-workflow.js",
+  "quick-mode-ui.js",
   "creative-quality.js",
   "comedy-mechanism.js",
   "performance-learning.js",
@@ -32,3 +33,4 @@ await mkdir("public", { recursive: true });
 
 await Promise.all(files.map((file) => copyFile(file, `public/${file}`)));
 await cp("assets", "public/assets", { recursive: true });
+await cp("vendor", "public/vendor", { recursive: true });

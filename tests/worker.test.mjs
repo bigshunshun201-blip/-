@@ -38,6 +38,13 @@ test("quick workflow exposes one state-driven primary action and validates creat
   assert.equal(quickWorkflow.primaryAction({ step: "plan", planComplete: true, packageComplete: false }).id, "generate-package");
   assert.equal(quickWorkflow.primaryAction({ step: "script", packageConfirmed: true, creationMode: "continue" }).label, "生成续写剧本");
   assert.equal(quickWorkflow.primaryAction({ step: "refine", hasScript: true, scriptDirty: true }).id, "save-script-version");
+  const emptyStates = quickWorkflow.stepStates({ step: "idea" });
+  assert.equal(emptyStates.find((item) => item.id === "idea").state, "current");
+  assert.equal(emptyStates.find((item) => item.id === "plan").state, "locked");
+  assert.deepEqual(quickWorkflow.resolveStep("storyboard", { step: "idea" }), { step: "idea", allowed: false, missing: ["先完成圣经复核并批准剧本"] });
+  const restoredStates = quickWorkflow.stepStates({ step: "script", hasScript: true, scriptApproved: true, hasStoryboard: true });
+  assert.equal(restoredStates.find((item) => item.id === "script").state, "current");
+  assert.equal(restoredStates.find((item) => item.id === "storyboard").complete, true);
 });
 
 test("worker normalizes a complete combined creation package", () => {

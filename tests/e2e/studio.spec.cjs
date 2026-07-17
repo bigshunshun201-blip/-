@@ -45,6 +45,49 @@ function fixture() {
   };
 }
 
+function emptyFixture() {
+  const project = projectDomain.createProjectRecord("快速向导空项目");
+  return {
+    projects: { formatVersion: 1, revision: 1, writerId: "e2e-empty", updatedAt: new Date().toISOString(), projects: [project] },
+    draft: {
+      currentProjectId: project.id,
+      currentEpisodeId: null,
+      creationMode: "new",
+      interfaceMode: "quick",
+      quickFlow: { step: "idea", packageTab: "beats" },
+      input: { theme: "", roles: "菲尔特：谨慎的新手洛克", scene: "月牙镇", direction: "轻喜剧整活", audience: "学生党与游戏短剧用户", duration: 60, episodeCount: 3, episodeNumber: 1, style: "搞笑、快节奏、反差梗", episodePlan: {} },
+      topics: [{ title: "喵喵把月牙镇整成邪修实验室", sellingPoint: "草系精灵反差整活", audience: "年轻游戏用户", roles: "菲尔特、喵喵", world: "月牙镇", emotion: "爆笑", reversal: "邪修配方其实是治愈魔法", memeLine: "先别内耗", duration: 60, series: true, priority: "S" }],
+    },
+  };
+}
+
+test("quick guide locks future steps and topic selection only fills the opening idea", async ({ page }) => {
+  const seeded = emptyFixture();
+  await page.addInitScript((value) => {
+    Object.defineProperty(window, "indexedDB", { value: undefined, configurable: true });
+    localStorage.setItem("roco-shortdrama-studio-projects", JSON.stringify(value.projects));
+    localStorage.setItem("roco-shortdrama-studio-draft", JSON.stringify(value.draft));
+    localStorage.removeItem("roco-shortdrama-access-code");
+  }, seeded);
+  await page.goto("/");
+
+  const planStep = page.locator('#quickStepRail [data-quick-step="plan"]');
+  await expect(planStep).toHaveAttribute("data-state", "locked");
+  await planStep.click();
+  await expect(page.locator("body")).toHaveAttribute("data-quick-step", "idea");
+  await expect(page.locator("#quickInlineNotice")).toContainText("先生成 3 个创意方向");
+  await expect(page.locator("#quickPrimaryAction")).toBeDisabled();
+
+  await page.locator('#quickStageContent [data-quick-drawer="topics"]').click();
+  await expect(page.locator("#quickDrawerLayer")).toBeVisible();
+  await page.locator('[data-quick-topic-select="0"]').click();
+  await expect(page.locator("#quickDrawerLayer")).toBeHidden();
+  await expect(page.locator("#quickIdeaInput")).toHaveValue("喵喵把月牙镇整成邪修实验室");
+  await expect(page.locator("body")).toHaveAttribute("data-quick-step", "idea");
+  await expect(page.locator("#quickPrimaryAction")).toBeEnabled();
+  await expect(page.locator(".quick-primary-action:visible")).toHaveCount(1);
+});
+
 test("desktop production workspace is stable and model scopes remain independent", async ({ page }) => {
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
@@ -60,22 +103,24 @@ test("desktop production workspace is stable and model scopes remain independent
   const response = await page.goto("/");
   expect(response.status()).toBe(200);
   expect(response.headers()["content-security-policy"]).toContain("frame-ancestors 'none'");
-  await expect(page.locator("#quickWorkflowBar")).toBeVisible();
-  await expect(page.locator(".quick-steps [data-quick-step]")).toHaveCount(6);
+  await expect(page.locator("#quickStudio")).toBeVisible();
+  await expect(page.locator("#quickStepRail [data-quick-step]")).toHaveCount(6);
   await expect(page.locator("#quickPrimaryAction")).toBeVisible();
+  await expect(page.locator(".quick-action-dock")).toBeInViewport();
   await expect(page.locator("body")).toHaveAttribute("data-quick-step", "idea");
-  await page.locator('.quick-steps [data-quick-step="plan"]').click();
-  await expect(page.locator("body")).toHaveAttribute("data-quick-step", "plan");
-  await expect(page.locator("#planStep")).toBeVisible();
-  await expect(page.locator("#briefStep")).toBeHidden();
+  await expect(page.getByRole("heading", { name: "先说这集想讲什么" })).toBeVisible();
+  await expect(page.locator("#quickIdeaInput")).toBeVisible();
+  await expect(page.locator("#appShell")).toBeHidden();
   await page.locator("#quickModelDrawer > summary").click();
   await page.locator('[data-quick-model-scope="creationPackage"]').selectOption("deepseek-v4-pro");
   await expect(page.locator('[data-quick-model-scope="creationPackage"]')).toHaveValue("deepseek-v4-pro");
   await expect(page.locator('[data-quick-model-scope="plan"]')).toHaveValue("deepseek-v4-flash");
-  await page.locator('.quick-steps [data-quick-step="script"]').click();
+  await page.locator('#quickStepRail [data-quick-step="script"]').click();
   await expect(page.locator("body")).toHaveAttribute("data-quick-step", "script");
-  await expect(page.getByRole("heading", { name: "旧徽章的双生主" })).toBeVisible();
+  await expect(page.locator("#quickStageContent").getByRole("heading", { name: "旧徽章的双生主" })).toBeVisible();
   await page.locator("#proModeBtn").click();
+  await expect(page.locator("#quickStudio")).toBeHidden();
+  await expect(page.locator("#appShell")).toBeVisible();
   await expect(page.getByRole("heading", { name: "旧徽章的双生主" })).toBeVisible();
 
   await page.locator('[data-tab="storyboard"]').click();

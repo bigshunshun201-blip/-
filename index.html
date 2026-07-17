@@ -32,20 +32,47 @@
       </div>
     </header>
 
-    <section class="quick-workflow-bar" id="quickWorkflowBar" aria-label="快速创作流程">
-      <nav class="quick-steps">
-        <button class="is-active" type="button" data-quick-step="idea"><span>01</span>创意</button>
-        <button type="button" data-quick-step="plan"><span>02</span>策划</button>
-        <button type="button" data-quick-step="script"><span>03</span>剧本</button>
-        <button type="button" data-quick-step="refine"><span>04</span>精修</button>
-        <button type="button" data-quick-step="storyboard"><span>05</span>分镜</button>
-        <button type="button" data-quick-step="review"><span>06</span>发布复盘</button>
-      </nav>
-      <div class="quick-next-card">
-        <div><span>当前下一步</span><strong id="quickActionHint">先生成三套策划，再挑一套继续</strong></div>
-        <button class="quick-primary-action" id="quickPrimaryAction" type="button">生成 3 套策划</button>
-      </div>
-    </section>
+    <main class="quick-studio" id="quickStudio" aria-label="快速创作向导">
+      <aside class="quick-studio-rail">
+        <div class="quick-project-context">
+          <span>当前内容项目</span>
+          <strong id="quickProjectName">洛克王国短剧项目</strong>
+          <small id="quickEpisodeLabel">第 1 集 · 新建本集</small>
+        </div>
+        <nav class="quick-steps" id="quickStepRail" aria-label="本集制作进度"></nav>
+        <div class="quick-rail-foot">
+          <span>需要完整控制？</span>
+          <button type="button" data-interface-mode="pro">打开专业模式</button>
+        </div>
+      </aside>
+      <section class="quick-stage-shell">
+        <header class="quick-stage-topline">
+          <div><span class="quick-scene-mark" aria-hidden="true"></span><p id="quickStageContext">本集制作中</p></div>
+          <div class="quick-stage-tools">
+            <button type="button" data-quick-drawer="topics" title="打开选题库"><i data-lucide="lightbulb" aria-hidden="true"></i><span>选题</span></button>
+            <button type="button" data-quick-drawer="assets" title="打开角色和梗"><i data-lucide="library" aria-hidden="true"></i><span>素材</span></button>
+          </div>
+        </header>
+        <div class="quick-inline-notice" id="quickInlineNotice" role="status" hidden></div>
+        <div class="quick-stage-content" id="quickStageContent"></div>
+        <footer class="quick-action-dock">
+          <div class="quick-action-copy">
+            <span id="quickActionMeta">Flash · 本次约 1 个 AI 单位</span>
+            <strong id="quickActionHint">先输入一句话想法</strong>
+            <div id="quickActionMissing" aria-live="polite"></div>
+          </div>
+          <button class="quick-primary-action" id="quickPrimaryAction" type="button">生成 3 个不同方向</button>
+        </footer>
+      </section>
+    </main>
+
+    <div class="quick-drawer-layer" id="quickDrawerLayer" hidden>
+      <button class="quick-drawer-scrim" type="button" data-quick-drawer-close aria-label="关闭抽屉"></button>
+      <aside class="quick-drawer" role="dialog" aria-modal="true" aria-labelledby="quickDrawerTitle">
+        <header><div><span id="quickDrawerEyebrow">可选信息</span><h2 id="quickDrawerTitle">补充创作条件</h2></div><button type="button" data-quick-drawer-close aria-label="关闭"><i data-lucide="x" aria-hidden="true"></i></button></header>
+        <div class="quick-drawer-body" id="quickDrawerBody"></div>
+      </aside>
+    </div>
 
     <main class="shell" id="appShell">
       <aside class="control-panel" aria-label="内容输入">
@@ -875,13 +902,15 @@
       粉丝向二创工作台示例，不代表官方内容或授权关系。发布前请核对平台规范与 IP 授权边界。
     </footer>
 
+    <script src="./vendor/lucide.min.js?v=1.24.0"></script>
     <script src="./generator.js?v=20260714-storyboard-reader"></script>
     <script src="./workflow-core.js?v=20260714-storyboard-reader"></script>
     <script src="./script-revision.js?v=20260716-bible-delta-selection"></script>
     <script src="./storyboard-revision.js?v=20260716-image-prompts"></script>
     <script src="./image-prompt-workflow.js?v=20260716-governance"></script>
     <script src="./project-domain.js?v=20260716-production-loop"></script>
-    <script src="./quick-workflow.js?v=20260717-fast-flow"></script>
+    <script src="./quick-workflow.js?v=20260717-guided-flow"></script>
+    <script src="./quick-mode-ui.js?v=20260717-guided-flow"></script>
     <script src="./creative-quality.js?v=20260717-quality"></script>
     <script src="./comedy-mechanism.js?v=20260717-comedy-library"></script>
     <script src="./performance-learning.js?v=20260717-performance-learning"></script>
@@ -895,6 +924,6 @@
     <script src="./creation-session.js?v=20260714-continuation-workspace"></script>
     <script src="./ai-operation.js?v=20260714-storyboard-reader"></script>
     <script src="./generation-client.js?v=20260714-storyboard-reader"></script>
-    <script src="./app.js?v=20260716-governance"></script>
+    <script src="./app.js?v=20260717-guided-flow"></script>
   </body>
 </html>

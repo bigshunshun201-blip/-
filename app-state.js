@@ -44,6 +44,8 @@
       creationMode: "new",
       interfaceMode: "quick",
       quickStep: "idea",
+      quickFlow: { step: "idea", packageTab: "beats", drawer: "" },
+      professionalActiveTab: "script",
       creationPackage: null,
       creationSessions: { new: null, continue: null },
       continuationSource: null,

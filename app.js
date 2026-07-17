@@ -58,6 +58,7 @@
   const imagePromptWorkflow = window.RocoImagePromptWorkflow;
   const episodeBibleDomain = window.RocoEpisodeBible;
   const quickWorkflow = window.RocoQuickWorkflow;
+  const quickModeUI = window.RocoQuickModeUI;
   const creativeQuality = window.RocoCreativeQuality;
   const comedyMechanism = window.RocoComedyMechanism;
   const performanceLearning = window.RocoPerformanceLearning;
@@ -102,6 +103,15 @@
     if (!pill) return;
     pill.textContent = message;
     pill.classList.toggle("error", isError);
+    if (isError && state.interfaceMode === "quick") setQuickNotice(message, "error");
+  }
+
+  function setQuickNotice(message = "", type = "info") {
+    const target = $("#quickInlineNotice");
+    if (!target) return;
+    target.hidden = !message;
+    target.textContent = message;
+    target.dataset.state = type;
   }
 
   function setSaveState(status) {
@@ -264,6 +274,7 @@
   function resetCurrentCreation() {
     state.creationMode = "new";
     state.quickStep = "idea";
+    state.quickFlow = { step: "idea", packageTab: "beats", drawer: "" };
     state.creationPackage = null;
     state.creationSessions = { new: null, continue: null };
     state.currentEpisodeId = null;
@@ -416,6 +427,7 @@
     return {
       mode: state.creationMode,
       quickStep: state.quickStep,
+      quickFlow: { ...state.quickFlow, step: state.quickStep, drawer: "" },
       creationPackage: state.creationPackage ? quickWorkflow.createPackage(state.creationPackage) : null,
       fields: creationFieldsSnapshot(),
       input: getInput(),
@@ -452,7 +464,12 @@
     Object.entries(session.fields || {}).forEach(([id, value]) => setInputValue(id, value));
     if (session.aiModels) restoreAiModels({ aiModels: session.aiModels });
     state.currentEpisodeId = session.currentEpisodeId || null;
-    state.quickStep = quickWorkflow.normalizeStep(session.quickStep);
+    state.quickStep = quickWorkflow.normalizeStep(session.quickFlow?.step || session.quickStep);
+    state.quickFlow = {
+      step: state.quickStep,
+      packageTab: session.quickFlow?.packageTab === "bible" ? "bible" : "beats",
+      drawer: "",
+    };
     state.creationPackage = session.creationPackage ? quickWorkflow.createPackage(session.creationPackage) : null;
     state.reviewEpisodeId = session.reviewEpisodeId || state.currentEpisodeId;
     state.currentHistoryId = session.currentHistoryId || null;
@@ -953,15 +970,21 @@
 
   function quickContext() {
     const input = getInput();
+    const episode = currentProjectEpisode();
     const activeVersion = activeEpisodeVersion(currentProjectEpisode());
     const packageComplete = quickWorkflow.isComplete(state.creationPackage || {});
     const packageConfirmed = packageComplete && state.creationPackage?.status === "confirmed"
       && state.beatSheetApproved && ["confirmed", "aligned"].includes(state.episodeBible?.status);
+    const review = episode?.review || {};
+    const reviewHasData = Object.entries(review).some(([key, value]) => !["status", "updatedAt", "scriptVersionId"].includes(key) && value !== "" && value !== 0 && value !== null && value !== undefined);
+    const versions = episode?.versions || [];
     return {
       step: state.quickStep,
       busy: Boolean(state.activeAiOperation),
+      theme: input.theme,
       creationMode: state.creationMode,
       hasPlans: Boolean(state.planOptions.length),
+      planCount: state.planOptions.length,
       planComplete: episodePlanner.planIsComplete(input.episodePlan),
       packageComplete,
       packageStatus: state.creationPackage?.status || "empty",
@@ -969,58 +992,387 @@
       hasScript: Boolean(state.script),
       scriptDirty: Boolean(state.scriptRevisionSession?.dirty),
       scriptApproved: activeVersion?.approvalStatus === "approved" && !state.scriptRevisionSession?.dirty,
+      scriptVersionNumber: Math.max(1, versions.findIndex((version) => version.id === activeVersion?.id) + 1),
       hasStoryboard: Boolean(state.storyboard.length),
+      storyboardCount: state.storyboard.length,
       reviewEpisodeId: state.reviewEpisodeId || state.currentEpisodeId,
+      reviewHasData,
     };
   }
 
+  function quickFieldOptions() {
+    const fields = ["scene", "direction", "audience", "duration", "style", "clipMode"];
+    return Object.fromEntries(fields.map((field) => {
+      const select = document.getElementById(field);
+      return [field, select ? Array.from(select.options).map((option) => ({ value: option.value, label: option.textContent.trim() })) : []];
+    }));
+  }
+
+  function quickReviewInsights(review = {}) {
+    const hasData = Object.entries(review).some(([key, value]) => !["status", "updatedAt", "scriptVersionId"].includes(key) && value !== "" && value !== 0 && value !== null && value !== undefined);
+    if (!hasData) return [];
+    const insights = deriveReviewInsights(review);
+    return [
+      { label: "下一集钩子", value: insights.hook },
+      { label: "标题方向", value: insights.title },
+      { label: "封面方向", value: insights.cover },
+    ];
+  }
+
+  function quickCanonReviewHtml(review) {
+    if (!review) return "";
+    const issues = review.issues || [];
+    const selected = new Set(state.scriptRevisionSession?.selectedBibleDeltaIds || []);
+    const deltas = review.bibleDeltas || [];
+    return `<p>${escapeHtml(review.summary || (review.status === "passed" ? "复核通过" : "发现连续性问题"))}</p>${issues.map((item) => `<article><strong>${escapeHtml(item.severity)} · ${escapeHtml(item.category)}</strong><p>${escapeHtml(item.evidence)}</p><small>${escapeHtml(item.recommendation)}</small></article>`).join("")}${deltas.length ? `<div class="quick-review-deltas"><strong>可选的本次圣经补充</strong>${deltas.map((item) => `<label><input type="checkbox" data-quick-review-bible-delta="${escapeHtml(item.id)}" ${selected.has(item.id) ? "checked" : ""}><span>${escapeHtml(item.field)} · ${escapeHtml(item.fact)}</span></label>`).join("")}<button type="button" data-quick-apply-bible-deltas ${selected.size ? "" : "disabled"}>采用所选圣经建议</button></div>` : ""}${review.status === "issues" ? `<button type="button" data-quick-force-approve>填写原因并强制批准</button>` : ""}`;
+  }
+
+  function quickViewModel() {
+    const context = quickContext();
+    const input = getInput();
+    const project = currentProject();
+    const episode = currentProjectEpisode();
+    const activeVersion = activeEpisodeVersion(episode);
+    const revision = state.scriptRevisionSession;
+    const baseVersion = (episode?.versions || []).find((item) => item.id === revision?.baseVersionId);
+    const candidateDiffHtml = revision?.rewriteCandidate?.script
+      ? uiTemplates.versionDiff(scriptRevisionDomain.structuredDiff(revision.workingScript, revision.rewriteCandidate.script))
+      : "";
+    const workingDiffHtml = revision?.dirty && baseVersion?.script
+      ? uiTemplates.versionDiff(scriptRevisionDomain.structuredDiff(baseVersion.script, revision.workingScript))
+      : "";
+    const versions = (episode?.versions || []).map((version, index) => ({
+      id: version.id,
+      number: index + 1,
+      title: version.script?.title || "未命名剧本",
+      active: version.id === activeVersion?.id,
+      status: version.approvalStatus === "approved" ? version.approvalReview?.status === "overridden" ? "有风险批准" : "已批准" : "草稿",
+      meta: `${new Date(version.createdAt || episode?.updatedAt || Date.now()).toLocaleString("zh-CN", { hour12: false })} · ${version.revisionSource || "generated"}`,
+    }));
+    const compareOptions = (episode?.versions || []).map((version, index) => ({ id: version.id, label: `v${index + 1} · ${version.script?.title || "未命名"}`, script: version.script }));
+    if (revision?.dirty && revision.workingScript) compareOptions.push({ id: workingDraftCompareId, label: "当前工作稿 · 未保存", script: revision.workingScript });
+    if (revision && compareOptions.length) {
+      const valid = new Set(compareOptions.map((item) => item.id));
+      revision.compareLeftId = valid.has(revision.compareLeftId) ? revision.compareLeftId : revision.baseVersionId || compareOptions[0].id;
+      revision.compareRightId = valid.has(revision.compareRightId) ? revision.compareRightId : compareOptions.at(-1).id;
+    }
+    const compareLeft = compareOptions.find((item) => item.id === revision?.compareLeftId)?.script;
+    const compareRight = compareOptions.find((item) => item.id === revision?.compareRightId)?.script;
+    const versionDiffHtml = compareLeft && compareRight
+      ? uiTemplates.versionDiff(scriptRevisionDomain.structuredDiff(compareLeft, compareRight))
+      : "";
+    const sourceRef = creationSession.normalizeSourceRef(state.continuationSource);
+    const reviewEpisode = project?.episodes?.find((item) => item.id === (state.reviewEpisodeId || state.currentEpisodeId)) || episode;
+    const review = reviewEpisode?.review || {};
+    const continuationCatalog = continuationSourceCatalog().map((item) => ({
+      key: continuationSourceKey(item.ref),
+      label: `第 ${item.ref.episodeNumber} 集 · v${item.ref.versionNumber} · ${item.ref.title}`,
+      selected: continuationSourceKey(item.ref) === continuationSourceKey(sourceRef),
+    }));
+    const steps = quickWorkflow.stepStates(context).map((item) => ({ ...item, assetLabel: quickWorkflow.assetLabel(item.id, context) }));
+    const stepState = steps.find((item) => item.id === state.quickStep);
+    return {
+      ...context,
+      step: state.quickStep,
+      steps,
+      stepState,
+      input: {
+        ...input,
+        customValues: {
+          scene: $("#customScene")?.value || "", direction: $("#customDirection")?.value || "",
+          audience: $("#customAudience")?.value || "", duration: $("#customDuration")?.value || "",
+          style: $("#customStyle")?.value || "",
+        },
+      },
+      projectName: project?.name || "洛克王国短剧项目",
+      episodeNumber: input.episodeNumber || episode?.episodeNumber || 1,
+      creationMode: state.creationMode,
+      roleSummary: episodePlanner.roleNames(input.roles).slice(0, 3).join("、"),
+      selectedAssetCount: state.activeCharacterIds.length + state.activeMemeIds.length,
+      plans: state.planOptions,
+      selectedPlanId: state.selectedPlanOptionId,
+      creationPackage: state.creationPackage,
+      packageTab: state.quickFlow?.packageTab || "beats",
+      script: state.script,
+      scriptMeta: `第 ${input.episodeNumber || 1} 集 · v${context.scriptVersionNumber} · ${state.creationMode === "continue" ? "续写" : "新建"} · 已绑定本次圣经`,
+      revision,
+      versions,
+      compareOptions,
+      compareLeftId: revision?.compareLeftId || "",
+      compareRightId: revision?.compareRightId || "",
+      candidateDiffHtml,
+      workingDiffHtml,
+      versionDiffHtml,
+      canonReviewHtml: quickCanonReviewHtml(revision?.canonReview),
+      storyboard: state.storyboard,
+      storyboardRevision: state.storyboardRevisionSession,
+      activeStoryboardIndex: Math.max(0, Math.min(activeStoryboardSegmentIndex, state.storyboard.length - 1)),
+      review,
+      reviewInsights: quickReviewInsights(review),
+      learning: project?.creativeLearning || performanceLearning.update(project || {}),
+      characters: (project?.characterCards || []).map((item) => ({ ...item, selected: state.activeCharacterIds.includes(item.id) })),
+      memes: (project?.memes || []).map((item) => ({ ...item, selected: state.activeMemeIds.includes(item.id) })),
+      topics: state.topics,
+      fieldLabels: { scene: "手游场景", direction: "剧情方向", audience: "目标受众", duration: "视频时长", style: "内容风格" },
+      fieldOptions: quickFieldOptions(),
+      continuationSource: sourceRef ? {
+        label: `第 ${sourceRef.episodeNumber} 集 · v${sourceRef.versionNumber || 1} · ${sourceRef.title}`,
+        hook: formatItem(state.continuationSource?.script?.hooks?.at(-1) || state.continuationBrief?.requiredHook || ""),
+      } : null,
+      continuationBrief: readContinuationBrief(),
+      continuationCatalog,
+    };
+  }
+
+  function quickActionPresentation(context, action) {
+    const scopeByAction = {
+      "generate-plans": "plan", "generate-package": "creationPackage", "generate-script": "script",
+      "approve-script": "scriptCanonReview", "generate-storyboard": "storyboard",
+    };
+    const scope = scopeByAction[action.id];
+    const model = scope ? state.aiModels[scope] : "";
+    const modelLabel = model.endsWith("pro") ? "Pro" : model ? "Flash" : "本地操作";
+    const cost = scope ? (model.endsWith("pro") ? 3 : 1) : 0;
+    const meta = scope ? `${modelLabel} · 本次约 ${cost} 个 AI 单位` : "不会额外调用 AI";
+    const hintByAction = {
+      "generate-plans": "根据当前想法生成三个明显不同的短剧方向",
+      "go-plan": "三个创意已经就绪，下一步比较并采用一套",
+      "go-idea": "返回开题并生成三个创意方向",
+      "wait-plan": "在上方三案中选择一套想拍的结构",
+      "generate-package": "一次生成 8 段节拍和七项本次创作圣经",
+      "confirm-package": "确认后，剧本将固定引用这一版设定",
+      "go-script": "准备包已经确认，可以开始生成正式剧本",
+      "generate-script": "生成与节拍、本次圣经和续写来源绑定的剧本",
+      "go-refine": "进入结构化精修、版本对比和圣经复核",
+      "save-script-version": "保存当前工作稿，原版本和原分镜保持不变",
+      "approve-script": "检查人物、能力、关系和前集承接后批准",
+      "go-storyboard": "当前版本已批准，可以生成对应分镜",
+      "generate-storyboard": "按当前批准剧本拆成可制作的视频段",
+      "go-review": "分镜已经就绪，录入发布结果",
+      "save-review": "保存数据并刷新下一集钩子、标题和封面方向",
+      busy: `${state.activeAiOperation?.label || "AI"}正在处理，请保留当前页面`,
+    };
+    const missing = [];
+    if (action.id === "generate-plans" && !String(context.theme || "").trim()) missing.push("先写一句话想法");
+    if (action.id === "wait-plan") missing.push("点击任意策划卡片底部的“采用这套”");
+    if (action.disabled && !missing.length) missing.push(...(quickWorkflow.stepStates(context).find((item) => item.id === context.step)?.missing || []));
+    return { meta, hint: hintByAction[action.id] || "完成当前步骤后继续", missing };
+  }
+
   function refreshQuickWorkflow() {
-    if (!quickWorkflow) return;
-    const action = quickWorkflow.primaryAction(quickContext());
+    if (!quickWorkflow || state.interfaceMode !== "quick") return;
+    const context = quickContext();
+    const action = quickWorkflow.primaryAction(context);
     const button = $("#quickPrimaryAction");
     if (button) {
       button.dataset.action = action.id;
       button.textContent = action.label;
       button.disabled = action.disabled;
+      button.dataset.busy = String(action.id === "busy");
     }
-    const hints = {
-      idea: "输入主题和角色，生成并筛选三套不同创意",
-      plan: "采用策划后，一次生成 8 节拍与七项本次圣经",
-      script: "准备包确认后，生成与设定绑定的正式剧本",
-      refine: "局部修改、保存版本并完成圣经复核批准",
-      storyboard: "只为已批准的当前剧本版本生成对应分镜",
-      review: "录入真实发布数据，沉淀下一集优化依据",
-    };
+    const presentation = quickActionPresentation(context, action);
     const hint = $("#quickActionHint");
-    if (hint) hint.textContent = hints[state.quickStep] || hints.idea;
+    if (hint) hint.textContent = presentation.hint;
+    if ($("#quickActionMeta")) $("#quickActionMeta").textContent = presentation.meta;
+    if ($("#quickActionMissing")) $("#quickActionMissing").textContent = presentation.missing.join("；");
+    const steps = quickWorkflow.stepStates(context).map((item) => ({ ...item, assetLabel: quickWorkflow.assetLabel(item.id, context) }));
+    if ($("#quickStepRail")) $("#quickStepRail").innerHTML = quickModeUI.renderSteps({ steps });
+    window.lucide?.createIcons?.({ attrs: { "stroke-width": 1.8 } });
   }
 
   function renderQuickWorkflow() {
+    if (!quickWorkflow || !quickModeUI) return;
+    const requested = state.quickFlow?.step || state.quickStep;
+    const resolution = quickWorkflow.resolveStep(requested, { ...quickContext(), step: state.quickStep });
+    state.quickStep = resolution.step;
+    state.quickFlow = { ...(state.quickFlow || {}), step: resolution.step, drawer: state.quickFlow?.drawer || "" };
     document.body.dataset.interfaceMode = state.interfaceMode || "quick";
-    document.body.dataset.quickStep = quickWorkflow.normalizeStep(state.quickStep);
+    document.body.dataset.quickStep = state.quickStep;
     $$('[data-interface-mode]').forEach((button) => button.classList.toggle("is-active", button.dataset.interfaceMode === state.interfaceMode));
-    $$('[data-quick-step]').forEach((button) => {
-      const active = button.dataset.quickStep === state.quickStep;
-      button.classList.toggle("is-active", active);
-      if (active) button.setAttribute("aria-current", "step"); else button.removeAttribute("aria-current");
-    });
+    if (state.interfaceMode !== "quick") return;
+    const view = quickViewModel();
+    if ($("#quickProjectName")) $("#quickProjectName").textContent = view.projectName;
+    if ($("#quickEpisodeLabel")) $("#quickEpisodeLabel").textContent = `第 ${view.episodeNumber} 集 · ${view.creationMode === "continue" ? "续写下一集" : "新建本集"}`;
+    if ($("#quickStageContext")) $("#quickStageContext").textContent = `${view.projectName} / 第 ${view.episodeNumber} 集 / ${quickWorkflow.stepMeta[view.step].label}`;
+    if ($("#quickStageContent")) $("#quickStageContent").innerHTML = quickModeUI.renderStage(view);
     refreshQuickWorkflow();
+    if (state.quickFlow.drawer) renderQuickDrawer(state.quickFlow.drawer);
+    window.lucide?.createIcons?.({ attrs: { "stroke-width": 1.8 } });
   }
 
   function setInterfaceMode(mode) {
     state.interfaceMode = mode === "pro" ? "pro" : "quick";
+    if (state.interfaceMode === "pro") switchTab(state.professionalActiveTab || "script", { remember: false });
     renderQuickWorkflow();
     saveDraft(false);
   }
 
   function setQuickStep(step) {
-    state.quickStep = quickWorkflow.normalizeStep(step);
-    if (state.quickStep === "script") { switchTab("script"); setScriptView("read"); }
-    if (state.quickStep === "refine") { switchTab("script"); setScriptView("edit"); }
-    if (state.quickStep === "storyboard") switchTab("storyboard");
-    if (state.quickStep === "review") switchTab("calendar");
+    const resolution = quickWorkflow.resolveStep(step, quickContext());
+    if (!resolution.allowed) {
+      setQuickNotice(`暂时不能进入“${quickWorkflow.stepMeta[quickWorkflow.normalizeStep(step)].label}”：${resolution.missing.join("；")}`, "warning");
+      return false;
+    }
+    state.quickStep = resolution.step;
+    state.quickFlow = { ...(state.quickFlow || {}), step: resolution.step, drawer: "" };
+    setQuickNotice();
+    if (state.quickStep === "script") setScriptView("read");
+    if (state.quickStep === "refine" && state.scriptRevisionSession?.activeView === "read") setScriptView("edit");
     renderQuickWorkflow();
     saveDraft(false);
+    $("#quickStageContent")?.scrollIntoView({ block: "start" });
+    return true;
+  }
+
+  function renderQuickDrawer(type) {
+    if (!quickModeUI || !type) return;
+    state.quickFlow = { ...(state.quickFlow || {}), drawer: type };
+    const drawer = quickModeUI.renderDrawer(type, quickViewModel());
+    const layer = $("#quickDrawerLayer");
+    if (!layer) return;
+    $("#quickDrawerEyebrow").textContent = drawer.eyebrow;
+    $("#quickDrawerTitle").textContent = drawer.title;
+    $("#quickDrawerBody").innerHTML = drawer.body;
+    layer.hidden = false;
+    document.body.classList.add("quick-drawer-open");
+    window.lucide?.createIcons?.({ attrs: { "stroke-width": 1.8 } });
+  }
+
+  function closeQuickDrawer() {
+    state.quickFlow = { ...(state.quickFlow || {}), drawer: "" };
+    const layer = $("#quickDrawerLayer");
+    if (layer) layer.hidden = true;
+    document.body.classList.remove("quick-drawer-open");
+  }
+
+  function updateQuickField(control) {
+    const field = control.dataset.quickField;
+    if (!field) return;
+    const customFieldByBase = { scene: "customScene", direction: "customDirection", audience: "customAudience", duration: "customDuration", style: "customStyle" };
+    if (customFieldByBase[field]) setInputValue(customFieldByBase[field], "");
+    setInputValue(field, control.value);
+    markBeatSheetStale();
+    saveDraft(false);
+    refreshQuickWorkflow();
+  }
+
+  function selectQuickTopic(index) {
+    const topic = state.topics[index];
+    if (!topic) throw new Error("没有找到这个选题，请重新打开选题库。");
+    state.selectedTopic = topic;
+    setInputValue("theme", topic.title || "");
+    if (topic.roles) setInputValue("roles", topic.roles);
+    if (topic.world) {
+      setInputValue("customScene", topic.world);
+    }
+    if (topic.audience) setInputValue("customAudience", topic.audience);
+    if (topic.duration) setInputValue("customDuration", topic.duration);
+    setInputValue("customStyle", [topic.emotion, topic.memeLine].filter(Boolean).join("；"));
+    markBeatSheetStale();
+    closeQuickDrawer();
+    renderQuickWorkflow();
+    saveDraft(false);
+    setStatus(`已把“${topic.title}”填入创意开题，确认后再生成三个方向`);
+  }
+
+  function updateQuickPackageBeat(control) {
+    const index = Number(control.dataset.quickBeatIndex);
+    const field = control.dataset.quickBeatField;
+    if (!field || !state.creationPackage?.beats?.[index]) return;
+    state.creationPackage.beats[index][field] = control.value.trim();
+    if (state.beatSheet[index]) state.beatSheet[index][field] = control.value.trim();
+    state.creationPackage.status = "draft";
+    state.beatSheetApproved = false;
+    renderBeatSheet();
+    saveDraft(false);
+    refreshQuickWorkflow();
+  }
+
+  function updateQuickPackageBible(control) {
+    const field = control.dataset.quickBibleField;
+    if (!field || !state.creationPackage?.bible) return;
+    state.creationPackage.bible[field] = control.value.trim();
+    state.creationPackage.status = "draft";
+    state.episodeBible.draft = { ...(state.episodeBible.draft || {}), [field]: control.value.trim() };
+    state.episodeBible.status = "draft";
+    setInputValue(episodeBibleFieldIds[field], control.value);
+    renderEpisodeBible({ syncFields: false });
+    saveDraft(false);
+    refreshQuickWorkflow();
+  }
+
+  function syncQuickReviewField(control) {
+    const target = document.getElementById(control.dataset.quickReviewField);
+    if (target) target.value = control.value;
+    saveDraft(false);
+  }
+
+  async function handleQuickStudioClick(event) {
+    const step = event.target.closest(".quick-rail-step[data-quick-step]");
+    const drawer = event.target.closest("[data-quick-drawer]");
+    const mode = event.target.closest("[data-quick-creation-mode]");
+    const plan = event.target.closest("[data-quick-plan-adopt]");
+    const packageTab = event.target.closest("[data-quick-package-tab]");
+    const scriptView = event.target.closest("[data-quick-script-view]");
+    const rewrite = event.target.closest("[data-quick-rewrite-beats]");
+    const adoptCandidate = event.target.closest("[data-quick-adopt-candidate]");
+    const discardCandidate = event.target.closest("[data-quick-discard-candidate]");
+    const restoreVersion = event.target.closest("[data-quick-version-restore]");
+    const storyboardIndex = event.target.closest("[data-quick-storyboard-index]");
+    const copySegment = event.target.closest("[data-quick-copy-segment]");
+    const imagePrompt = event.target.closest("[data-quick-generate-image-prompt]");
+    const copyImage = event.target.closest("[data-quick-copy-image-prompt]");
+    const forceApprove = event.target.closest("[data-quick-force-approve]");
+    const applyBibleDeltas = event.target.closest("[data-quick-apply-bible-deltas]");
+    const regenerateSegment = event.target.closest("[data-quick-regenerate-segment]");
+    const adoptSegmentCandidate = event.target.closest("[data-quick-adopt-segment-candidate]");
+    const discardSegmentCandidate = event.target.closest("[data-quick-discard-segment-candidate]");
+    try {
+      if (step) return void setQuickStep(step.dataset.quickStep);
+      if (drawer) return void renderQuickDrawer(drawer.dataset.quickDrawer);
+      if (mode) {
+        switchCreationMode(mode.dataset.quickCreationMode);
+        state.quickStep = "idea";
+        state.quickFlow = { ...(state.quickFlow || {}), step: "idea", drawer: "" };
+        renderQuickWorkflow();
+        return;
+      }
+      if (plan) { adoptPlanOption(Number(plan.dataset.quickPlanAdopt)); renderQuickWorkflow(); return; }
+      if (packageTab) { state.quickFlow.packageTab = packageTab.dataset.quickPackageTab; renderQuickWorkflow(); return; }
+      if (scriptView) { setScriptView(scriptView.dataset.quickScriptView); renderQuickWorkflow(); return; }
+      if (rewrite) { await rewriteScriptBeat(rewrite.dataset.quickRewriteBeats); renderQuickWorkflow(); return; }
+      if (adoptCandidate) { adoptRewriteCandidate(); renderQuickWorkflow(); return; }
+      if (discardCandidate) { discardRewriteCandidate(); renderQuickWorkflow(); return; }
+      if (restoreVersion) {
+        if (state.scriptRevisionSession?.dirty) throw new Error("当前工作稿有未保存修改，请先保存或放弃工作稿。");
+        restoreProjectEpisode(state.currentEpisodeId, restoreVersion.dataset.quickVersionRestore);
+        state.quickStep = "refine";
+        state.quickFlow.step = "refine";
+        renderQuickWorkflow();
+        return;
+      }
+      if (storyboardIndex) { activeStoryboardSegmentIndex = Number(storyboardIndex.dataset.quickStoryboardIndex); renderQuickWorkflow(); return; }
+      if (copySegment) { await copyStoryboardSegment(Number(copySegment.dataset.quickCopySegment)); return; }
+      if (imagePrompt) { await generateImagePrompts([Number(imagePrompt.dataset.quickGenerateImagePrompt)]); renderQuickWorkflow(); return; }
+      if (copyImage) { await copyImagePrompt(Number(copyImage.dataset.quickCopyImagePrompt)); return; }
+      if (forceApprove) { await forceApproveCurrentScript(); renderQuickWorkflow(); return; }
+      if (applyBibleDeltas) { applyReviewBibleDeltas(); renderQuickWorkflow(); return; }
+      if (regenerateSegment) { await regenerateStoryboardSegment(Number(regenerateSegment.dataset.quickRegenerateSegment)); renderQuickWorkflow(); return; }
+      if (adoptSegmentCandidate) { adoptStoryboardSegmentCandidate(); renderQuickWorkflow(); return; }
+      if (discardSegmentCandidate) { discardStoryboardSegmentCandidate(); renderQuickWorkflow(); }
+    } catch (error) { reportError("快速创作", error); }
+  }
+
+  async function handleQuickDrawerClick(event) {
+    if (event.target.closest("[data-quick-drawer-close]")) { closeQuickDrawer(); return; }
+    const topic = event.target.closest("[data-quick-topic-select]");
+    const character = event.target.closest("[data-quick-character-use]");
+    const meme = event.target.closest("[data-quick-meme-use]");
+    try {
+      if (topic) return void selectQuickTopic(Number(topic.dataset.quickTopicSelect));
+      if (character) { useCharacterCard(character.dataset.quickCharacterUse); renderQuickDrawer("assets"); renderQuickWorkflow(); return; }
+      if (meme) { adoptSavedMeme(meme.dataset.quickMemeUse); renderQuickDrawer("assets"); renderQuickWorkflow(); }
+    } catch (error) { reportError("快速创作素材", error); }
   }
 
   async function generateCreationPackage() {
@@ -1079,8 +1431,9 @@
     const action = quickWorkflow.primaryAction(quickContext()).id;
     if (action === "generate-plans") return suggestEpisodePlans();
     if (action === "go-plan") return setQuickStep("plan");
+    if (action === "go-idea") return setQuickStep("idea");
     if (action === "generate-package") return generateCreationPackage();
-    if (action === "confirm-package") return confirmCreationPackage();
+    if (action === "confirm-package") { confirmCreationPackage(); return setQuickStep("script"); }
     if (action === "go-script") return setQuickStep("script");
     if (action === "generate-script") return generateAll();
     if (action === "go-refine") return setQuickStep("refine");
@@ -1589,7 +1942,7 @@
     renderMemeLibrary();
     renderCreativeAssetPicker();
     renderProject();
-    setStatus(`已把“${phrase}”存入项目梗库`);
+    setStatus(`已把“${idea.phrase}”存入项目梗库`);
   }
 
   function renderMemeLibrary() {
@@ -3131,6 +3484,11 @@
   }
 
   function refreshTopicDerivedViews() {
+    if (!state.analysis) {
+      const source = state.competitors.length ? state.competitors : window.RocoStudio.seedCompetitors.slice();
+      state.competitors = state.competitors.length ? state.competitors : window.RocoStudio.scoreCompetitors(source);
+      state.analysis = window.RocoStudio.analyzeCompetitors(state.competitors);
+    }
     state.creativePack = window.RocoStudio.generateCreativePack(state.script, getInput(), state.topics);
     state.calendar = window.RocoStudio.generatePublishPlan(state.topics, state.analysis);
     renderTopics();
@@ -4877,6 +5235,8 @@
       continuationSource: state.continuationSource,
       creationMode: state.creationMode,
       interfaceMode: state.interfaceMode,
+      quickFlow: { ...state.quickFlow, step: state.quickStep, drawer: "" },
+      professionalActiveTab: state.professionalActiveTab,
       creationSessions: state.creationSessions,
       savedAt: new Date().toISOString(),
     };
@@ -4892,6 +5252,10 @@
     try {
       const draft = await archiveStore.get(draftKey);
       if (!draft) return;
+      state.interfaceMode = draft.interfaceMode === "pro" ? "pro" : "quick";
+      state.professionalActiveTab = String(draft.professionalActiveTab || "script");
+      state.quickStep = quickWorkflow.normalizeStep(draft.quickFlow?.step || draft.quickStep || "idea");
+      state.quickFlow = { step: state.quickStep, packageTab: draft.quickFlow?.packageTab === "bible" ? "bible" : "beats", drawer: "" };
       if (draft.currentProjectId && state.projects.some((project) => project.id === draft.currentProjectId)) {
         state.currentProjectId = draft.currentProjectId;
       }
@@ -4946,7 +5310,6 @@
       const activeBatch = (currentProject()?.planBatches || []).find((batch) => batch.id === state.activePlanBatchId);
       state.planOptions = activeBatch?.plans?.map((option) => ({ ...option, plan: { ...option.plan } })) || [];
       if (draft.creationSessions && typeof draft.creationSessions === "object") {
-        state.interfaceMode = draft.interfaceMode === "pro" ? "pro" : "quick";
         state.creationMode = creationSession.normalizeMode(draft.creationMode);
         state.creationSessions = {
           new: draft.creationSessions.new || null,
@@ -4964,7 +5327,7 @@
     }
   }
 
-  function switchTab(tabName) {
+  function switchTab(tabName, options = {}) {
     const workspaceGroups = {
       creation: ["script", "storyboard", "consistency", "creative"],
       planning: ["topics", "example"],
@@ -4980,6 +5343,7 @@
     $$("[data-workspace-tabs]").forEach((group) => group.classList.toggle("is-active", group.dataset.workspaceTabs === groupName));
     $$(".tab").forEach((tab) => tab.classList.toggle("active", tab.dataset.tab === tabName));
     $$(".tab-panel").forEach((panel) => panel.classList.toggle("active", panel.id === `tab-${tabName}`));
+    if (options.remember !== false && state.interfaceMode === "pro") state.professionalActiveTab = tabName;
     refreshToolbarState(tabName);
   }
 
@@ -5104,10 +5468,105 @@
   }
 
   function bindEvents() {
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && !$("#quickDrawerLayer")?.hidden) closeQuickDrawer();
+    });
     $$('[data-interface-mode]').forEach((button) => button.addEventListener("click", () => setInterfaceMode(button.dataset.interfaceMode)));
-    $$('[data-quick-step]').forEach((button) => button.addEventListener("click", () => setQuickStep(button.dataset.quickStep)));
+    $("#quickStudio")?.addEventListener("click", handleQuickStudioClick);
+    $("#quickStageContent")?.addEventListener("input", (event) => {
+      const control = event.target;
+      if (control.dataset.quickField) return updateQuickField(control);
+      if (control.dataset.quickBeatField) return updateQuickPackageBeat(control);
+      if (control.dataset.quickBibleField) return updateQuickPackageBible(control);
+      if (control.dataset.quickReviewField) return syncQuickReviewField(control);
+      if (control.dataset.quickRewriteInstruction !== undefined) {
+        const session = ensureScriptRevisionSession();
+        if (session) session.rewriteInstructions[control.dataset.quickRewriteInstruction] = control.value;
+        saveDraft(false);
+        return;
+      }
+      if (control.dataset.quickRevisionNote !== undefined) {
+        const session = ensureScriptRevisionSession();
+        if (session) session.revisionNote = control.value;
+        saveDraft(false);
+        return;
+      }
+      if (control.dataset.quickStoryboardRewriteInstruction !== undefined) {
+        const session = ensureStoryboardRevisionSession();
+        const segment = session?.workingStoryboard?.[Number(control.dataset.quickStoryboardRewriteInstruction)];
+        if (segment) session.instructionByClipId[segment.clipId] = control.value;
+        saveDraft(false);
+        return;
+      }
+      if (control.matches("[data-script-editor-input]")) updateScriptEditorInput(control);
+    });
+    $("#quickStageContent")?.addEventListener("change", (event) => {
+      const lock = event.target.closest("[data-quick-beat-lock]");
+      const compare = event.target.closest("[data-quick-compare]");
+      const bibleDelta = event.target.closest("[data-quick-review-bible-delta]");
+      if (lock) {
+        const session = ensureScriptRevisionSession();
+        const beatIds = lock.dataset.quickBeatLock.split("+").filter(Boolean);
+        session.lockedBeatIds = lock.checked
+          ? [...new Set([...session.lockedBeatIds, ...beatIds])]
+          : session.lockedBeatIds.filter((id) => !beatIds.includes(id));
+        saveDraft(false);
+      }
+      if (compare) {
+        const session = ensureScriptRevisionSession();
+        if (compare.dataset.quickCompare === "left") session.compareLeftId = compare.value;
+        else session.compareRightId = compare.value;
+        renderQuickWorkflow();
+        saveDraft(false);
+      }
+      if (bibleDelta) {
+        const session = ensureScriptRevisionSession();
+        const id = bibleDelta.dataset.quickReviewBibleDelta;
+        session.selectedBibleDeltaIds = bibleDelta.checked
+          ? [...new Set([...(session.selectedBibleDeltaIds || []), id])]
+          : (session.selectedBibleDeltaIds || []).filter((item) => item !== id);
+        renderQuickWorkflow();
+        saveDraft(false);
+      }
+    });
+    $("#quickDrawerLayer")?.addEventListener("click", handleQuickDrawerClick);
+    $("#quickDrawerBody")?.addEventListener("input", (event) => {
+      const control = event.target;
+      if (control.dataset.quickField) updateQuickField(control);
+      if (control.dataset.quickCustomField) {
+        const idByField = { scene: "customScene", direction: "customDirection", audience: "customAudience", duration: "customDuration", style: "customStyle" };
+        setInputValue(idByField[control.dataset.quickCustomField], control.value);
+        markBeatSheetStale();
+        saveDraft(false);
+        refreshQuickWorkflow();
+      }
+      if (control.dataset.quickContinuationField) {
+        const idByField = { requiredHook: "continuationHook", openQuestions: "continuationOpenQuestions", characterState: "continuationCharacterState", constraints: "continuationConstraints", mustPreserve: "continuationFacts", direction: "continueInstruction", newIdeas: "continuationNewIdeas" };
+        setInputValue(idByField[control.dataset.quickContinuationField], control.value);
+        state.continuationBrief = readContinuationBrief();
+        markBeatSheetStale();
+        saveDraft(false);
+      }
+    });
+    $("#quickDrawerBody")?.addEventListener("change", (event) => {
+      const control = event.target;
+      if (control.dataset.quickField) updateQuickField(control);
+      if (control.dataset.quickCustomField) {
+        const idByField = { scene: "customScene", direction: "customDirection", audience: "customAudience", duration: "customDuration", style: "customStyle" };
+        setInputValue(idByField[control.dataset.quickCustomField], control.value);
+        markBeatSheetStale();
+        saveDraft(false);
+      }
+      if (control.matches("[data-quick-continuation-source]")) {
+        const source = continuationSourceCatalog().find((item) => continuationSourceKey(item.ref) === control.value);
+        if (source) {
+          try { setContinuationSource(source); renderQuickDrawer("continuation"); renderQuickWorkflow(); }
+          catch (error) { reportError("续写来源", error); }
+        }
+      }
+    });
     $("#quickPrimaryAction").addEventListener("click", async () => {
-      try { await runQuickPrimaryAction(); }
+      try { await runQuickPrimaryAction(); renderQuickWorkflow(); }
       catch (error) { reportError("快速创作", error); }
     });
     $("#quickModelSettings").addEventListener("change", (event) => {
@@ -5759,7 +6218,7 @@
   }
 
   async function init() {
-    if (!window.RocoStudio || !window.RocoWorkflowCore || !window.RocoProjectDomain || !window.RocoEpisodePlanner || !window.RocoEpisodeBible || !window.RocoQuickWorkflow || !window.RocoCreativeQuality || !window.RocoComedyMechanism || !window.RocoPerformanceLearning || !window.RocoUiTemplates || !window.RocoApiClient || !window.RocoDataStore || !window.RocoArchiveSync || !window.RocoAppState || !window.RocoCreationSession || !window.RocoAiOperation || !window.RocoGenerationClient || !window.RocoImagePromptWorkflow) {
+    if (!window.RocoStudio || !window.RocoWorkflowCore || !window.RocoProjectDomain || !window.RocoEpisodePlanner || !window.RocoEpisodeBible || !window.RocoQuickWorkflow || !window.RocoQuickModeUI || !window.RocoCreativeQuality || !window.RocoComedyMechanism || !window.RocoPerformanceLearning || !window.RocoUiTemplates || !window.RocoApiClient || !window.RocoDataStore || !window.RocoArchiveSync || !window.RocoAppState || !window.RocoCreationSession || !window.RocoAiOperation || !window.RocoGenerationClient || !window.RocoImagePromptWorkflow) {
       setStatus("生成器未加载，请用本地服务打开或刷新缓存", true);
       return;
     }
