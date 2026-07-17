@@ -60,6 +60,22 @@ test("desktop production workspace is stable and model scopes remain independent
   const response = await page.goto("/");
   expect(response.status()).toBe(200);
   expect(response.headers()["content-security-policy"]).toContain("frame-ancestors 'none'");
+  await expect(page.locator("#quickWorkflowBar")).toBeVisible();
+  await expect(page.locator(".quick-steps [data-quick-step]")).toHaveCount(6);
+  await expect(page.locator("#quickPrimaryAction")).toBeVisible();
+  await expect(page.locator("body")).toHaveAttribute("data-quick-step", "idea");
+  await page.locator('.quick-steps [data-quick-step="plan"]').click();
+  await expect(page.locator("body")).toHaveAttribute("data-quick-step", "plan");
+  await expect(page.locator("#planStep")).toBeVisible();
+  await expect(page.locator("#briefStep")).toBeHidden();
+  await page.locator("#quickModelDrawer > summary").click();
+  await page.locator('[data-quick-model-scope="creationPackage"]').selectOption("deepseek-v4-pro");
+  await expect(page.locator('[data-quick-model-scope="creationPackage"]')).toHaveValue("deepseek-v4-pro");
+  await expect(page.locator('[data-quick-model-scope="plan"]')).toHaveValue("deepseek-v4-flash");
+  await page.locator('.quick-steps [data-quick-step="script"]').click();
+  await expect(page.locator("body")).toHaveAttribute("data-quick-step", "script");
+  await expect(page.getByRole("heading", { name: "旧徽章的双生主" })).toBeVisible();
+  await page.locator("#proModeBtn").click();
   await expect(page.getByRole("heading", { name: "旧徽章的双生主" })).toBeVisible();
 
   await page.locator('[data-tab="storyboard"]').click();

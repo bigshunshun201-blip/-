@@ -18,13 +18,36 @@
         </div>
       </div>
       <div class="topbar-status">
+        <div class="interface-mode-switch" role="group" aria-label="界面模式">
+          <button class="is-active" id="quickModeBtn" type="button" data-interface-mode="quick">快速模式</button>
+          <button id="proModeBtn" type="button" data-interface-mode="pro">专业模式</button>
+        </div>
+        <details class="quick-model-drawer" id="quickModelDrawer">
+          <summary>模型设置</summary>
+          <div id="quickModelSettings"></div>
+        </details>
         <span class="workspace-label">当前工作区</span>
         <div class="status-pill" id="statusPill" role="status">等待连接 AI</div>
         <span class="save-state" id="saveStateText" data-state="saved">已保存</span>
       </div>
     </header>
 
-    <main class="shell">
+    <section class="quick-workflow-bar" id="quickWorkflowBar" aria-label="快速创作流程">
+      <nav class="quick-steps">
+        <button class="is-active" type="button" data-quick-step="idea"><span>01</span>创意</button>
+        <button type="button" data-quick-step="plan"><span>02</span>策划</button>
+        <button type="button" data-quick-step="script"><span>03</span>剧本</button>
+        <button type="button" data-quick-step="refine"><span>04</span>精修</button>
+        <button type="button" data-quick-step="storyboard"><span>05</span>分镜</button>
+        <button type="button" data-quick-step="review"><span>06</span>发布复盘</button>
+      </nav>
+      <div class="quick-next-card">
+        <div><span>当前下一步</span><strong id="quickActionHint">先生成三套策划，再挑一套继续</strong></div>
+        <button class="quick-primary-action" id="quickPrimaryAction" type="button">生成 3 套策划</button>
+      </div>
+    </section>
+
+    <main class="shell" id="appShell">
       <aside class="control-panel" aria-label="内容输入">
         <div class="control-panel-head">
           <p class="eyebrow">本集档案</p>
@@ -226,6 +249,11 @@
             </div>
           </div>
           <div class="plan-suggestions" id="planSuggestions" aria-live="polite" hidden></div>
+          <section class="creative-review-panel" id="creativeReviewPanel" hidden>
+            <div><strong>AI 创意导演</strong><span>仅在你主动点击时调用；建议会作为新候选保存，不覆盖原三案。</span></div>
+            <div class="creative-review-actions"><div data-ai-model-switch data-ai-model-scope="creativeReview" aria-label="创意导演模型"></div><button class="secondary-action" id="creativeReviewBtn" type="button">AI 复核三案</button></div>
+            <div id="creativeReviewOutput"></div>
+          </section>
           <details class="plan-history" id="planHistory">
             <summary>策划记录 <span id="planHistoryCount">0</span></summary>
             <div class="plan-history-list" id="planHistoryList"></div>
@@ -444,13 +472,17 @@
                 <label>点赞<input id="reviewLikes" type="number" min="0" placeholder="0" /></label>
                 <label>评论<input id="reviewComments" type="number" min="0" placeholder="0" /></label>
                 <label>转发<input id="reviewShares" type="number" min="0" placeholder="0" /></label>
+                <label>收藏<input id="reviewFavorites" type="number" min="0" placeholder="0" /></label>
                 <label>关注转化<input id="reviewFollows" type="number" min="0" placeholder="0" /></label>
                 <label>完播率 %<input id="reviewCompletionRate" type="number" min="0" max="100" step="0.1" placeholder="例如：46.5" /></label>
+                <label>平均观看时长（秒）<input id="reviewAverageWatchTime" type="number" min="0" step="0.1" placeholder="例如：38.2" /></label>
+                <label>前段留存 %<input id="reviewEarlyRetention" type="number" min="0" max="100" step="0.1" placeholder="例如：72.5" /></label>
                 <label class="review-notes">用户高频评论<textarea id="reviewCommentThemes" rows="3" placeholder="例如：迪莫别下线、黑袍人是谁、想看月牙镇夜景"></textarea></label>
                 <label class="review-notes">复盘结论<textarea id="reviewNotes" rows="3" placeholder="例如：首镜信息不足，下一集前 3 秒直接抛出契约倒计时。"></textarea></label>
               </div>
               <button class="secondary-action" id="saveReviewBtn">保存本集复盘</button>
               <div class="review-insights" id="reviewInsights"></div>
+              <section class="creative-learning-panel" id="creativeLearningPanel"></section>
             </section>
           </article>
 
@@ -579,8 +611,19 @@
               <div class="meme-library-entry">
                 <label>梗名称<input id="memeName" placeholder="一句能快速识别的梗名" /></label>
                 <label>适用标签<input id="memeTags" placeholder="例如：嘴硬, 道具拆台, 开头" /></label>
+                <label>来源类型<select id="memeSourceType"><option>手动录入</option><option>用户素材</option><option>原创结构</option></select></label>
+                <label>来源备注<input id="memeSourceNote" placeholder="素材出处或改编备注，不填也可以" /></label>
+                <label>机制类型<select id="memeMechanismType"><option value="视觉反差">视觉反差</option><option value="规则误导">规则误导</option><option value="关系错位">关系错位</option><option value="道具回扣">道具回扣</option><option value="语言动作错位">语言动作错位</option></select></label>
+                <label>适用节拍<input id="memeFitBeat" placeholder="例如：BEAT-02 铺垫，BEAT-06 回扣" /></label>
                 <label class="meme-wide">剧情机制<textarea id="memeMechanism" rows="3" placeholder="这个梗如何改变动作、道具、规则或人物误会，而不只是一句台词。"></textarea></label>
-                <label class="meme-wide">铺垫与回扣<textarea id="memeComedy" rows="2" placeholder="写清铺垫 -> 误导 -> 回扣，或静音也能看懂的视觉笑点。"></textarea></label>
+                <label>铺垫<textarea id="memeSetup" rows="2" placeholder="先让观众看到什么"></textarea></label>
+                <label>误导<textarea id="memeMisdirection" rows="2" placeholder="观众和角色误以为什么"></textarea></label>
+                <label>回扣<textarea id="memePayoff" rows="2" placeholder="同一动作、道具或规则如何反打"></textarea></label>
+                <label>静音可懂动作<textarea id="memeVisualAction" rows="2" placeholder="关掉声音也能看懂的视觉变化"></textarea></label>
+                <label>剧情后果<textarea id="memePlotEffect" rows="2" placeholder="笑点之后迫使角色做什么"></textarea></label>
+                <label>适配角色特质<textarea id="memeFitTraits" rows="2" placeholder="例如：嘴硬、控制欲强、过度谨慎"></textarea></label>
+                <label>使用风险<textarea id="memeRisk" rows="2" placeholder="过时、生硬或设定冲突风险"></textarea></label>
+                <label>禁用方式<textarea id="memeForbidden" rows="2" placeholder="哪些用法会破坏角色或世界观"></textarea></label>
                 <button class="secondary-action" id="addMemeBtn" type="button">存入梗库</button>
               </div>
               <div class="library-toolbar">
@@ -838,6 +881,10 @@
     <script src="./storyboard-revision.js?v=20260716-image-prompts"></script>
     <script src="./image-prompt-workflow.js?v=20260716-governance"></script>
     <script src="./project-domain.js?v=20260716-production-loop"></script>
+    <script src="./quick-workflow.js?v=20260717-fast-flow"></script>
+    <script src="./creative-quality.js?v=20260717-quality"></script>
+    <script src="./comedy-mechanism.js?v=20260717-comedy-library"></script>
+    <script src="./performance-learning.js?v=20260717-performance-learning"></script>
     <script src="./episode-planner.js?v=20260714-storyboard-reader"></script>
     <script src="./ui-templates.js?v=20260716-image-prompts"></script>
     <script src="./api-client.js?v=20260714-storyboard-reader"></script>

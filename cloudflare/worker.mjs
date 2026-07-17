@@ -47,7 +47,10 @@ const AI_PATH_COST = new Map([
   ["/api/episode-bible", 1],
   ["/api/character-card", 1],
   ["/api/meme-lab", 1],
+  ["/api/meme-enrich", 1],
   ["/api/plans", 1],
+  ["/api/creative-review", 1],
+  ["/api/creation-package", 1],
   ["/api/creative-mix", 1],
   ["/api/beat-sheet", 1],
   ["/api/topics", 1],
@@ -405,6 +408,8 @@ function normalizeInput(input = {}) {
     candidateMemes: Array.isArray(input.candidateMemes) ? input.candidateMemes.slice(0, 30) : [],
     candidateCharacterCards: Array.isArray(input.candidateCharacterCards) ? input.candidateCharacterCards.slice(0, 20) : [],
     characterDraft: input.characterDraft && typeof input.characterDraft === "object" ? input.characterDraft : {},
+    meme: input.meme && typeof input.meme === "object" ? input.meme : null,
+    plans: Array.isArray(input.plans) ? input.plans.slice(0, 6) : [],
     latestReview: input.latestReview && typeof input.latestReview === "object" ? input.latestReview : null,
     episodePlan: input.episodePlan && typeof input.episodePlan === "object" ? input.episodePlan : {},
     beatSheet: Array.isArray(input.beatSheet) ? input.beatSheet.slice(0, 8) : [],
@@ -602,7 +607,7 @@ function scriptPrompt(input) {
 2. 这是手游开放世界语境：探索、传送点、精灵互动、收集、区域首领、隐藏宝藏、地图任务；不要当成旧页游剧情。
 3. 不暗示官方授权，不写成官方宣传。
 4. 前 3 秒必须抛出强信息钩子；中段每 8-12 秒至少一次信息变化；结尾留下一集能直接承接的问题。
-5. 台词必须口语化、短句、可拍摄。热梗素材：${compact(payload.memeSeed, "未提供；使用原创的平台化口语，不得冒充实时热梗")}。热梗必须转化为动作、道具、世界规则或误会机制，不能只把流行句塞进台词。
+5. 台词必须口语化、短句、可拍摄。热梗素材：${compact(payload.memeSeed, "未提供；使用原创的平台化口语，不得冒充实时热梗")}。选中的结构化梗卡必须按原 assetId 落到具体角色、动作、道具或规则，并至少跨两个 BEAT 完成 setup 与 payoff；不能只把流行句塞进台词，也不限制剧情按需要创建临时笑点。
 6. 必须使用下列用户指定角色名，不能擅自替换：${names.length ? names.join("、") : "未指定，可根据主题自创 2-4 名角色"}。角色库不是白名单，在总角色数 2-5 人的范围内，可以按剧情需要加入未入库的临时角色。
 7. 本次创作圣经是当前版本的直接约束。角色、能力、关系、反派、世界规则、主线和钩子都必须与其一致。
 8. 剧本完成后仅提取会影响后续集数的新增长期事实为 canonDeltas；普通动作、单集胜负和已写入本次圣经的事实不要重复上报。
@@ -774,6 +779,7 @@ function storyboardPrompt(input, options = {}) {
 11. 所有视频段合起来必须完整实现当前剧本；最后一段必须呈现剧本结尾悬念，不能擅自增加新反转或混入其他剧本内容。
 12. 角色若有结构化角色卡，动作链和画面提示词必须体现其标志性动作、反差或喜剧触发器；口头禅只能出现在剧本已有台词中，不得为分镜擅自加戏。
 13. 每段必须用 beatIds 和 dialogueIds 原样引用剧本中的节拍与台词 id；分镜台词必须与所引用 LINE 原台词一致，不能只写意思相近的新台词。
+14. 剧本 assetIntegration 中绑定的结构化梗必须在对应视频段落实 setup/payoff 的同一视觉元素，优先用角色动作、道具状态或规则反馈表现；不得在分镜里临时改成一句新台词。
 14. 每段 visualPrompt 建议 ${compactRetry ? "80-140" : "100-180"} 字，完整写清环境、构图、角色外观与位置、连续动作、镜头、光色、特效和禁止事项；continuityIn、continuityOut 各建议 ${compactRetry ? "30-60" : "40-90"} 字。增加的是制作信息密度，不得增加剧本之外的新事件。
 15. beatBreakdown 按本段时长拆成 ${compactRetry ? "正好 2 个" : "2-3 个"}连续动作阶段，写清每阶段的起点、动作变化和落点，确保可直接用于一次 AI 视频生成。
 ${previousContinuity ? `16. 本批第一段 continuityIn 必须准确承接上一批最后状态，不得重置人物或道具：${previousContinuity}` : ""}
@@ -1062,10 +1068,19 @@ ${extractMode
     {
       "phrase":"素材关键词或原创梗名",
       "meaning":"该素材在当前语境中的情绪或误会点",
+      "sourceNote":"真实素材备注；原创则写原创结构",
+      "mechanismType":"视觉反差|规则误导|关系错位|道具回扣|语言动作错位",
       "mechanism":"如何变成角色动作、道具或世界规则并推动剧情",
-      "comedy":"铺垫 -> 误导 -> 回扣的具体笑点",
-      "fit":"适合放在开头/升级/反转/结尾中的哪个位置",
+      "setup":"先出现的具体动作、道具或规则",
+      "misdirection":"观众和角色会产生的错误判断",
+      "payoff":"同一元素如何回扣并反打",
+      "visualAction":"静音也能看懂的5-10秒动作",
+      "plotEffect":"笑点之后对角色选择和剧情造成的后果",
+      "fitBeat":"适合在哪些节拍铺垫和回扣",
+      "fitTraits":"最适合触发它的角色特质",
       "risk":"需要规避的生硬、过时或侵权风险",
+      "forbidden":"绝不能怎样使用，避免破坏人物或设定",
+      "tags":["机制标签"],
       "sourceType":"${extractMode ? "用户素材" : "原创结构"}"
     }
   ]
@@ -1153,6 +1168,34 @@ ${continuationPromptContext(payload, 7000)}
 限制：beats 必须正好 8 条，id 从 BEAT-01 到 BEAT-08。`;
 }
 
+function creationPackagePrompt(input) {
+  const payload = normalizeInput(input);
+  return `你是抖音连续短剧的执行总编。请基于已经采用的本集策划，一次生成可直接检查和编辑的“创作准备包”。只输出严格 JSON，不要 Markdown、解释或代码围栏。
+
+准备包包含正好8个因果节拍和七项本次创作圣经。两部分必须互相对应：圣经里的角色、能力、关系、规则与钩子必须在节拍中有可执行落点，节拍不得引入圣经未约束的万能能力或无来源反转。
+
+节拍要求：
+1. BEAT-01 在前3秒展示异常并采取行动；BEAT-02至06持续增加阻力、代价和新信息；BEAT-07落实反转与被迫选择；BEAT-08兑现后果并留下下一集必须行动的问题。
+2. 每拍写清时间、戏剧任务、人物目标、可见动作、新信息、情绪、与上一拍的因果；已选梗至少跨两拍完成铺垫与回扣。
+3. assetIds 只能引用当前已选角色或梗ID，没有则为空数组。
+
+本次圣经要求：
+1. characters 写本集人物欲望、稳定性格、语言/动作特征和底线；abilities 写效果、代价、冷却和禁区。
+2. relations 写开场关系、允许变化和不可跨越阶段；antagonist 写目标、手段、底线和可见行动。
+3. worldRules 写本集实际生效的手游场景、任务、道具与规则；mainConflict 写推进什么和不能提前解决什么；hookRules 写开头兑现、反转触发和结尾新悬念。
+4. 续写时第一拍必须承接来源钩子，继承人物、关系、能力代价和道具归属，不复述整集。
+
+本集策划：${stringify(payload.episodePlan || {}, 5000)}
+角色与梗要求：${compact(payload.creativeMixBrief, "按已选资产自然融合")}
+项目资料：${bibleContext(payload)}
+本集输入：${creativeInputSummary(payload)}
+${continuationPromptContext(payload, 7500)}
+
+返回结构：
+{"package":{"summary":"这版准备包的一句话执行方向","risks":["生成剧本前需要人工核对的具体风险"],"beats":[{"id":"BEAT-01","timeRange":"0-3秒","dramaticTask":"本拍任务","characterGoal":"人物目标","action":"可见动作","newInformation":"新增信息","emotion":"结束情绪","causalLink":"因为/但是/所以因果","assetIds":[]}],"bible":{"characters":"本集角色约束","abilities":"本集能力边界","relations":"关系起点与可变范围","antagonist":"反派目标手段底线","worldRules":"场景任务道具规则","mainConflict":"主线推进与禁区","hookRules":"开头反转结尾规则"}}}
+限制：beats 正好8条，七项圣经全部非空；summary 只写一句；risks 1-6条。`;
+}
+
 function plansPrompt(input, options = {}) {
   const payload = normalizeInput(input);
   const names = roleNames(payload);
@@ -1169,7 +1212,7 @@ function plansPrompt(input, options = {}) {
 7. 必须使用这些角色名：${names.length ? names.join("、") : "根据输入选择 2-4 个明确角色"}。
 8. 热梗素材：${compact(payload.memeSeed, "未提供；使用原创平台化口语，不得冒充实时热梗")}。每套必须把梗转化为不同的剧情动作、道具或规则机制，不能只写一句流行台词。
 9. 目标时长 ${payload.duration} 秒，本集为第 ${payload.episodeNumber} 集。
-10. 三套分别使用不同的创新引擎、喜剧机制和视觉母题；至少一套用视觉喜剧，一套用规则误导，一套用关系反差，但不能复用失忆、万能黑衣人、契约突然失效等通用套路。
+10. 三套必须依次使用且只使用以下主引擎：A角色关系碰撞、B世界规则异常、C道具或能力失控；三套的冲突发动机、反转类型、核心画面和喜剧机制不得重复。
 11. 每套必须有一个一眼能记住、静音也能看懂的 9:16 强画面，并让反转由前面出现过的规则、道具或人物选择触发。
 12. 每套必须写清主角的具体目标、失败代价、不可兼得的被迫选择，以及本集结束后的关系变化；不能只从观众视角罗列钩子。
 ${compactRetry ? "13. 这是截断后的紧凑重试：每个字符串字段只写一句，每项不超过 55 字，不复述项目资料，不提供备选解释；仍必须保留 3 套方案和全部字段。" : ""}
@@ -1189,6 +1232,7 @@ ${continuationPromptContext(payload, 7000)}
       "innovation": "本集独有、能推动因果的创新机制",
       "memeMechanic": "热梗如何变成动作、道具、规则或回扣笑点",
       "visualSetpiece": "最强竖屏画面及前中后景变化",
+      "creativeProfile": {"axis":"角色关系碰撞|世界规则异常|道具或能力失控","conflictEngine":"冲突如何被持续发动","reversalType":"反转所用类型","coreImage":"唯一核心强画面","comedyMechanism":"喜剧如何铺垫误导回扣"},
       "plan": {
         "openingHook": "前3秒具体画面和事件",
         "conflict": "本集必须解决的对立问题与代价",
@@ -1635,19 +1679,41 @@ function normalizeBible(result) {
   return { bible: normalized };
 }
 
+function normalizeMemeMechanism(idea = {}) {
+  const meme = {
+    phrase: textValue(idea?.phrase), meaning: textValue(idea?.meaning), sourceType: textValue(idea?.sourceType) || "原创结构", sourceNote: textValue(idea?.sourceNote),
+    mechanismType: textValue(idea?.mechanismType), mechanism: textValue(idea?.mechanism), setup: textValue(idea?.setup),
+    misdirection: textValue(idea?.misdirection), payoff: textValue(idea?.payoff), visualAction: textValue(idea?.visualAction),
+    plotEffect: textValue(idea?.plotEffect), fitBeat: textValue(idea?.fitBeat || idea?.fit), fitTraits: textValue(idea?.fitTraits),
+    risk: textValue(idea?.risk), forbidden: textValue(idea?.forbidden), tags: normalizeIdList(idea?.tags, 8),
+  };
+  meme.comedy = [meme.setup, meme.misdirection, meme.payoff].join(" -> ");
+  meme.fit = meme.fitBeat;
+  return meme;
+}
+
 function normalizeMemeIdeas(result) {
   const source = Array.isArray(result?.ideas) ? result.ideas : [];
-  const ideas = source.slice(0, 6).map((idea) => ({
-    phrase: String(idea?.phrase || "").trim(),
-    meaning: String(idea?.meaning || "").trim(),
-    mechanism: String(idea?.mechanism || "").trim(),
-    comedy: String(idea?.comedy || "").trim(),
-    fit: String(idea?.fit || "").trim(),
-    risk: String(idea?.risk || "").trim(),
-    sourceType: String(idea?.sourceType || "原创结构").trim(),
-  })).filter((idea) => idea.phrase && idea.mechanism && idea.comedy);
+  const required = ["phrase", "mechanismType", "mechanism", "setup", "misdirection", "payoff", "visualAction", "plotEffect", "fitBeat", "fitTraits", "risk", "forbidden"];
+  const ideas = source.slice(0, 6).map(normalizeMemeMechanism).filter((idea) => required.every((field) => idea[field]));
   if (ideas.length !== 6) throw new Error("AI 没有返回 6 个完整梗机制，请重新生成");
   return { ideas };
+}
+
+function memeEnrichPrompt(input) {
+  const payload = normalizeInput(input);
+  return `你是短剧喜剧机制编辑。请把一张旧梗卡补全为可复用的完整喜剧机制，不改变原梗名、已有机制含义和来源。只输出严格JSON。
+要求：补齐机制类型、铺垫、误导、回扣、静音可懂动作、剧情后果、适用节拍、适配角色特质、风险和禁用方式；必须能跨至少两个节拍形成铺垫与回扣，笑点必须改变角色选择或剧情结果。
+旧梗卡：${stringify(payload.meme || {}, 5000)}
+当前项目：${bibleContext(payload)}
+返回：{"meme":{"phrase":"原梗名","meaning":"语境","sourceType":"原来源","sourceNote":"来源备注","mechanismType":"机制类型","mechanism":"完整机制","setup":"铺垫","misdirection":"误导","payoff":"回扣","visualAction":"静音动作","plotEffect":"剧情后果","fitBeat":"铺垫与回扣节拍","fitTraits":"适配角色","risk":"风险","forbidden":"禁用方式","tags":["标签"]}}`;
+}
+
+function normalizeMemeEnrichment(result) {
+  const meme = normalizeMemeMechanism(result?.meme || result);
+  const required = ["phrase", "mechanismType", "mechanism", "setup", "misdirection", "payoff", "visualAction", "plotEffect", "fitBeat", "fitTraits", "risk", "forbidden"];
+  if (required.some((field) => !meme[field])) throw validationError("旧梗补全", ["所有喜剧机制字段都必须完整"]);
+  return { meme };
 }
 
 function normalizeCharacterCard(result) {
@@ -1666,10 +1732,9 @@ function normalizeCharacterCard(result) {
   return { card };
 }
 
-function normalizePlans(result) {
-  const source = Array.isArray(result?.plans) ? result.plans : [];
-  const requiredKeys = ["openingHook", "conflict", "protagonistGoal", "stakes", "forcedChoice", "reversal", "relationshipShift", "endingSuspense", "targetEmotion"];
-  const plans = source.slice(0, 3).map((item, index) => {
+const PLAN_REQUIRED_KEYS = ["openingHook", "conflict", "protagonistGoal", "stakes", "forcedChoice", "reversal", "relationshipShift", "endingSuspense", "targetEmotion"];
+
+function normalizePlanItem(item, index = 0) {
     const plan = item?.plan && typeof item.plan === "object" ? item.plan : {};
     return {
       id: `ai-plan-${crypto.randomUUID()}`,
@@ -1679,11 +1744,63 @@ function normalizePlans(result) {
       innovation: String(item?.innovation || ""),
       memeMechanic: String(item?.memeMechanic || ""),
       visualSetpiece: String(item?.visualSetpiece || ""),
-      plan: Object.fromEntries(requiredKeys.map((key) => [key, String(plan[key] || "").trim()])),
+      creativeProfile: item?.creativeProfile && typeof item.creativeProfile === "object" ? {
+        axis: textValue(item.creativeProfile.axis), conflictEngine: textValue(item.creativeProfile.conflictEngine),
+        reversalType: textValue(item.creativeProfile.reversalType), coreImage: textValue(item.creativeProfile.coreImage),
+        comedyMechanism: textValue(item.creativeProfile.comedyMechanism),
+      } : null,
+      plan: Object.fromEntries(PLAN_REQUIRED_KEYS.map((key) => [key, String(plan[key] || "").trim()])),
     };
-  }).filter((item) => requiredKeys.every((key) => item.plan[key]));
-  if (plans.length !== 3) throw new Error("AI 没有返回 3 套完整策划，请重新生成");
+}
+
+function normalizePlans(result) {
+  const source = Array.isArray(result?.plans) ? result.plans : [];
+  const plans = source.slice(0, 3).map(normalizePlanItem).filter((item) => PLAN_REQUIRED_KEYS.every((key) => item.plan[key]));
+  if (plans.length !== 3) throw validationError("三套策划", ["必须返回3套完整策划"]);
+  const expectedAxes = ["角色关系碰撞", "世界规则异常", "道具或能力失控"];
+  const issues = [];
+  plans.forEach((plan, index) => {
+    if (!plan.creativeProfile || Object.values(plan.creativeProfile).some((value) => !value)) issues.push(`第${index + 1}套缺少完整creativeProfile`);
+    if (plan.creativeProfile?.axis !== expectedAxes[index]) issues.push(`第${index + 1}套必须使用${expectedAxes[index]}`);
+  });
+  ["conflictEngine", "reversalType", "coreImage", "comedyMechanism"].forEach((field) => {
+    const values = plans.map((plan) => cleanForComparison(plan.creativeProfile?.[field]));
+    if (new Set(values).size !== 3) issues.push(`三套${field}必须明显不同`);
+  });
+  if (issues.length) throw validationError("三套创意差异", issues);
   return { plans };
+}
+
+function cleanForComparison(value) {
+  return textValue(value).replace(/[\s，。！？、；：]/g, "").slice(0, 36);
+}
+
+function creativeReviewPrompt(input) {
+  const payload = normalizeInput(input);
+  return `你是短视频创意导演。比较用户当前三套单集策划及其本地七维评分，给出有证据的排序，并只改写其中最值得修复的一套。只输出严格JSON，不要Markdown。
+要求：
+1. 排名必须引用具体开头、冲突、笑点、画面、反转或钩子作为证据，不得只复述分数。
+2. rewritePatch 必须保留父方案ID，候选仍包含完整策划结构及creativeProfile；不得覆盖原方案。
+3. 改写应降低历史重复风险，并增强角色选择、可见动作、铺垫回扣与可执行结尾悬念。
+当前三案：${stringify(payload.plans || [], 16000)}
+项目资料：${bibleContext(payload)}
+返回：{"review":{"summary":"总体判断","ranking":[{"rank":1,"planId":"原方案ID","evidence":"具体证据","suggestion":"可执行建议"}],"rewritePatch":{"parentPlanId":"原方案ID","candidate":{"angle":"角度","title":"标题","why":"理由","innovation":"创新","memeMechanic":"梗机制","visualSetpiece":"强画面","creativeProfile":{"axis":"保留父方案轴","conflictEngine":"发动机","reversalType":"反转类型","coreImage":"核心画面","comedyMechanism":"喜剧机制"},"plan":{"openingHook":"开头","conflict":"冲突","protagonistGoal":"目标","stakes":"代价","forcedChoice":"选择","reversal":"反转","relationshipShift":"关系变化","endingSuspense":"结尾悬念","targetEmotion":"情绪"}}}}}`;
+}
+
+function normalizeCreativeReview(result, input = {}) {
+  const source = result?.review || result;
+  const validIds = new Set((Array.isArray(input.plans) ? input.plans : []).slice(0, 3).map((plan) => textValue(plan?.id)));
+  const ranking = (Array.isArray(source?.ranking) ? source.ranking : []).slice(0, 3).map((item, index) => ({ rank: index + 1, planId: textValue(item?.planId), evidence: textValue(item?.evidence), suggestion: textValue(item?.suggestion) }));
+  const parentPlanId = textValue(source?.rewritePatch?.parentPlanId);
+  const candidateRaw = source?.rewritePatch?.candidate;
+  const candidate = normalizePlanItem(candidateRaw, 0);
+  const issues = [];
+  if (!textValue(source?.summary)) issues.push("缺少总体判断");
+  if (ranking.length !== 3 || ranking.some((item) => !validIds.has(item.planId) || !item.evidence || !item.suggestion)) issues.push("排名必须完整引用三套原方案");
+  if (!validIds.has(parentPlanId)) issues.push("改写候选缺少有效父方案ID");
+  if (!PLAN_REQUIRED_KEYS.every((key) => candidate.plan[key]) || !candidate.creativeProfile || Object.values(candidate.creativeProfile).some((value) => !value)) issues.push("改写候选结构不完整");
+  if (issues.length) throw validationError("创意导演", issues);
+  return { review: { summary: textValue(source.summary), ranking, rewritePatch: { parentPlanId, candidate: { ...candidate, id: undefined, parentPlanId } } } };
 }
 
 function normalizeCreativeMixes(result, input = {}) {
@@ -1732,6 +1849,19 @@ function normalizeBeatSheet(result, input = {}) {
   if (validAssetIds.size && !beats.some((beat) => beat.assetIds.length)) issues.push("已选角色或梗没有进入任何节拍");
   if (issues.length) throw validationError("剧情节拍表", issues);
   return { beats };
+}
+
+function normalizeCreationPackage(result, input = {}) {
+  const source = result?.package && typeof result.package === "object" ? result.package : result;
+  const beats = normalizeBeatSheet({ beats: source?.beats }, input).beats;
+  const bible = normalizeBible({ bible: source?.bible }).bible;
+  const summary = textValue(source?.summary);
+  const risks = (Array.isArray(source?.risks) ? source.risks : []).map(textValue).filter(Boolean).slice(0, 6);
+  const issues = [];
+  if (!summary) issues.push("准备包摘要不能为空");
+  if (!risks.length) issues.push("至少需要一条具体风险提示");
+  if (issues.length) throw validationError("创作准备包", issues);
+  return { package: { summary, risks, beats, bible } };
 }
 
 function normalizeTopics(result, count) {
@@ -2203,7 +2333,24 @@ async function api(request, env, url) {
         throw retryCause;
       }
     }
-    const result = normalizePlans(rawPlans);
+    const result = await normalizeWithRepair(env, input, rawPlans, normalizePlans, 6500, usageMeter, "episode-plans-difference");
+    return success(result);
+  }
+
+  if (url.pathname === "/api/creative-review") {
+    if (!Array.isArray(input.plans) || input.plans.length < 3) return error("请先提供三套完整策划", "PLANS_REQUIRED", 400);
+    const raw = await askDeepSeek(env, input, creativeReviewPrompt(input), 5200, usageMeter, { label: "creative-review", temperature: 0.45 });
+    const result = await normalizeWithRepair(env, input, raw, (value) => normalizeCreativeReview(value, input), 5200, usageMeter, "creative-review");
+    return success(result);
+  }
+
+  if (url.pathname === "/api/creation-package") {
+    const requiredPlanKeys = ["openingHook", "conflict", "protagonistGoal", "stakes", "forcedChoice", "reversal", "relationshipShift", "endingSuspense", "targetEmotion"];
+    if (requiredPlanKeys.some((key) => !textValue(input.episodePlan?.[key]))) {
+      return error("请先生成并采用一套完整本集策划", "EPISODE_PLAN_REQUIRED", 400);
+    }
+    const raw = await askDeepSeek(env, input, creationPackagePrompt(input), 5200, usageMeter, { label: "creation-package", temperature: 0.58 });
+    const result = await normalizeWithRepair(env, input, raw, (value) => normalizeCreationPackage(value, input), 5200, usageMeter, "creation-package");
     return success(result);
   }
 
@@ -2248,6 +2395,13 @@ async function api(request, env, url) {
       return error("请先提供热榜标题、分享文案或评论素材", "MEME_MATERIAL_REQUIRED", 400);
     }
     const result = normalizeMemeIdeas(await askDeepSeek(env, input, memeLabPrompt(input), 2100, usageMeter));
+    return success(result);
+  }
+
+  if (url.pathname === "/api/meme-enrich") {
+    if (!input.meme || !textValue(input.meme.phrase)) return error("请提供需要补全的旧梗卡", "MEME_REQUIRED", 400);
+    const raw = await askDeepSeek(env, input, memeEnrichPrompt(input), 2600, usageMeter, { label: "meme-enrich", temperature: 0.48 });
+    const result = await normalizeWithRepair(env, input, raw, normalizeMemeEnrichment, 2600, usageMeter, "meme-enrich");
     return success(result);
   }
 
@@ -2331,14 +2485,20 @@ export const __test = {
   normalizeScriptDoctor,
   normalizeRecastScript,
   normalizeMemeIdeas,
+  normalizeMemeEnrichment,
   normalizePlans,
+  normalizeCreativeReview,
   normalizeCreativeMixes,
   normalizeBeatSheet,
+  normalizeCreationPackage,
   scriptPrompt,
   rewriteScriptPrompt,
   scriptCanonReviewPrompt,
   plansPrompt,
+  creativeReviewPrompt,
   beatSheetPrompt,
+  creationPackagePrompt,
+  memeEnrichPrompt,
   storyboardPrompt,
   rewriteStoryboardSegmentPrompt,
   imagePromptPrompt,

@@ -20,8 +20,68 @@ const episodeBible = require("../episode-bible.js");
 const scriptRevision = require("../script-revision.js");
 const storyboardRevision = require("../storyboard-revision.js");
 const imagePromptWorkflow = require("../image-prompt-workflow.js");
+const quickWorkflow = require("../quick-workflow.js");
+const creativeQuality = require("../creative-quality.js");
+const comedyMechanism = require("../comedy-mechanism.js");
+const performanceLearning = require("../performance-learning.js");
 
 const completeBible = Object.fromEntries(episodeBible.FIELDS.map((field) => [field, `${field}设定`]));
+
+test("quick workflow exposes one state-driven primary action and validates creation packages", () => {
+  const beats = Array.from({ length: 8 }, (_, index) => ({
+    id: `BEAT-${String(index + 1).padStart(2, "0")}`, timeRange: `${index * 7}-${index * 7 + 7}秒`,
+    dramaticTask: `任务${index + 1}`, characterGoal: `目标${index + 1}`, action: `动作${index + 1}`,
+    newInformation: `信息${index + 1}`, emotion: "紧张", causalLink: index ? "因为上一拍失败，所以继续行动" : "因为任务异常，所以立即检查", assetIds: [],
+  }));
+  const prepared = quickWorkflow.createPackage({ summary: "方向", risks: ["核对能力代价"], beats, bible: completeBible });
+  assert.equal(quickWorkflow.isComplete(prepared), true);
+  assert.equal(quickWorkflow.primaryAction({ step: "plan", planComplete: true, packageComplete: false }).id, "generate-package");
+  assert.equal(quickWorkflow.primaryAction({ step: "script", packageConfirmed: true, creationMode: "continue" }).label, "生成续写剧本");
+  assert.equal(quickWorkflow.primaryAction({ step: "refine", hasScript: true, scriptDirty: true }).id, "save-script-version");
+});
+
+test("worker normalizes a complete combined creation package", () => {
+  const beats = Array.from({ length: 8 }, (_, index) => ({
+    id: `BEAT-${String(index + 1).padStart(2, "0")}`, timeRange: `${index * 7}-${index * 7 + 7}秒`, dramaticTask: `任务${index + 1}`,
+    characterGoal: `目标${index + 1}`, action: `动作${index + 1}`, newInformation: `信息${index + 1}`, emotion: "紧张",
+    causalLink: index ? "因为上一拍，所以行动" : "因为异常，所以检查", assetIds: [],
+  }));
+  const result = __test.normalizeCreationPackage({ package: { summary: "先兑现钩子再升级规则冲突", risks: ["能力代价需核对"], beats, bible: completeBible } }, {});
+  assert.equal(result.package.beats.length, 8);
+  assert.equal(result.package.bible.hookRules, "hookRules设定");
+  assert.match(__test.creationPackagePrompt({ duration: 60, episodePlan: {} }), /创作准备包/);
+});
+
+test("creative quality scores seven dimensions and detects historical repetition", () => {
+  const option = { title: "路牌会揭穿谎言", innovation: "路牌按谎言转向", memeMechanic: "先嘴硬误导，路牌转头回扣", visualSetpiece: "前景路牌齐转，中景主角僵住", plan: { openingHook: "路牌突然追着主角转", conflict: "必须追回核心", protagonistGoal: "保护搭档", stakes: "搭档离队", forcedChoice: "认错或丢证据", reversal: "真正改路的是旧徽章", relationshipShift: "从隐瞒到担责", endingSuspense: "坐标指向地下入口，下一集必须追查", targetEmotion: "笑到紧张" } };
+  const scored = creativeQuality.scoreOption(option, { roleNames: ["主角", "搭档"], history: [{ title: "旧方案", text: creativeQuality.textOfPlan(option) }] });
+  assert.deepEqual(Object.keys(scored.scores), creativeQuality.dimensions);
+  assert.equal(scored.duplicateLevel, "high");
+  assert.ok(scored.total >= 0 && scored.total <= 100);
+  assert.ok(creativeQuality.jaccard("月牙镇路牌", "月牙镇路牌") === 1);
+});
+
+test("performance learning waits for ten valid episodes and caps learned influence", () => {
+  assert.equal(performanceLearning.resultScore({ views: 0, completionRate: 100 }), null);
+  const project = { episodes: Array.from({ length: 20 }, (_, index) => {
+    const score = 2 + index * 0.35;
+    const versionId = `v${index}`;
+    return {
+      episodeNumber: index + 1, activeVersionId: versionId,
+      review: { scriptVersionId: versionId, views: index === 19 ? 1_000_000 : 10_000, completionRate: 30 + index * 2, follows: 30 + index * 4, shares: 80 + index * 5, comments: 60 + index * 3, favorites: 100 + index * 8 },
+      versions: [{ id: versionId, creativeSourceRef: { scoreSnapshot: { scores: { hook: score, freshness: 10 - score / 2, comedy: score, visual: score, characterFit: score, reversal: score, serialValue: score } } } }],
+    };
+  }) };
+  const collecting = performanceLearning.learn({ episodes: project.episodes.slice(0, 9) });
+  assert.equal(collecting.status, "collecting");
+  assert.deepEqual(collecting.currentWeights, performanceLearning.baseWeights);
+  const learned = performanceLearning.learn(project);
+  assert.equal(learned.status, "learned");
+  assert.equal(learned.sampleCount, 20);
+  assert.ok(learned.confidence > 0);
+  assert.ok(Math.abs(Object.values(learned.currentWeights).reduce((a, b) => a + b, 0) - 1) < 0.001);
+  assert.ok(learned.currentWeights.hook > performanceLearning.baseWeights.hook * 0.2);
+});
 
 function editableScript() {
   return {
@@ -380,13 +440,17 @@ test("meme lab normalizer requires six usable mechanisms", () => {
     phrase: `梗${index + 1}`,
     meaning: "情绪误会",
     mechanism: `道具机制${index + 1}`,
-    comedy: `铺垫 -> 误导 -> 回扣${index + 1}`,
-    fit: "升级段",
+    mechanismType: ["视觉反差", "规则误导", "关系错位"][index % 3],
+    setup: "主角把道具藏在身后", misdirection: "所有人以为道具丢了", payoff: `道具自己举手回扣${index + 1}`,
+    visualAction: "道具从背后伸出发光标记", plotEffect: "暴露主角说谎并迫使其公开行动",
+    fitBeat: "BEAT-02铺垫，BEAT-06回扣", fitTraits: "嘴硬、爱逞强",
     risk: "避免照搬",
+    forbidden: "禁止只说流行语而没有动作后果", tags: ["道具回扣"],
     sourceType: "用户素材",
   }));
   assert.equal(__test.normalizeMemeIdeas({ ideas }).ideas.length, 6);
   assert.throws(() => __test.normalizeMemeIdeas({ ideas: ideas.slice(0, 5) }), /6 个完整梗机制/);
+  assert.equal(comedyMechanism.isComplete(__test.normalizeMemeIdeas({ ideas }).ideas[0]), true);
 });
 
 test("character card normalizer keeps repeatable character signatures", () => {
@@ -410,6 +474,11 @@ test("AI plan normalizer requires three complete episode plans", () => {
       innovation: `创新机制${index + 1}`,
       memeMechanic: `梗机制${index + 1}`,
       visualSetpiece: `强画面${index + 1}`,
+      creativeProfile: {
+        axis: ["角色关系碰撞", "世界规则异常", "道具或能力失控"][index],
+        conflictEngine: `发动机${index + 1}`, reversalType: `反转类型${index + 1}`,
+        coreImage: `核心画面${index + 1}`, comedyMechanism: `喜剧机制${index + 1}`,
+      },
       plan: {
         openingHook: `开头${index + 1}`,
         conflict: `冲突${index + 1}`,
@@ -426,7 +495,7 @@ test("AI plan normalizer requires three complete episode plans", () => {
   assert.equal(result.plans.length, 3);
   assert.equal(result.plans[1].plan.reversal, "反转2");
   assert.equal(result.plans[1].innovation, "创新机制2");
-  assert.throws(() => __test.normalizePlans({ plans: result.plans.slice(0, 2) }), /3 套完整策划/);
+  assert.throws(() => __test.normalizePlans({ plans: result.plans.slice(0, 2) }), /必须返回3套完整策划/);
 });
 
 test("creative mix normalizer only accepts candidate character and meme ids", () => {
@@ -817,7 +886,8 @@ test("app state initializes independent model preferences", () => {
   assert.equal(state.aiModels.script, "deepseek-v4-flash");
   state.aiModels.episodeBible = "deepseek-v4-pro";
   assert.equal(state.aiModels.bible, "deepseek-v4-flash");
-  assert.equal(appStateModule.aiModelScopes.length, 18);
+  assert.equal(appStateModule.aiModelScopes.length, 21);
+  assert.equal(state.aiModels.creationPackage, "deepseek-v4-flash");
   state.aiModels.scriptRewrite = "deepseek-v4-pro";
   assert.equal(state.aiModels.scriptCanonReview, "deepseek-v4-flash");
   state.aiModels.storyboardRewrite = "deepseek-v4-pro";
@@ -866,11 +936,12 @@ test("project domain appends versions without overwriting an episode", () => {
     currentEpisodeId: first.episode.id,
     mode: "new",
     input: { episodeNumber: 1, theme: "第二版" },
-    versionSnapshot: { script: { title: "第二版" }, historyId: "history-2" },
+    versionSnapshot: { script: { title: "第二版" }, historyId: "history-2", creativeSourceRef: { planBatchId: "batch-1", planId: "plan-2", scoreSnapshot: { total: 82, scores: { hook: 8 } }, characterIds: ["c1"], memeIds: ["m1"] } },
   });
   assert.equal(project.episodes.length, 1);
   assert.equal(second.episode.versions.length, 2);
   assert.equal(second.episode.script.title, "第二版");
+  assert.equal(second.version.creativeSourceRef.planId, "plan-2");
   projectDomain.applyEpisodeVersion(second.episode, first.version.id);
   assert.equal(second.episode.script.title, "第一版");
 });
@@ -959,15 +1030,20 @@ test("canon review normalizer keeps actionable issues, bible suggestions, and se
   assert.equal(reviewed.review.evidenceMap.find((item) => item.field === "characters").status, "missing");
 });
 
-test("project schema v9 preserves continuation lineage and does not fabricate legacy bible snapshots", () => {
+test("project schema v12 preserves continuation lineage and initializes local learning", () => {
   const migrated = projectDomain.migrateProjectRecord({
     schemaVersion: 6,
     id: "legacy-v6",
     name: "旧项目",
-    planBatches: [{ id: "plan-1" }],
+    planBatches: [{ id: "plan-1", plans: [{ id: "old-plan", title: "旧策划", plan: {} }] }],
+    memes: [{ id: "old-meme", phrase: "旧梗", mechanism: "道具拆台", comedy: "一句旧描述", risk: "避免生硬" }],
     episodes: [{ id: "episode-1", episodeNumber: 1, versions: [{ id: "version-1", script: { title: "第一集" } }], activeVersionId: "version-1" }],
   });
-  assert.equal(migrated.schemaVersion, 9);
+  assert.equal(migrated.schemaVersion, 12);
+  assert.equal(migrated.planBatches[0].plans[0].qualityStatus, "unscored");
+  assert.equal(migrated.memes[0].needsEnrichment, true);
+  assert.equal(migrated.memes[0].comedy, "一句旧描述");
+  assert.equal(migrated.creativeLearning.status, "collecting");
   assert.equal(migrated.episodes[0].versions[0].creationMode, "new");
   assert.equal(migrated.episodes[0].versions[0].generationBibleSnapshot, null);
   assert.equal(migrated.episodes[0].versions[0].episodeBibleSnapshot, null);

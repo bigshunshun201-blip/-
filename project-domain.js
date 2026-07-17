@@ -3,7 +3,7 @@
   if (typeof module === "object" && module.exports) module.exports = api;
   if (root) root.RocoProjectDomain = api;
 })(typeof globalThis !== "undefined" ? globalThis : this, function () {
-  const PROJECT_SCHEMA_VERSION = 9;
+  const PROJECT_SCHEMA_VERSION = 12;
 
   function clone(value) {
     return value == null ? value : JSON.parse(JSON.stringify(value));
@@ -69,6 +69,7 @@
       assets: [],
       memes: [],
       characterCards: [],
+      creativeLearning: { sampleCount: 0, confidence: 0, currentWeights: { hook: 0.18, freshness: 0.18, comedy: 0.14, visual: 0.15, characterFit: 0.13, reversal: 0.12, serialValue: 0.10 }, versions: [], status: "collecting" },
       createdAt: now,
       updatedAt: now,
     };
@@ -142,6 +143,7 @@
       approvalStatus: snapshot.approvalStatus === "approved" ? "approved" : "draft",
       approvedAt: String(snapshot.approvedAt || ""),
       approvalReview: normalizeApprovalReview(snapshot.approvalReview),
+      creativeSourceRef: snapshot.creativeSourceRef && typeof snapshot.creativeSourceRef === "object" ? clone(snapshot.creativeSourceRef) : null,
       doctorResult,
       doctorReport: doctorResult?.report || snapshot.doctorReport || null,
     };
@@ -184,6 +186,7 @@
     episode.approvalStatus = version.approvalStatus || "draft";
     episode.approvedAt = version.approvedAt || "";
     episode.approvalReview = normalizeApprovalReview(version.approvalReview);
+    episode.creativeSourceRef = version.creativeSourceRef ? clone(version.creativeSourceRef) : null;
     episode.doctorResult = version.doctorResult || null;
     episode.doctorReport = version.doctorReport || null;
     return episode;
@@ -272,6 +275,7 @@
       seriesLedger: { ...emptySeriesLedger(), ...(source.seriesLedger || {}) },
       ledgerVersions: Array.isArray(source.ledgerVersions) ? source.ledgerVersions : [],
       canonSources: Array.isArray(source.canonSources) ? source.canonSources : [],
+      creativeLearning: source.creativeLearning && typeof source.creativeLearning === "object" ? clone(source.creativeLearning) : null,
     };
 
     if (project.schemaVersion < 2) {
@@ -383,6 +387,37 @@
     }
 
     if (project.schemaVersion < 9) project.schemaVersion = 9;
+
+    if (project.schemaVersion < 10) {
+      project.planBatches = project.planBatches.map((batch) => ({
+        ...batch,
+        plans: (batch.plans || []).map((plan) => ({ ...plan, qualityStatus: plan.quality ? "scored" : "unscored" })),
+      }));
+      project.schemaVersion = 10;
+    }
+
+    if (project.schemaVersion < 11) {
+      project.memes = project.memes.map((meme) => ({
+        ...meme,
+        sourceNote: String(meme.sourceNote || ""), mechanismType: String(meme.mechanismType || ""),
+        setup: String(meme.setup || ""), misdirection: String(meme.misdirection || ""), payoff: String(meme.payoff || ""),
+        visualAction: String(meme.visualAction || ""), plotEffect: String(meme.plotEffect || ""),
+        fitBeat: String(meme.fitBeat || meme.fit || ""), fitTraits: String(meme.fitTraits || ""),
+        forbidden: String(meme.forbidden || ""), tags: normalizeIdList(meme.tags), useCount: Math.max(0, Number(meme.useCount || 0)),
+        needsEnrichment: !["mechanismType", "setup", "misdirection", "payoff", "visualAction", "plotEffect", "fitTraits", "risk", "forbidden"].every((field) => String(meme[field] || "").trim()),
+      }));
+      project.schemaVersion = 11;
+    }
+
+    if (project.schemaVersion < 12) {
+      project.creativeLearning = project.creativeLearning || { sampleCount: 0, confidence: 0, currentWeights: { hook: 0.18, freshness: 0.18, comedy: 0.14, visual: 0.15, characterFit: 0.13, reversal: 0.12, serialValue: 0.10 }, versions: [], status: "collecting" };
+      project.episodes = project.episodes.map((episode) => ({
+        ...episode,
+        review: episode.review ? { favorites: 0, averageWatchTime: 0, earlyRetention: 0, ...episode.review } : episode.review,
+        versions: Array.isArray(episode.versions) ? episode.versions.map((version) => ({ ...version, creativeSourceRef: version.creativeSourceRef || null })) : episode.versions,
+      }));
+      project.schemaVersion = 12;
+    }
 
     project.schemaVersion = PROJECT_SCHEMA_VERSION;
     return normalizeProjectEpisodes(project);

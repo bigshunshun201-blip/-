@@ -57,6 +57,10 @@
   const storyboardRevisionDomain = window.RocoStoryboardRevision;
   const imagePromptWorkflow = window.RocoImagePromptWorkflow;
   const episodeBibleDomain = window.RocoEpisodeBible;
+  const quickWorkflow = window.RocoQuickWorkflow;
+  const creativeQuality = window.RocoCreativeQuality;
+  const comedyMechanism = window.RocoComedyMechanism;
+  const performanceLearning = window.RocoPerformanceLearning;
   const episodeBibleFieldIds = {
     characters: "episodeBibleCharacters", abilities: "episodeBibleAbilities", relations: "episodeBibleRelations",
     antagonist: "episodeBibleAntagonist", worldRules: "episodeBibleWorldRules", mainConflict: "episodeBibleMainConflict",
@@ -242,6 +246,7 @@
       approveVersionButton.textContent = activeVersion?.approvalStatus === "approved" && !revisionDirty ? "本版已批准" : "复核并批准本版";
     }
     refreshToolbarState();
+    refreshQuickWorkflow();
   }
 
   function beginAiOperation(label) {
@@ -258,6 +263,8 @@
 
   function resetCurrentCreation() {
     state.creationMode = "new";
+    state.quickStep = "idea";
+    state.creationPackage = null;
     state.creationSessions = { new: null, continue: null };
     state.currentEpisodeId = null;
     state.reviewEpisodeId = null;
@@ -408,6 +415,8 @@
   function captureCreationSession() {
     return {
       mode: state.creationMode,
+      quickStep: state.quickStep,
+      creationPackage: state.creationPackage ? quickWorkflow.createPackage(state.creationPackage) : null,
       fields: creationFieldsSnapshot(),
       input: getInput(),
       aiModels: { ...state.aiModels },
@@ -423,6 +432,7 @@
       planOptions: state.planOptions.map((item) => ({ ...item, plan: { ...(item.plan || {}) } })),
       selectedPlanOptionId: state.selectedPlanOptionId,
       activePlanBatchId: state.activePlanBatchId,
+      creativeReview: state.creativeReview,
       activeMemeIds: [...state.activeMemeIds],
       activeCharacterIds: [...state.activeCharacterIds],
       creativeMixOptions: state.creativeMixOptions.map((item) => ({ ...item, characterIds: [...(item.characterIds || [])], memeIds: [...(item.memeIds || [])], planPatch: { ...(item.planPatch || {}) } })),
@@ -442,6 +452,8 @@
     Object.entries(session.fields || {}).forEach(([id, value]) => setInputValue(id, value));
     if (session.aiModels) restoreAiModels({ aiModels: session.aiModels });
     state.currentEpisodeId = session.currentEpisodeId || null;
+    state.quickStep = quickWorkflow.normalizeStep(session.quickStep);
+    state.creationPackage = session.creationPackage ? quickWorkflow.createPackage(session.creationPackage) : null;
     state.reviewEpisodeId = session.reviewEpisodeId || state.currentEpisodeId;
     state.currentHistoryId = session.currentHistoryId || null;
     state.script = session.script || null;
@@ -457,6 +469,7 @@
     state.planOptions = Array.isArray(session.planOptions) ? session.planOptions : [];
     state.selectedPlanOptionId = session.selectedPlanOptionId || null;
     state.activePlanBatchId = session.activePlanBatchId || null;
+    state.creativeReview = session.creativeReview || null;
     state.activeMemeIds = Array.isArray(session.activeMemeIds) ? session.activeMemeIds : [];
     state.activeCharacterIds = Array.isArray(session.activeCharacterIds) ? session.activeCharacterIds : [];
     state.creativeMixOptions = Array.isArray(session.creativeMixOptions) ? session.creativeMixOptions : [];
@@ -478,6 +491,7 @@
     renderStoryboard();
     renderCreativePack();
     renderConsistency();
+    renderQuickWorkflow();
   }
 
   function restoreActiveSelections(input = {}) {
@@ -511,11 +525,13 @@
   }
 
   function memeSeedLine(meme) {
-    return `梗机制：${meme.phrase}｜${meme.mechanism}｜笑点：${meme.comedy}`;
+    const item = comedyMechanism.withStatus(meme);
+    return `梗资产[${item.id || "临时"}]：${item.phrase}｜类型：${item.mechanismType || "待补全"}｜机制：${item.mechanism}｜铺垫：${item.setup || "待设计"}｜误导：${item.misdirection || "待设计"}｜回扣：${item.payoff || item.comedy || "待设计"}｜可见动作：${item.visualAction || "待设计"}｜剧情后果：${item.plotEffect || "待设计"}`;
   }
 
   function markBeatSheetStale() {
     markEpisodeBibleStale();
+    if (state.creationPackage) state.creationPackage.status = "stale";
     if (!state.beatSheet.length) return;
     state.beatSheetApproved = false;
     renderBeatSheet();
@@ -924,6 +940,156 @@
         ["deepseek-v4-pro", "Pro"],
       ].map(([value, label]) => `<button type="button" data-ai-model-value="${value}" data-ai-model-scope="${scope}" class="${value === model ? "is-active" : ""}" aria-pressed="${value === model}">${label}</button>`).join("");
     });
+    renderQuickModelSettings();
+  }
+
+  function renderQuickModelSettings() {
+    const target = $("#quickModelSettings");
+    if (!target) return;
+    const scopes = ["plan", "creationPackage", "script", "scriptRewrite", "scriptCanonReview", "storyboard", "storyboardRewrite", "creativeReview", "meme", "memeEnrich"]
+      .filter((scope) => aiModelScopes.includes(scope));
+    target.innerHTML = scopes.map((scope) => `<label><span>${escapeHtml(aiModelScopeLabels[scope] || scope)}</span><select data-quick-model-scope="${scope}"><option value="deepseek-v4-flash"${state.aiModels[scope] === "deepseek-v4-flash" ? " selected" : ""}>Flash</option><option value="deepseek-v4-pro"${state.aiModels[scope] === "deepseek-v4-pro" ? " selected" : ""}>Pro</option></select></label>`).join("");
+  }
+
+  function quickContext() {
+    const input = getInput();
+    const activeVersion = activeEpisodeVersion(currentProjectEpisode());
+    const packageComplete = quickWorkflow.isComplete(state.creationPackage || {});
+    const packageConfirmed = packageComplete && state.creationPackage?.status === "confirmed"
+      && state.beatSheetApproved && ["confirmed", "aligned"].includes(state.episodeBible?.status);
+    return {
+      step: state.quickStep,
+      busy: Boolean(state.activeAiOperation),
+      creationMode: state.creationMode,
+      hasPlans: Boolean(state.planOptions.length),
+      planComplete: episodePlanner.planIsComplete(input.episodePlan),
+      packageComplete,
+      packageStatus: state.creationPackage?.status || "empty",
+      packageConfirmed,
+      hasScript: Boolean(state.script),
+      scriptDirty: Boolean(state.scriptRevisionSession?.dirty),
+      scriptApproved: activeVersion?.approvalStatus === "approved" && !state.scriptRevisionSession?.dirty,
+      hasStoryboard: Boolean(state.storyboard.length),
+      reviewEpisodeId: state.reviewEpisodeId || state.currentEpisodeId,
+    };
+  }
+
+  function refreshQuickWorkflow() {
+    if (!quickWorkflow) return;
+    const action = quickWorkflow.primaryAction(quickContext());
+    const button = $("#quickPrimaryAction");
+    if (button) {
+      button.dataset.action = action.id;
+      button.textContent = action.label;
+      button.disabled = action.disabled;
+    }
+    const hints = {
+      idea: "输入主题和角色，生成并筛选三套不同创意",
+      plan: "采用策划后，一次生成 8 节拍与七项本次圣经",
+      script: "准备包确认后，生成与设定绑定的正式剧本",
+      refine: "局部修改、保存版本并完成圣经复核批准",
+      storyboard: "只为已批准的当前剧本版本生成对应分镜",
+      review: "录入真实发布数据，沉淀下一集优化依据",
+    };
+    const hint = $("#quickActionHint");
+    if (hint) hint.textContent = hints[state.quickStep] || hints.idea;
+  }
+
+  function renderQuickWorkflow() {
+    document.body.dataset.interfaceMode = state.interfaceMode || "quick";
+    document.body.dataset.quickStep = quickWorkflow.normalizeStep(state.quickStep);
+    $$('[data-interface-mode]').forEach((button) => button.classList.toggle("is-active", button.dataset.interfaceMode === state.interfaceMode));
+    $$('[data-quick-step]').forEach((button) => {
+      const active = button.dataset.quickStep === state.quickStep;
+      button.classList.toggle("is-active", active);
+      if (active) button.setAttribute("aria-current", "step"); else button.removeAttribute("aria-current");
+    });
+    refreshQuickWorkflow();
+  }
+
+  function setInterfaceMode(mode) {
+    state.interfaceMode = mode === "pro" ? "pro" : "quick";
+    renderQuickWorkflow();
+    saveDraft(false);
+  }
+
+  function setQuickStep(step) {
+    state.quickStep = quickWorkflow.normalizeStep(step);
+    if (state.quickStep === "script") { switchTab("script"); setScriptView("read"); }
+    if (state.quickStep === "refine") { switchTab("script"); setScriptView("edit"); }
+    if (state.quickStep === "storyboard") switchTab("storyboard");
+    if (state.quickStep === "review") switchTab("calendar");
+    renderQuickWorkflow();
+    saveDraft(false);
+  }
+
+  async function generateCreationPackage() {
+    const input = getInput();
+    validateEpisodePlan(input);
+    if (state.creationMode === "continue" && !state.continuationSource?.script) throw new Error("请先选择续写来源。");
+    const operation = beginAiOperation("创作准备包");
+    try {
+      setStatus("DeepSeek 正在一次生成剧情节拍与本次圣经…");
+      const response = await apiRequest("/api/creation-package", { input: generationContext(input, "creationPackage") });
+      assertActiveAiOperation(operation);
+      const result = response.result?.package || response.result || {};
+      const packageId = newId("creation-package");
+      const prepared = quickWorkflow.createPackage({ ...result, id: packageId, status: "draft", fingerprint: currentEpisodeBibleFingerprint(), createdAt: new Date().toISOString() });
+      if (!quickWorkflow.isComplete(prepared)) throw new Error("AI 返回的准备包不完整，请重新生成。");
+      state.creationPackage = prepared;
+      state.beatSheet = normalizeBeatSheet({ beats: prepared.beats });
+      state.beatSheetApproved = false;
+      state.episodeBible = episodeBibleDomain.createState({ draft: prepared.bible, status: "draft", generatedForFingerprint: prepared.fingerprint });
+      const batch = {
+        id: newId("beat-sheet-batch"), packageId, createdAt: prepared.createdAt, episodeNumber: input.episodeNumber,
+        theme: input.theme, model: response.model || "", source: response.source || "", approved: false,
+        creationMode: state.creationMode, targetEpisodeNumber: input.episodeNumber,
+        sourceRef: creationSession.normalizeSourceRef(state.continuationSource),
+        beats: prepared.beats.map((beat) => ({ ...beat, assetIds: [...(beat.assetIds || [])] })),
+      };
+      const project = currentProject();
+      project.beatSheetBatches = [batch, ...(project.beatSheetBatches || [])].slice(0, 30);
+      state.activeBeatSheetBatchId = batch.id;
+      await persistProjects();
+      renderBeatSheet();
+      renderEpisodeBible();
+      saveDraft(false);
+      setStatus(`创作准备包已生成，请检查后统一确认${usageSuffix(response)}`);
+    } finally { endAiOperation(operation); }
+  }
+
+  function confirmCreationPackage() {
+    if (!quickWorkflow.isComplete(state.creationPackage || {})) throw new Error("准备包还不完整，请先补全 8 节拍和七项圣经。");
+    state.beatSheet = normalizeBeatSheet({ beats: state.creationPackage.beats });
+    state.episodeBible.draft = episodeBibleDomain.normalizeBible(readEpisodeBibleForm(), { requireComplete: true });
+    approveBeatSheet();
+    confirmEpisodeBible();
+    state.creationPackage = quickWorkflow.createPackage({
+      ...state.creationPackage,
+      beats: state.beatSheet,
+      bible: state.episodeBible.draft,
+      status: "confirmed",
+      fingerprint: currentEpisodeBibleFingerprint(),
+    });
+    saveDraft(false);
+    refreshQuickWorkflow();
+  }
+
+  async function runQuickPrimaryAction() {
+    const action = quickWorkflow.primaryAction(quickContext()).id;
+    if (action === "generate-plans") return suggestEpisodePlans();
+    if (action === "go-plan") return setQuickStep("plan");
+    if (action === "generate-package") return generateCreationPackage();
+    if (action === "confirm-package") return confirmCreationPackage();
+    if (action === "go-script") return setQuickStep("script");
+    if (action === "generate-script") return generateAll();
+    if (action === "go-refine") return setQuickStep("refine");
+    if (action === "save-script-version") return saveWorkingScriptVersion();
+    if (action === "approve-script") return approveCurrentScript();
+    if (action === "go-storyboard") return setQuickStep("storyboard");
+    if (action === "generate-storyboard") return generateStoryboardForCurrentScript();
+    if (action === "go-review") return setQuickStep("review");
+    if (action === "save-review") return saveReview();
   }
 
   function setAiModel(scope, model) {
@@ -972,14 +1138,33 @@
     };
   }
 
+  function creativeHistoryContext() {
+    const project = currentProject();
+    const planHistory = (project?.planBatches || []).flatMap((batch) => (batch.plans || []).map((plan) => ({ title: plan.title, text: creativeQuality.textOfPlan(plan) }))).slice(0, 20);
+    const scriptHistory = (project?.episodes || []).flatMap((episode) => (episode.versions || []).map((version) => ({ title: version.script?.title || `第${episode.episodeNumber}集`, text: version.script?.synopsis || "" }))).filter((item) => item.text).slice(-20).reverse();
+    return {
+      history: [...planHistory, ...scriptHistory],
+      creationMode: state.creationMode,
+      roleNames: episodePlanner.roleNames(getInput().roles),
+      sourceHook: state.creationMode === "continue" ? state.continuationSource?.script?.hooks?.at(-1) || "" : "",
+      weights: currentProject()?.creativeLearning?.currentWeights || creativeQuality.baseWeights,
+    };
+  }
+
+  function scoreCurrentPlans(options = state.planOptions) {
+    return creativeQuality.scorePlans(options, creativeHistoryContext());
+  }
+
   function renderPlanSuggestions() {
     const target = $("#planSuggestions");
     if (!target) return;
     target.hidden = !state.planOptions.length;
     if (!state.planOptions.length) {
       target.innerHTML = "";
+      if ($("#creativeReviewPanel")) $("#creativeReviewPanel").hidden = true;
       return;
     }
+    if ($("#creativeReviewPanel")) $("#creativeReviewPanel").hidden = false;
     const labels = {
       openingHook: "开头",
       conflict: "冲突",
@@ -1001,6 +1186,11 @@
           <button class="small-action" type="button" data-plan-option="${index}">${option.id === state.selectedPlanOptionId ? "已采用" : "采用"}</button>
         </div>
         <p>${escapeHtml(option.why)}</p>
+        ${option.quality ? `<div class="creative-score-row">
+          <strong>${escapeHtml(option.quality.total)}<small>/100</small></strong>
+          <div>${creativeQuality.dimensions.map((key) => `<span>${escapeHtml(creativeQuality.labels[key])} ${escapeHtml(option.quality.scores[key])}</span>`).join("")}</div>
+          <em data-duplicate-level="${escapeHtml(option.quality.duplicateLevel)}">${option.quality.duplicateLevel === "high" ? `高度重复 ${Math.round(option.quality.nearest.similarity * 100)}%` : option.quality.duplicateLevel === "similar" ? `结构相似 ${Math.round(option.quality.nearest.similarity * 100)}%` : "历史去重通过"}</em>
+        </div>` : `<p class="quality-unscored">历史方案尚未进行本地创意评分</p>`}
         ${(option.innovation || option.memeMechanic || option.visualSetpiece) ? `<div class="plan-option-insights">
           ${option.innovation ? `<span><strong>创新：</strong>${escapeHtml(option.innovation)}</span>` : ""}
           ${option.memeMechanic ? `<span><strong>梗机制：</strong>${escapeHtml(option.memeMechanic)}</span>` : ""}
@@ -1011,6 +1201,48 @@
         </ul>
       </article>
     `).join("");
+    renderCreativeReview();
+  }
+
+  function renderCreativeReview() {
+    const target = $("#creativeReviewOutput");
+    if (!target) return;
+    const review = state.creativeReview;
+    if (!review) { target.innerHTML = ""; return; }
+    target.innerHTML = `<div class="creative-director-result">
+      <strong>${escapeHtml(review.summary || "创意导演复核完成")}</strong>
+      <ol>${(review.ranking || []).map((item) => `<li><b>${escapeHtml(item.rank)}. ${escapeHtml(item.planId)}</b><span>${escapeHtml(item.evidence)}</span><em>${escapeHtml(item.suggestion)}</em></li>`).join("")}</ol>
+      ${review.rewritePatch ? `<button class="small-action" type="button" id="adoptCreativeReviewBtn">采用导演改写为新候选</button>` : ""}
+    </div>`;
+  }
+
+  async function runCreativeReview() {
+    if (state.planOptions.length < 3) throw new Error("请先生成三套完整策划。");
+    const operation = beginAiOperation("AI 创意导演");
+    try {
+      setStatus("AI 创意导演正在比较三案，不会覆盖原方案…");
+      const response = await apiRequest("/api/creative-review", { input: { ...generationContext(getInput(), "creativeReview"), plans: state.planOptions.slice(0, 3) } });
+      assertActiveAiOperation(operation);
+      state.creativeReview = response.result?.review || response.result;
+      renderCreativeReview();
+      saveDraft(false);
+      setStatus(`创意导演复核完成${usageSuffix(response)}`);
+    } finally { endAiOperation(operation); }
+  }
+
+  async function adoptCreativeReviewCandidate() {
+    const patch = state.creativeReview?.rewritePatch;
+    if (!patch?.parentPlanId || !patch?.candidate) throw new Error("导演没有返回可采用的改写候选。");
+    const normalized = episodePlanner.normalizePlanOptions({ plans: [{ ...patch.candidate, parentPlanId: patch.parentPlanId }] }, { prefix: "director-plan" })[0];
+    if (!normalized) throw new Error("导演候选结构不完整，未保存。");
+    const candidate = scoreCurrentPlans([{ ...normalized, parentPlanId: patch.parentPlanId }])[0];
+    state.planOptions = [...state.planOptions, candidate];
+    const batch = (currentProject()?.planBatches || []).find((item) => item.id === state.activePlanBatchId);
+    if (batch) batch.plans = [...(batch.plans || []), { ...candidate, plan: { ...candidate.plan } }];
+    await persistProjects();
+    renderPlanSuggestions();
+    saveDraft(false);
+    setStatus("导演建议已作为新候选保存，原三案保持不变");
   }
 
   function renderPlanHistory() {
@@ -1073,6 +1305,7 @@
       if (!["episodePlan", "episodePlanRef"].includes(key)) setInputValue(key, value);
     });
     state.planOptions = (batch.plans || []).map((option) => ({ ...option, plan: { ...option.plan } }));
+    if (state.planOptions.some((option) => !option.quality)) state.planOptions = scoreCurrentPlans(state.planOptions);
     state.activePlanBatchId = batch.id;
     state.selectedPlanOptionId = batch.selectedPlanId || null;
     applyEpisodePlan(state.planOptions.find((option) => option.id === batch.selectedPlanId)?.plan || {});
@@ -1092,10 +1325,11 @@
       };
       const response = await apiRequest("/api/plans", { input: generationContext(input, "plan") });
       assertActiveAiOperation(operation);
-      const options = episodePlanner.normalizePlanOptions(response.result, { prefix: "ai-plan" });
+      const options = scoreCurrentPlans(episodePlanner.normalizePlanOptions(response.result, { prefix: "ai-plan" }));
       if (options.length !== 3) throw new Error("DeepSeek 没有返回 3 套完整策划，请重新生成。");
       state.planOptions = options;
       state.selectedPlanOptionId = null;
+      state.creativeReview = null;
       await archivePlanBatch(options, response, input);
       renderPlanSuggestions();
       saveDraft(false);
@@ -1258,16 +1492,12 @@
 
   function normalizeMemeIdeas(result) {
     const source = Array.isArray(result?.ideas) ? result.ideas : [];
-    return source.slice(0, 6).map((idea, index) => ({
+    return source.slice(0, 6).map((idea, index) => comedyMechanism.withStatus({
       id: idea.id || `meme-idea-${Date.now()}-${index}`,
+      ...idea,
       phrase: String(idea.phrase || `梗结构 ${index + 1}`).trim(),
-      meaning: String(idea.meaning || "").trim(),
-      mechanism: String(idea.mechanism || "").trim(),
-      comedy: String(idea.comedy || "").trim(),
-      fit: String(idea.fit || "").trim(),
-      risk: String(idea.risk || "").trim(),
       sourceType: String(idea.sourceType || "原创结构").trim(),
-    })).filter((idea) => idea.mechanism && idea.comedy);
+    })).filter((idea) => comedyMechanism.isComplete(idea));
   }
 
   function renderMemeLab() {
@@ -1278,9 +1508,10 @@
         <div>
           <strong>${escapeHtml(idea.phrase)} · ${escapeHtml(idea.sourceType)}</strong>
           ${idea.meaning ? `<p>${escapeHtml(idea.meaning)}</p>` : ""}
-          <p><b>剧情机制：</b>${escapeHtml(idea.mechanism)}</p>
-          <p><b>笑点：</b>${escapeHtml(idea.comedy)}</p>
-          <small>${escapeHtml(idea.fit)}${idea.risk ? ` · 注意：${escapeHtml(idea.risk)}` : ""}</small>
+          <p><b>${escapeHtml(idea.mechanismType)}：</b>${escapeHtml(idea.mechanism)}</p>
+          <p><b>铺垫 → 误导 → 回扣：</b>${escapeHtml(idea.setup)} → ${escapeHtml(idea.misdirection)} → ${escapeHtml(idea.payoff)}</p>
+          <p><b>静音动作：</b>${escapeHtml(idea.visualAction)} · <b>剧情后果：</b>${escapeHtml(idea.plotEffect)}</p>
+          <small>${escapeHtml(idea.fitBeat)} · 适配：${escapeHtml(idea.fitTraits)}${idea.risk ? ` · 注意：${escapeHtml(idea.risk)}` : ""}</small>
         </div>
         <div class="meme-idea-actions">
           <button class="small-action" type="button" data-meme-idea-add="${index}">加入本集</button>
@@ -1314,7 +1545,7 @@
   function adoptMemeIdea(index) {
     const idea = state.memeIdeas[index];
     if (!idea) throw new Error("没有找到这个梗结构。");
-    const addition = `梗机制：${idea.phrase}｜${idea.mechanism}｜笑点：${idea.comedy}`;
+    const addition = memeSeedLine(idea);
     const current = $("#memeSeed").value.trim();
     if (!current.includes(addition)) setInputValue("memeSeed", [current, addition].filter(Boolean).join("\n"));
     saveDraft(false);
@@ -1330,7 +1561,7 @@
     const idea = state.memeIdeas[index];
     if (!idea) throw new Error("没有找到这个梗结构。");
     if (memeIdeaIsSaved(idea)) throw new Error("这个梗已经收藏过了。");
-    currentProject().memes.push({ ...idea, id: newId("meme"), tags: [], useCount: 0, createdAt: new Date().toISOString() });
+    currentProject().memes.push(comedyMechanism.withStatus({ ...idea, id: newId("meme"), tags: [], useCount: 0, createdAt: new Date().toISOString() }));
     persistProjects();
     renderMemeLab();
     renderMemeLibrary();
@@ -1340,19 +1571,20 @@
   }
 
   function addManualMeme() {
-    const phrase = $("#memeName").value.trim();
-    const mechanism = $("#memeMechanism").value.trim();
-    const comedy = $("#memeComedy").value.trim();
-    if (!phrase || !mechanism || !comedy) throw new Error("请填写梗名称、剧情机制和铺垫回扣。");
-    const idea = {
-      id: newId("meme"), phrase, mechanism, comedy,
-      meaning: "", fit: "", risk: "", sourceType: "手动录入", useCount: 0,
+    const idea = comedyMechanism.withStatus({
+      id: newId("meme"), phrase: $("#memeName").value, mechanism: $("#memeMechanism").value,
+      sourceType: $("#memeSourceType").value, sourceNote: $("#memeSourceNote").value, mechanismType: $("#memeMechanismType").value,
+      setup: $("#memeSetup").value, misdirection: $("#memeMisdirection").value, payoff: $("#memePayoff").value,
+      visualAction: $("#memeVisualAction").value, plotEffect: $("#memePlotEffect").value,
+      fitBeat: $("#memeFitBeat").value, fitTraits: $("#memeFitTraits").value,
+      risk: $("#memeRisk").value, forbidden: $("#memeForbidden").value, useCount: 0,
       tags: $("#memeTags").value.split(/[,，、\n]/).map((tag) => tag.trim()).filter(Boolean).slice(0, 8),
       createdAt: new Date().toISOString(),
-    };
+    });
+    if (!comedyMechanism.isComplete(idea) || !idea.mechanism) throw new Error("请完整填写机制类型、铺垫、误导、回扣、静音动作、剧情后果、适用节拍/角色和风险禁区。");
     if (memeIdeaIsSaved(idea)) throw new Error("这个梗已经收藏过了。");
     currentProject().memes.push(idea);
-    ["memeName", "memeMechanism", "memeComedy", "memeTags"].forEach((id) => setInputValue(id, ""));
+    ["memeName", "memeMechanism", "memeTags", "memeSourceNote", "memeSetup", "memeMisdirection", "memePayoff", "memeVisualAction", "memePlotEffect", "memeFitBeat", "memeFitTraits", "memeRisk", "memeForbidden"].forEach((id) => setInputValue(id, ""));
     persistProjects();
     renderMemeLibrary();
     renderCreativeAssetPicker();
@@ -1367,18 +1599,18 @@
     const query = String($("#memeLibrarySearch")?.value || "").trim().toLowerCase();
     const source = $("#memeLibrarySource")?.value || "all";
     const filtered = memes.filter((item) => {
-      const haystack = [item.phrase, item.mechanism, item.comedy, ...(item.tags || [])].join(" ").toLowerCase();
+      const haystack = [item.phrase, item.mechanism, item.mechanismType, item.setup, item.misdirection, item.payoff, item.visualAction, item.plotEffect, ...(item.tags || [])].join(" ").toLowerCase();
       return (!query || haystack.includes(query)) && (source === "all" || item.sourceType === source);
     });
     $("#memeLibraryCount").textContent = `${memes.length} 条梗`;
     target.innerHTML = filtered.length ? filtered.slice().reverse().map((item) => `
       <article class="library-card meme-library-card">
-        <div class="library-card-meta"><span>${escapeHtml(item.sourceType || "收藏")}</span><span>使用 ${escapeHtml(item.useCount || 0)} 次</span></div>
+        <div class="library-card-meta"><span>${escapeHtml(item.sourceType || "收藏")} · ${escapeHtml(item.mechanismType || "待补全机制")}</span><span>使用 ${escapeHtml(item.useCount || 0)} 次</span></div>
         <h4>${escapeHtml(item.phrase)}</h4>
         <p><strong>机制：</strong>${escapeHtml(item.mechanism)}</p>
-        <p><strong>笑点：</strong>${escapeHtml(item.comedy)}</p>
+        ${item.needsEnrichment ? `<p class="meme-needs-enrichment">旧梗待补全：不会自动伪造铺垫和回扣。</p>` : `<p><strong>三段结构：</strong>${escapeHtml(item.setup)} → ${escapeHtml(item.misdirection)} → ${escapeHtml(item.payoff)}</p><p><strong>可见动作：</strong>${escapeHtml(item.visualAction)} · <strong>剧情后果：</strong>${escapeHtml(item.plotEffect)}</p>`}
         <div class="tagline">${(item.tags || []).map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join("")}</div>
-        <div class="library-card-actions"><button class="small-action ${state.activeMemeIds.includes(item.id) ? "is-active" : ""}" data-saved-meme-use="${escapeHtml(item.id)}">${state.activeMemeIds.includes(item.id) ? "移出本集" : "加入本集"}</button><button class="small-action danger-action" data-saved-meme-delete="${escapeHtml(item.id)}">移除</button></div>
+        <div class="library-card-actions"><button class="small-action ${state.activeMemeIds.includes(item.id) ? "is-active" : ""}" data-saved-meme-use="${escapeHtml(item.id)}">${state.activeMemeIds.includes(item.id) ? "移出本集" : "加入本集"}</button>${item.needsEnrichment ? `<button class="small-action" data-saved-meme-enrich="${escapeHtml(item.id)}">AI 补全机制</button>` : ""}<button class="small-action danger-action" data-saved-meme-delete="${escapeHtml(item.id)}">移除</button></div>
       </article>`).join("") : `<p class="helper">${memes.length ? "没有符合当前筛选的梗。" : "梗库还是空的。可从左侧 AI 结果收藏，或在这里手动录入。"}</p>`;
   }
 
@@ -1421,6 +1653,25 @@
     renderMemeLab();
     renderProject();
     setStatus("已从梗库移除");
+  }
+
+  async function enrichSavedMeme(id) {
+    const meme = (currentProject()?.memes || []).find((item) => item.id === id);
+    if (!meme) throw new Error("没有找到这条梗。");
+    const operation = beginAiOperation("旧梗机制补全");
+    try {
+      setStatus(`AI 正在补全“${meme.phrase}”的喜剧机制…`);
+      const response = await apiRequest("/api/meme-enrich", { input: { ...generationContext(getInput(), "memeEnrich"), meme } });
+      assertActiveAiOperation(operation);
+      const enriched = comedyMechanism.withStatus(response.result?.meme || response.result);
+      if (!comedyMechanism.isComplete(enriched)) throw new Error("AI 返回的梗机制仍不完整，原卡未修改。");
+      Object.assign(meme, enriched, { id: meme.id, createdAt: meme.createdAt, useCount: meme.useCount || 0, needsEnrichment: false, updatedAt: new Date().toISOString() });
+      await persistProjects();
+      renderMemeLibrary();
+      renderCreativeAssetPicker();
+      saveDraft(false);
+      setStatus(`“${meme.phrase}”已补全为可复用喜剧机制${usageSuffix(response)}`);
+    } finally { endAiOperation(operation); }
   }
 
   function characterDraftFromForm() {
@@ -2006,11 +2257,15 @@
     setInputValue("reviewLikes", review.likes ?? "");
     setInputValue("reviewComments", review.comments ?? "");
     setInputValue("reviewShares", review.shares ?? "");
+    setInputValue("reviewFavorites", review.favorites ?? "");
     setInputValue("reviewFollows", review.follows ?? "");
     setInputValue("reviewCompletionRate", review.completionRate ?? "");
+    setInputValue("reviewAverageWatchTime", review.averageWatchTime ?? "");
+    setInputValue("reviewEarlyRetention", review.earlyRetention ?? "");
     setInputValue("reviewCommentThemes", review.commentThemes || "");
     setInputValue("reviewNotes", review.notes || "");
     renderReviewInsights(review);
+    renderCreativeLearning();
   }
 
   function renderProject() {
@@ -2166,6 +2421,18 @@
   function upsertProjectEpisode({ mode, input, response, generated, historyId }) {
     const project = currentProject();
     if (!project) return null;
+    const selectedBatch = (project.planBatches || []).find((batch) => batch.id === state.activePlanBatchId);
+    const selectedPlan = (selectedBatch?.plans || []).find((plan) => plan.id === state.selectedPlanOptionId);
+    const creativeSourceRef = selectedPlan ? {
+      planBatchId: selectedBatch.id,
+      planId: selectedPlan.id,
+      parentPlanId: selectedPlan.parentPlanId || "",
+      scoreSnapshot: selectedPlan.quality ? JSON.parse(JSON.stringify(selectedPlan.quality)) : null,
+      characterIds: [...state.activeCharacterIds],
+      memeIds: [...state.activeMemeIds],
+      creativeMixBatchId: state.activeCreativeMixBatchId || "",
+      creativeMixId: state.selectedCreativeMixId || "",
+    } : null;
     const { episode } = projectDomain.upsertEpisodeVersion(project, {
       currentEpisodeId: state.currentEpisodeId,
       mode,
@@ -2195,6 +2462,7 @@
         approvalStatus: generated.approvalStatus === "approved" ? "approved" : "draft",
         approvedAt: generated.approvedAt || "",
         approvalReview: generated.approvalReview || null,
+        creativeSourceRef,
       },
     });
     state.currentEpisodeId = episode.id;
@@ -2275,12 +2543,18 @@
       likes: Number($("#reviewLikes").value || 0),
       comments: Number($("#reviewComments").value || 0),
       shares: Number($("#reviewShares").value || 0),
+      favorites: Number($("#reviewFavorites").value || 0),
       follows: Number($("#reviewFollows").value || 0),
       completionRate: Number($("#reviewCompletionRate").value || 0),
+      averageWatchTime: Number($("#reviewAverageWatchTime").value || 0),
+      earlyRetention: Number($("#reviewEarlyRetention").value || 0),
       commentThemes: $("#reviewCommentThemes").value.trim(),
       notes: $("#reviewNotes").value.trim(),
+      scriptVersionId: episode.activeVersionId || "",
       updatedAt: new Date().toISOString(),
     };
+    const project = currentProject();
+    project.creativeLearning = performanceLearning.update(project);
     persistProjects();
     renderProject();
     setStatus(`第 ${episode.episodeNumber} 集复盘已保存`);
@@ -2300,6 +2574,18 @@
       ["标题方向", insights.title],
       ["封面方向", insights.cover],
     ].map(([title, body]) => `<article><h4>${escapeHtml(title)}</h4><p>${escapeHtml(body)}</p></article>`).join("");
+  }
+
+  function renderCreativeLearning() {
+    const target = $("#creativeLearningPanel");
+    if (!target) return;
+    const learning = currentProject()?.creativeLearning || performanceLearning.update(currentProject() || {});
+    const labels = { hook: "开头抓力", freshness: "新鲜度", comedy: "喜剧机制", visual: "画面表现", characterFit: "角色适配", reversal: "反转质量", serialValue: "连载价值" };
+    target.innerHTML = `<div class="section-heading"><div><p class="eyebrow">真实数据学习</p><h3>追更增长权重</h3></div><span>${escapeHtml(learning.sampleCount || 0)} 个有效样本 · 置信度 ${Math.round((learning.confidence || 0) * 100)}%</span></div>
+      <p class="helper">播放量只作比率分母；少于10集不会改权重。完播40%、关注30%、转发15%、评论10%、收藏5%。</p>
+      <div class="learning-weight-grid">${performanceLearning.dimensions.map((key) => `<div><span>${escapeHtml(labels[key])}</span><strong>${Math.round(Number(learning.currentWeights?.[key] || performanceLearning.baseWeights[key]) * 100)}%</strong><small>${learning.correlations?.[key] == null ? "等待样本" : `相关 ${learning.correlations[key]}`}</small></div>`).join("")}</div>
+      <ul class="learning-reasons">${(learning.reasons || []).map((reason) => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>
+      <p class="learning-version">权重版本 ${(learning.versions || []).length} · 仅使用当前项目复盘，本地计算，不消耗 AI。</p>`;
   }
 
   function renderAssets() {
@@ -4590,6 +4876,7 @@
       memeIdeas: state.memeIdeas,
       continuationSource: state.continuationSource,
       creationMode: state.creationMode,
+      interfaceMode: state.interfaceMode,
       creationSessions: state.creationSessions,
       savedAt: new Date().toISOString(),
     };
@@ -4659,6 +4946,7 @@
       const activeBatch = (currentProject()?.planBatches || []).find((batch) => batch.id === state.activePlanBatchId);
       state.planOptions = activeBatch?.plans?.map((option) => ({ ...option, plan: { ...option.plan } })) || [];
       if (draft.creationSessions && typeof draft.creationSessions === "object") {
+        state.interfaceMode = draft.interfaceMode === "pro" ? "pro" : "quick";
         state.creationMode = creationSession.normalizeMode(draft.creationMode);
         state.creationSessions = {
           new: draft.creationSessions.new || null,
@@ -4816,6 +5104,16 @@
   }
 
   function bindEvents() {
+    $$('[data-interface-mode]').forEach((button) => button.addEventListener("click", () => setInterfaceMode(button.dataset.interfaceMode)));
+    $$('[data-quick-step]').forEach((button) => button.addEventListener("click", () => setQuickStep(button.dataset.quickStep)));
+    $("#quickPrimaryAction").addEventListener("click", async () => {
+      try { await runQuickPrimaryAction(); }
+      catch (error) { reportError("快速创作", error); }
+    });
+    $("#quickModelSettings").addEventListener("change", (event) => {
+      const select = event.target.closest("[data-quick-model-scope]");
+      if (select) setAiModel(select.dataset.quickModelScope, select.value);
+    });
     $$(".creation-rail a").forEach((link) => link.addEventListener("click", (event) => {
       const target = document.querySelector(link.getAttribute("href"));
       const panel = $(".control-panel");
@@ -4917,9 +5215,11 @@
     ["memeLibrarySearch", "memeLibrarySource"].forEach((id) => document.getElementById(id)?.addEventListener(id === "memeLibrarySearch" ? "input" : "change", renderMemeLibrary));
     $("#memeLibrary").addEventListener("click", (event) => {
       const useButton = event.target.closest("[data-saved-meme-use]");
+      const enrichButton = event.target.closest("[data-saved-meme-enrich]");
       const deleteButton = event.target.closest("[data-saved-meme-delete]");
       try {
         if (useButton) adoptSavedMeme(useButton.dataset.savedMemeUse);
+        if (enrichButton) enrichSavedMeme(enrichButton.dataset.savedMemeEnrich).catch((error) => reportError("旧梗补全", error));
         if (deleteButton) deleteSavedMeme(deleteButton.dataset.savedMemeDelete);
       } catch (error) { reportError("梗库操作", error); }
     });
@@ -5025,6 +5325,12 @@
       } catch (error) {
         reportError("本集策划生成", error);
       }
+    });
+    $("#creativeReviewBtn").addEventListener("click", async () => {
+      try { await runCreativeReview(); } catch (error) { reportError("创意导演", error); }
+    });
+    $("#creativeReviewOutput").addEventListener("click", (event) => {
+      if (event.target.closest("#adoptCreativeReviewBtn")) adoptCreativeReviewCandidate().catch((error) => reportError("采用导演建议", error));
     });
     $("#planSuggestions").addEventListener("click", (event) => {
       const button = event.target.closest("[data-plan-option]");
@@ -5453,7 +5759,7 @@
   }
 
   async function init() {
-    if (!window.RocoStudio || !window.RocoWorkflowCore || !window.RocoProjectDomain || !window.RocoEpisodePlanner || !window.RocoEpisodeBible || !window.RocoUiTemplates || !window.RocoApiClient || !window.RocoDataStore || !window.RocoArchiveSync || !window.RocoAppState || !window.RocoCreationSession || !window.RocoAiOperation || !window.RocoGenerationClient || !window.RocoImagePromptWorkflow) {
+    if (!window.RocoStudio || !window.RocoWorkflowCore || !window.RocoProjectDomain || !window.RocoEpisodePlanner || !window.RocoEpisodeBible || !window.RocoQuickWorkflow || !window.RocoCreativeQuality || !window.RocoComedyMechanism || !window.RocoPerformanceLearning || !window.RocoUiTemplates || !window.RocoApiClient || !window.RocoDataStore || !window.RocoArchiveSync || !window.RocoAppState || !window.RocoCreationSession || !window.RocoAiOperation || !window.RocoGenerationClient || !window.RocoImagePromptWorkflow) {
       setStatus("生成器未加载，请用本地服务打开或刷新缓存", true);
       return;
     }
@@ -5486,6 +5792,7 @@
       renderExample();
       renderCloudArchive();
       renderCreationMode();
+      renderQuickWorkflow();
       checkAiStatus();
       if (localStorage.getItem(accessCodeKey)) refreshCloudArchive(false).catch(() => {});
     } catch (error) {

@@ -198,6 +198,8 @@
         innovation: clean(item?.innovation),
         memeMechanic: clean(item?.memeMechanic),
         visualSetpiece: clean(item?.visualSetpiece),
+        creativeProfile: item?.creativeProfile && typeof item.creativeProfile === "object" ? { ...item.creativeProfile } : null,
+        parentPlanId: clean(item?.parentPlanId),
         plan: Object.fromEntries(requiredPlanKeys.map((key) => [key, clean(plan[key])])),
       };
     }).filter((item) => planIsComplete(item.plan));
