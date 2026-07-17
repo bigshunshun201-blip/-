@@ -80,6 +80,9 @@ test("quick guide locks future steps and topic selection only fills the opening 
 
   await page.locator('#quickStageContent [data-quick-drawer="topics"]').click();
   await expect(page.locator("#quickDrawerLayer")).toBeVisible();
+  await expect(page.locator("#quickDrawerTitle")).toHaveCSS("color", "rgb(20, 33, 25)");
+  await expect(page.locator(".quick-topic-drawer article").first()).toHaveCSS("color", "rgb(20, 33, 25)");
+  await expect(page.locator(".quick-topic-drawer article p").first()).toHaveCSS("color", "rgb(70, 88, 78)");
   await page.locator('[data-quick-topic-select="0"]').click();
   await expect(page.locator("#quickDrawerLayer")).toBeHidden();
   await expect(page.locator("#quickIdeaInput")).toHaveValue("喵喵把月牙镇整成邪修实验室");
